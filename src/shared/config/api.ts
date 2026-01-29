@@ -1,22 +1,21 @@
 // Configuración para la integración con backend .NET
-// Por defecto usamos el proxy de Next.js para evitar problemas de CORS
-// Si quieres usar conexión directa, configura NEXT_PUBLIC_USE_API_PROXY=false
+// ============================================================
+// ÚNICO LUGAR para cambiar la URL de la API:
+// - Opción 1: variable de entorno NEXT_PUBLIC_API_URL (ej. en .env.local)
+// - Opción 2: editar el valor por defecto aquí abajo
+// ============================================================
+const DEFAULT_API_URL = 'http://192.168.0.113:5107';
+export const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || DEFAULT_API_URL;
+
 const USE_PROXY = process.env.NEXT_PUBLIC_USE_API_PROXY !== 'false'; // Por defecto true
 
 export const API_CONFIG = {
-  // URL base del API (cambiar en producción)
-  // Si USE_PROXY es true, usa el proxy de Next.js para evitar CORS
-  // Si es false, usa la URL directa (requiere CORS configurado en el servidor)
-  BASE_URL: USE_PROXY 
-    ? '' // El proxy de Next.js manejará la URL base
-    : (process.env.NEXT_PUBLIC_API_URL || 'http://192.168.0.113:5107'),
-  
+  // URL base del API (usa API_BASE_URL)
+  BASE_URL: USE_PROXY ? '' : API_BASE_URL,
   // URL real del servidor (para el proxy)
-  REAL_API_URL: process.env.NEXT_PUBLIC_API_URL || 'http://192.168.0.113:5107',
-  
-  // Si se usa proxy (por defecto true para evitar CORS)
-  USE_PROXY: USE_PROXY,
-  
+  REAL_API_URL: API_BASE_URL,
+  USE_PROXY,
+
   // Endpoints del API
   ENDPOINTS: {
     AUTH: {

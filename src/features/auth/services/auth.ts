@@ -1,6 +1,6 @@
-import { User, LoginCredentials, RegisterData, PasswordResetData, AuthSession, ApiResponse } from '../types';
+import { User, LoginCredentials, RegisterData, PasswordResetData, PasswordResetConfirmData, AuthSession, ApiResponse } from '../types';
 import { getFromLocalStorage, setToLocalStorage, getUserByEmail } from '@/shared/services/database';
-import { apiClient } from '@/shared/config/api';
+import { apiClient, API_CONFIG } from '@/shared/config/api';
 import { loginService } from '@/shared/services/apiService';
 import { setLoggedUser } from '@/shared/utils/auth';
 
@@ -166,26 +166,35 @@ export class AuthService {
     }
   }
 
+  /** Solicitar enlace de recuperación (API envía el correo con el link) */
   async resetPassword(data: PasswordResetData): Promise<ApiResponse> {
     try {
-      const user = await this.findUserByEmail(data.email);
-      
-      if (!user) {
-        return {
-          success: true,
-          message: 'Si el correo existe, recibirás un enlace de restablecimiento'
-        };
-      }
-
+      await apiClient.post(API_CONFIG.ENDPOINTS.AUTH.FORGOT_PASSWORD, { email: data.email });
       return {
         success: true,
-        message: 'Se ha enviado un enlace de restablecimiento a tu correo'
+        message: 'Si el correo existe, recibirás un enlace de restablecimiento'
       };
-    } catch (error) {
+    } catch (err: any) {
+      const message = err?.data?.message ?? err?.message ?? 'Error al enviar el enlace. Intenta de nuevo.';
+      return { success: false, message };
+    }
+  }
+
+  /** Confirmar nueva contraseña desde el link del correo (token y email en la URL) */
+  async confirmResetPassword(data: PasswordResetConfirmData): Promise<ApiResponse> {
+    try {
+      await apiClient.post(API_CONFIG.ENDPOINTS.AUTH.RESET_PASSWORD, {
+        token: data.token,
+        email: data.email,
+        newPassword: data.newPassword
+      });
       return {
-        success: false,
-        message: 'Error interno del servidor'
+        success: true,
+        message: 'Contraseña restablecida correctamente. Ya puedes iniciar sesión.'
       };
+    } catch (err: any) {
+      const message = err?.data?.message ?? err?.message ?? 'El enlace pudo haber expirado. Solicita uno nuevo.';
+      return { success: false, message };
     }
   }
 

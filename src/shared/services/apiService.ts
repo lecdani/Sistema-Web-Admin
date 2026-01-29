@@ -1,10 +1,12 @@
 /**
  * Servicio de API - autenticación y peticiones con token
- * Usa fetch nativo.
+ * Usa fetch nativo. La URL de la API se define en @/shared/config/api
  */
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://192.168.0.113:5107';
-const USE_PROXY = process.env.NEXT_PUBLIC_USE_API_PROXY === 'true';
+import { API_CONFIG } from '@/shared/config/api';
+
+const API_BASE_URL = API_CONFIG.REAL_API_URL;
+const USE_PROXY = API_CONFIG.USE_PROXY;
 
 function getAuthToken(): string | null {
   if (typeof window === 'undefined') return null;

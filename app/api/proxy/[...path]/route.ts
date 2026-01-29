@@ -1,9 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { API_BASE_URL } from '@/shared/config/api';
 
 // Forzar renderizado dinámico para el proxy
 export const dynamic = 'force-dynamic';
-
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://192.168.0.113:5107';
 
 export async function GET(
   request: NextRequest,

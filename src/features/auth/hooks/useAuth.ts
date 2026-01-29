@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { User, LoginCredentials, RegisterData, PasswordResetData, AuthSession, ApiResponse } from '../types';
+import { User, LoginCredentials, RegisterData, PasswordResetData, PasswordResetConfirmData, AuthSession, ApiResponse } from '../types';
 import { authService } from '../services/auth';
 import { getFromLocalStorage } from '@/shared/services/database';
 import { getLoggedUser, removeLoggedUser } from '@/shared/utils/auth';
@@ -197,7 +197,7 @@ export function useAuth() {
     }
   }, []);
 
-  // Función de reset password
+  // Función de reset password (solicitar enlace al correo)
   const resetPassword = useCallback(async (data: PasswordResetData): Promise<ApiResponse> => {
     try {
       return await authService.resetPassword(data);
@@ -205,6 +205,18 @@ export function useAuth() {
       return {
         success: false,
         message: 'Error interno del servidor'
+      };
+    }
+  }, []);
+
+  // Confirmar nueva contraseña (desde el link del correo)
+  const confirmResetPassword = useCallback(async (data: PasswordResetConfirmData): Promise<ApiResponse> => {
+    try {
+      return await authService.confirmResetPassword(data);
+    } catch (error) {
+      return {
+        success: false,
+        message: 'Error al restablecer la contraseña'
       };
     }
   }, []);
@@ -223,6 +235,7 @@ export function useAuth() {
     register,
     logout,
     resetPassword,
+    confirmResetPassword,
     refreshSession
   };
 }
