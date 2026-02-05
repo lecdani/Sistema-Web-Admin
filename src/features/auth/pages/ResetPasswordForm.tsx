@@ -94,12 +94,13 @@ export const ResetPasswordForm: React.FC<ResetPasswordFormProps> = ({ token, ema
                 Ya puedes iniciar sesión con tu nueva contraseña.
               </p>
             </div>
-            <Button asChild className="w-full h-12">
-              <Link href="/login">
-                <ArrowLeft className="mr-2 h-4 w-4" />
-                Ir al inicio de sesión
-              </Link>
-            </Button>
+            <Link
+              href="/login"
+              className="inline-flex items-center justify-center gap-2 w-full h-12 rounded-lg font-medium bg-blue-600 text-white hover:bg-blue-700 focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 transition-all"
+            >
+              <ArrowLeft className="h-4 w-4" />
+              Ir al inicio de sesión
+            </Link>
           </div>
         </CardContent>
       </Card>
@@ -221,12 +222,13 @@ export const ResetPasswordForm: React.FC<ResetPasswordFormProps> = ({ token, ema
                   'Restablecer contraseña'
                 )}
               </Button>
-              <Button asChild variant="ghost" className="w-full h-12 text-gray-600 hover:text-gray-800 hover:bg-gray-50">
-                <Link href="/login">
-                  <ArrowLeft className="mr-2 h-4 w-4" />
-                  Volver al inicio de sesión
-                </Link>
-              </Button>
+              <Link
+                href="/login"
+                className="inline-flex items-center justify-center gap-2 w-full h-12 rounded-lg font-medium text-gray-600 hover:text-gray-800 hover:bg-gray-50 focus-visible:ring-2 focus-visible:ring-offset-2 transition-all"
+              >
+                <ArrowLeft className="h-4 w-4" />
+                Volver al inicio de sesión
+              </Link>
             </div>
           </form>
         </div>

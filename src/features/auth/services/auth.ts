@@ -169,7 +169,10 @@ export class AuthService {
   /** Solicitar enlace de recuperación (API envía el correo con el link) */
   async resetPassword(data: PasswordResetData): Promise<ApiResponse> {
     try {
-      await apiClient.post(API_CONFIG.ENDPOINTS.AUTH.FORGOT_PASSWORD, { email: data.email });
+      await apiClient.post(API_CONFIG.ENDPOINTS.AUTH.FORGOT_PASSWORD, {
+        email: data.email,
+        AppType: 'Admin'
+      });
       return {
         success: true,
         message: 'Si el correo existe, recibirás un enlace de restablecimiento'

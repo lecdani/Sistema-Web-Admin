@@ -4,7 +4,7 @@
 // - Opción 1: variable de entorno NEXT_PUBLIC_API_URL (ej. en .env.local)
 // - Opción 2: editar el valor por defecto aquí abajo
 // ============================================================
-const DEFAULT_API_URL = 'http://192.168.0.113:5107';
+const DEFAULT_API_URL = 'http://100.127.113.86:5107';
 export const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || DEFAULT_API_URL;
 
 const USE_PROXY = process.env.NEXT_PUBLIC_USE_API_PROXY !== 'false'; // Por defecto true

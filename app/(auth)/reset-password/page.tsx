@@ -1,16 +1,37 @@
 'use client';
 
 import { useSearchParams } from 'next/navigation';
-import { Suspense } from 'react';
+import { Suspense, useState, useEffect } from 'react';
 import { ResetPasswordForm } from '../../../src/features/auth/pages/ResetPasswordForm';
 import Link from 'next/link';
-import { Button } from '@/shared/components/base/Button';
 import { AlertCircle } from 'lucide-react';
+
+/** Extrae token y email de la URL aunque venga mal formada (ej: ?/reset-password?token=...&email=...) */
+function parseTokenAndEmailFromUrl(searchParams: URLSearchParams): { token: string; email: string } {
+  let token = searchParams.get('token') ?? '';
+  let email = searchParams.get('email') ?? '';
+
+  if (token && email) return { token, email };
+
+  if (typeof window !== 'undefined' && window.location.search) {
+    const raw = window.location.search.replace(/^\?/, '');
+    const tokenMatch = raw.match(/token=([^&]*)/);
+    const emailMatch = raw.match(/email=([^&]*)/);
+    if (tokenMatch) token = decodeURIComponent(tokenMatch[1].trim());
+    if (emailMatch) email = decodeURIComponent(emailMatch[1].trim());
+  }
+  return { token, email };
+}
 
 function ResetPasswordContent() {
   const searchParams = useSearchParams();
-  const token = searchParams.get('token') ?? '';
-  const email = searchParams.get('email') ?? '';
+  const [parsed, setParsed] = useState(() => parseTokenAndEmailFromUrl(searchParams));
+
+  useEffect(() => {
+    setParsed(parseTokenAndEmailFromUrl(searchParams));
+  }, [searchParams]);
+
+  const { token, email } = parsed;
 
   if (!token || !email) {
     return (
@@ -25,9 +46,12 @@ function ResetPasswordContent() {
           <p className="text-gray-600 mb-6">
             Este enlace de recuperación no es válido o ya ha caducado. Solicita uno nuevo desde la pantalla de inicio de sesión.
           </p>
-          <Button asChild className="w-full h-12">
-            <Link href="/login">Ir al inicio de sesión</Link>
-          </Button>
+          <Link
+            href="/login"
+            className="inline-flex items-center justify-center w-full h-12 rounded-lg font-medium border border-gray-300 bg-white hover:bg-gray-50 focus-visible:ring-2 focus-visible:ring-offset-2"
+          >
+            Ir al inicio de sesión
+          </Link>
         </div>
       </div>
     );
