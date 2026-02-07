@@ -3,6 +3,7 @@ import { User, LoginCredentials, RegisterData, PasswordResetData, PasswordResetC
 import { authService } from '../services/auth';
 import { getFromLocalStorage } from '@/shared/services/database';
 import { getLoggedUser, removeLoggedUser } from '@/shared/utils/auth';
+import { apiClient } from '@/shared/config/api';
 
 interface AuthState {
   user: User | null;
@@ -40,6 +41,7 @@ export function useAuth() {
         // 1) Prioridad: usuario logueado por la API (LoggedOrderItAppUser)
         const loggedUser = getLoggedUser();
         if (loggedUser) {
+          apiClient.setAuthToken(loggedUser.token);
           const user = loggedUserToUser(loggedUser);
           setAuthState({
             user,
@@ -61,7 +63,7 @@ export function useAuth() {
           });
           return;
         }
-        
+
         const session = await authService.getCurrentSession();
         if (session) {
           const user = users.find(u => u.id === session.userId) || null;
@@ -108,12 +110,12 @@ export function useAuth() {
 
     try {
       const result = await authService.login(credentials);
-      
+
       if (result.success && result.data) {
         // Obtener datos del usuario
         const users: User[] = getFromLocalStorage('app-users') || [];
         const user = users.find(u => u.id === result.data!.userId) || null;
-        
+
         if (user) {
           setAuthState({
             user,
@@ -136,7 +138,7 @@ export function useAuth() {
           error: result.message || 'Error en el login'
         }));
       }
-      
+
       return result;
     } catch (error) {
       const errorMessage = 'Error interno del servidor';
@@ -145,7 +147,7 @@ export function useAuth() {
         isLoading: false,
         error: errorMessage
       }));
-      
+
       return {
         success: false,
         message: errorMessage
@@ -159,13 +161,13 @@ export function useAuth() {
 
     try {
       const result = await authService.register(data);
-      
+
       setAuthState(prev => ({
         ...prev,
         isLoading: false,
         error: result.success ? null : result.message || 'Error en el registro'
       }));
-      
+
       return result;
     } catch (error) {
       const errorMessage = 'Error interno del servidor';
@@ -174,7 +176,7 @@ export function useAuth() {
         isLoading: false,
         error: errorMessage
       }));
-      
+
       return {
         success: false,
         message: errorMessage

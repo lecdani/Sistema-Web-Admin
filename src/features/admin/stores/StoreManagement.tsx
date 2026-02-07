@@ -9,30 +9,26 @@ import {
   Filter,
   Eye,
   MapPin,
-  Phone,
-  Mail,
-  User,
   Save,
   X,
   ArrowLeft,
-  Building2,
-  Hash
+  Building2
 } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/shared/components/base/Card';
 import { Button } from '@/shared/components/base/Button';
 import { Input } from '@/shared/components/base/Input';
 import { Badge } from '@/shared/components/base/Badge';
-import { 
-  Dialog, 
-  DialogContent, 
-  DialogDescription, 
-  DialogHeader, 
-  DialogTitle, 
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
   DialogTrigger,
   DialogFooter,
   DialogClose
 } from '@/shared/components/base/Dialog';
-import { 
+import {
   AlertDialog,
   AlertDialogAction,
   AlertDialogCancel,
@@ -47,7 +43,8 @@ import { Label } from '@/shared/components/base/Label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/shared/components/base/Select';
 import { Textarea } from '@/shared/components/base/Textarea';
 import { Store, City } from '@/shared/types';
-import { getFromLocalStorage, setToLocalStorage } from '@/shared/services/database';
+import { storesApi } from '@/shared/services/stores-api';
+import { citiesApi } from '@/shared/services/cities-api';
 import { toast } from '@/shared/components/base/Toast';
 
 interface StoreManagementProps {
@@ -55,14 +52,9 @@ interface StoreManagementProps {
 }
 
 interface StoreFormData {
-  serialNumber: string;
   name: string;
   address: string;
   cityId: string;
-  phone: string;
-  email: string;
-  manager: string;
-  isActive: boolean;
 }
 
 export const StoreManagement: React.FC<StoreManagementProps> = ({ onBack }) => {
@@ -79,16 +71,11 @@ export const StoreManagement: React.FC<StoreManagementProps> = ({ onBack }) => {
   const [showAddDialog, setShowAddDialog] = useState(false);
   const [showDetailDialog, setShowDetailDialog] = useState(false);
   const [selectedStore, setSelectedStore] = useState<Store | null>(null);
-  
+
   const [formData, setFormData] = useState<StoreFormData>({
-    serialNumber: '',
     name: '',
     address: '',
     cityId: '',
-    phone: '',
-    email: '',
-    manager: '',
-    isActive: true
   });
 
   useEffect(() => {
@@ -102,11 +89,13 @@ export const StoreManagement: React.FC<StoreManagementProps> = ({ onBack }) => {
 
   const loadStores = async () => {
     try {
-      const storeData = getFromLocalStorage('app-stores') || [];
-      setStores(storeData);
+      setIsLoading(true);
+      const data = await storesApi.fetchAll();
+      setStores(data);
     } catch (error) {
       console.error('Error cargando tiendas:', error);
       toast.error('Error al cargar las tiendas');
+      setStores([]);
     } finally {
       setIsLoading(false);
     }
@@ -114,10 +103,11 @@ export const StoreManagement: React.FC<StoreManagementProps> = ({ onBack }) => {
 
   const loadCities = async () => {
     try {
-      const cityData = getFromLocalStorage('app-cities') || [];
-      setCities(cityData);
+      const data = await citiesApi.fetchAll();
+      setCities(data);
     } catch (error) {
       console.error('Error cargando ciudades:', error);
+      toast.error('Error al cargar ciudades');
     }
   };
 
@@ -130,20 +120,18 @@ export const StoreManagement: React.FC<StoreManagementProps> = ({ onBack }) => {
       filtered = filtered.filter(store => {
         const city = cities.find(c => c.id === store.cityId);
         const cityName = city ? city.name : '';
-        
+
         return (
           store.name.toLowerCase().includes(searchLower) ||
           store.address.toLowerCase().includes(searchLower) ||
-          cityName.toLowerCase().includes(searchLower) ||
-          store.serialNumber.toLowerCase().includes(searchLower) ||
-          (store.manager && store.manager.toLowerCase().includes(searchLower))
+          cityName.toLowerCase().includes(searchLower)
         );
       });
     }
 
     // Filtro por estado
     if (statusFilter !== 'all') {
-      filtered = filtered.filter(store => 
+      filtered = filtered.filter(store =>
         statusFilter === 'active' ? store.isActive : !store.isActive
       );
     }
@@ -158,25 +146,11 @@ export const StoreManagement: React.FC<StoreManagementProps> = ({ onBack }) => {
 
   const resetForm = () => {
     setFormData({
-      serialNumber: '',
       name: '',
       address: '',
       cityId: '',
-      phone: '',
-      email: '',
-      manager: '',
-      isActive: true
     });
     setEditingStore(null);
-  };
-
-  const generateStoreId = (): string => {
-    return Date.now().toString() + Math.random().toString(36).substr(2, 9);
-  };
-
-  const generateSerialNumber = (): string => {
-    const storeCount = stores.length + 1;
-    return `ST${storeCount.toString().padStart(3, '0')}`;
   };
 
   const validateForm = (): boolean => {
@@ -192,22 +166,6 @@ export const StoreManagement: React.FC<StoreManagementProps> = ({ onBack }) => {
       toast.error('La ciudad es requerida');
       return false;
     }
-    if (formData.email && !/\S+@\S+\.\S+/.test(formData.email)) {
-      toast.error('El email no es válido');
-      return false;
-    }
-
-    // Verificar serial único
-    if (!editingStore) {
-      const existingStore = stores.find(store => 
-        store.serialNumber === formData.serialNumber
-      );
-      if (existingStore) {
-        toast.error('Ya existe una tienda con ese número de serie');
-        return false;
-      }
-    }
-
     return true;
   };
 
@@ -215,54 +173,33 @@ export const StoreManagement: React.FC<StoreManagementProps> = ({ onBack }) => {
     if (!validateForm()) return;
 
     try {
-      const currentStores = [...stores];
-      const now = new Date();
+      // Validar que la ciudad sigue existiendo
+      const cityExists = cities.find(c => c.id === formData.cityId);
+      if (!cityExists) {
+        toast.error('La ciudad seleccionada no es válida');
+        return;
+      }
+
+      const storeData: any = {
+        name: formData.name.trim(),
+        address: formData.address.trim(),
+        cityId: formData.cityId
+      };
 
       if (editingStore) {
-        // Editar tienda existente
-        const storeIndex = currentStores.findIndex(s => s.id === editingStore.id);
-        if (storeIndex !== -1) {
-          currentStores[storeIndex] = {
-            ...editingStore,
-            serialNumber: formData.serialNumber.trim(),
-            name: formData.name.trim(),
-            address: formData.address.trim(),
-            cityId: formData.cityId.trim(),
-            phone: formData.phone.trim(),
-            email: formData.email.trim(),
-            manager: formData.manager.trim(),
-            isActive: formData.isActive,
-            updatedAt: now
-          };
-        }
+        await storesApi.update(editingStore.id, storeData);
         toast.success('Tienda actualizada correctamente');
       } else {
-        // Crear nueva tienda
-        const newStore: Store = {
-          id: generateStoreId(),
-          serialNumber: formData.serialNumber.trim() || generateSerialNumber(),
-          name: formData.name.trim(),
-          address: formData.address.trim(),
-          cityId: formData.cityId.trim(),
-          phone: formData.phone.trim(),
-          email: formData.email.trim(),
-          manager: formData.manager.trim(),
-          isActive: formData.isActive,
-          createdAt: now,
-          updatedAt: now
-        };
-        currentStores.push(newStore);
+        await storesApi.create(storeData);
         toast.success('Tienda creada correctamente');
       }
 
-      // Guardar tiendas actualizadas
-      setToLocalStorage('app-stores', currentStores);
-      setStores(currentStores);
+      loadStores(); // Recargar lista
 
       // Limpiar formulario y cerrar diálogo
       resetForm();
       setShowAddDialog(false);
-      
+
     } catch (error) {
       console.error('Error guardando tienda:', error);
       toast.error('Error al guardar la tienda');
@@ -271,14 +208,9 @@ export const StoreManagement: React.FC<StoreManagementProps> = ({ onBack }) => {
 
   const handleEditStore = (store: Store) => {
     setFormData({
-      serialNumber: store.serialNumber,
       name: store.name,
       address: store.address,
-      cityId: store.cityId,
-      phone: store.phone || '',
-      email: store.email || '',
-      manager: store.manager || '',
-      isActive: store.isActive
+      cityId: store.cityId
     });
     setEditingStore(store);
     setShowAddDialog(true);
@@ -286,15 +218,10 @@ export const StoreManagement: React.FC<StoreManagementProps> = ({ onBack }) => {
 
   const handleToggleStatus = async (store: Store) => {
     try {
-      const updatedStores = stores.map(s =>
-        s.id === store.id
-          ? { ...s, isActive: !s.isActive, updatedAt: new Date() }
-          : s
-      );
-      
-      setToLocalStorage('app-stores', updatedStores);
-      setStores(updatedStores);
-      
+      // El endpoint de desactivar funciona como toggle (activar/desactivar)
+      await storesApi.deactivate(store.id);
+
+      await loadStores();
       toast.success(`Tienda ${!store.isActive ? 'activada' : 'desactivada'} correctamente`);
     } catch (error) {
       console.error('Error cambiando estado de la tienda:', error);
@@ -344,10 +271,10 @@ export const StoreManagement: React.FC<StoreManagementProps> = ({ onBack }) => {
             <p className="text-gray-500">Administra todas las tiendas del sistema</p>
           </div>
         </div>
-        
+
         <Dialog open={showAddDialog} onOpenChange={setShowAddDialog}>
           <DialogTrigger asChild>
-            <Button 
+            <Button
               className="bg-indigo-600 hover:bg-indigo-700"
               onClick={() => {
                 resetForm();
@@ -364,132 +291,79 @@ export const StoreManagement: React.FC<StoreManagementProps> = ({ onBack }) => {
                 {editingStore ? 'Editar Tienda' : 'Agregar Nueva Tienda'}
               </DialogTitle>
               <DialogDescription>
-                {editingStore 
-                  ? 'Modifica la información de la tienda.' 
+                {editingStore
+                  ? 'Modifica la información de la tienda.'
                   : 'Completa la información para crear una nueva tienda.'
                 }
               </DialogDescription>
             </DialogHeader>
-            
-            <div className="space-y-5 px-6 py-4 max-h-96 overflow-y-auto">
+
+            <div className="space-y-5 px-6 py-4">
               {/* Mensaje de aviso si no hay ciudades disponibles */}
               {getUniqueCities().length === 0 && !editingStore && (
-                <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-4">
+                <div className="bg-yellow-50 border border-yellow-200 rounded-md p-3">
                   <div className="flex items-center gap-2">
-                    <MapPin className="h-5 w-5 text-yellow-600" />
+                    <MapPin className="h-4 w-4 text-yellow-600" />
                     <div>
                       <h4 className="text-sm font-medium text-yellow-800">No hay ciudades disponibles</h4>
-                      <p className="text-sm text-yellow-700 mt-1">
+                      <p className="text-xs text-yellow-700 mt-0.5">
                         Necesitas crear al menos una ciudad antes de poder agregar tiendas.
-                        Ve al módulo de <strong>Gestión de Ciudades</strong> para crear una.
                       </p>
                     </div>
                   </div>
                 </div>
               )}
-              
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <Label htmlFor="serialNumber">Número de Serie</Label>
-                  <Input
-                    id="serialNumber"
-                    value={formData.serialNumber}
-                    onChange={(e) => setFormData(prev => ({ ...prev, serialNumber: e.target.value }))}
-                    placeholder={editingStore ? "ST001" : generateSerialNumber()}
-                  />
-                </div>
-                <div>
-                  <Label htmlFor="name">Nombre de la Tienda *</Label>
-                  <Input
-                    id="name"
-                    value={formData.name}
-                    onChange={(e) => setFormData(prev => ({ ...prev, name: e.target.value }))}
-                    placeholder="Tienda Principal"
-                  />
-                </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="name">Nombre de la Tienda *</Label>
+                <Input
+                  id="name"
+                  value={formData.name}
+                  onChange={(e) => setFormData(prev => ({ ...prev, name: e.target.value }))}
+                  placeholder="Ej: Tienda Centro"
+                  className="h-10"
+                />
               </div>
-              
-              <div>
+
+              <div className="space-y-2">
                 <Label htmlFor="address">Dirección *</Label>
                 <Textarea
                   id="address"
                   value={formData.address}
                   onChange={(e) => setFormData(prev => ({ ...prev, address: e.target.value }))}
-                  placeholder="Av. Principal 123, Centro"
-                  rows={2}
+                  placeholder="Ej: Av. Principal 123"
+                  rows={3}
+                  className="resize-none min-h-[80px]"
                 />
               </div>
-              
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <Label htmlFor="cityId">Ciudad *</Label>
-                  <Select 
-                    value={formData.cityId} 
-                    onValueChange={(value) => setFormData(prev => ({ ...prev, cityId: value }))}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Seleccionar ciudad" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {getUniqueCities().length > 0 ? (
-                        getUniqueCities().map((city) => (
-                          <SelectItem key={city.id} value={city.id}>
-                            {city.name} - {city.country}
-                          </SelectItem>
-                        ))
-                      ) : (
-                        <SelectItem value="" disabled>
-                          No hay ciudades disponibles
+
+              <div className="space-y-2">
+                <Label htmlFor="cityId">Ciudad *</Label>
+                <Select
+                  value={formData.cityId}
+                  onValueChange={(value) => setFormData(prev => ({ ...prev, cityId: value }))}
+                >
+                  <SelectTrigger className="h-10">
+                    <SelectValue placeholder="Seleccionar ciudad" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {getUniqueCities().length > 0 ? (
+                      getUniqueCities().map((city) => (
+                        <SelectItem key={city.id} value={city.id}>
+                          {city.name} - {city.country}
                         </SelectItem>
-                      )}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div>
-                  <Label htmlFor="phone">Teléfono</Label>
-                  <Input
-                    id="phone"
-                    value={formData.phone}
-                    onChange={(e) => setFormData(prev => ({ ...prev, phone: e.target.value }))}
-                    placeholder="+1 234-567-8900"
-                  />
-                </div>
+                      ))
+                    ) : (
+                      <SelectItem value="" disabled>
+                        No hay ciudades disponibles
+                      </SelectItem>
+                    )}
+                  </SelectContent>
+                </Select>
               </div>
-              
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <Label htmlFor="email">Email</Label>
-                  <Input
-                    id="email"
-                    type="email"
-                    value={formData.email}
-                    onChange={(e) => setFormData(prev => ({ ...prev, email: e.target.value }))}
-                    placeholder="tienda@empresa.com"
-                  />
-                </div>
-                <div>
-                  <Label htmlFor="manager">Gerente</Label>
-                  <Input
-                    id="manager"
-                    value={formData.manager}
-                    onChange={(e) => setFormData(prev => ({ ...prev, manager: e.target.value }))}
-                    placeholder="Nombre del Gerente"
-                  />
-                </div>
-              </div>
-              
-              <div className="flex items-center space-x-2">
-                <input
-                  type="checkbox"
-                  id="isActive"
-                  checked={formData.isActive}
-                  onChange={(e) => setFormData(prev => ({ ...prev, isActive: e.target.checked }))}
-                  className="w-4 h-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500"
-                />
-                <Label htmlFor="isActive">Tienda activa</Label>
-              </div>
+
             </div>
-            
+
             <DialogFooter>
               <DialogClose asChild>
                 <Button variant="outline">
@@ -570,7 +444,7 @@ export const StoreManagement: React.FC<StoreManagementProps> = ({ onBack }) => {
                 />
               </div>
             </div>
-            
+
             <div className="flex gap-4">
               <Select value={statusFilter} onValueChange={setStatusFilter}>
                 <SelectTrigger className="w-48">
@@ -621,9 +495,6 @@ export const StoreManagement: React.FC<StoreManagementProps> = ({ onBack }) => {
                     Ubicación
                   </th>
                   <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Contacto
-                  </th>
-                  <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                     Estado
                   </th>
                   <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -648,32 +519,12 @@ export const StoreManagement: React.FC<StoreManagementProps> = ({ onBack }) => {
                           <div className="text-sm font-medium text-gray-900">
                             {store.name}
                           </div>
-                          <div className="text-sm text-gray-500 flex items-center gap-1">
-                            <Hash className="h-3 w-3" />
-                            {store.serialNumber}
-                          </div>
                         </div>
                       </div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div className="text-sm text-gray-900">{getCityName(store.cityId)}</div>
                       <div className="text-sm text-gray-500">{store.address}</div>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="text-sm text-gray-900">
-                        {store.manager && (
-                          <div className="flex items-center gap-1 mb-1">
-                            <User className="h-3 w-3 text-gray-400" />
-                            {store.manager}
-                          </div>
-                        )}
-                        {store.phone && (
-                          <div className="flex items-center gap-1 text-gray-500">
-                            <Phone className="h-3 w-3" />
-                            {store.phone}
-                          </div>
-                        )}
-                      </div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <Badge className={getStatusBadgeColor(store.isActive)}>
@@ -692,7 +543,7 @@ export const StoreManagement: React.FC<StoreManagementProps> = ({ onBack }) => {
                         >
                           <Eye className="h-4 w-4" />
                         </Button>
-                        
+
                         <Button
                           size="sm"
                           variant="outline"
@@ -700,7 +551,7 @@ export const StoreManagement: React.FC<StoreManagementProps> = ({ onBack }) => {
                         >
                           <Edit3 className="h-4 w-4" />
                         </Button>
-                        
+
                         <AlertDialog>
                           <AlertDialogTrigger asChild>
                             <Button
@@ -745,7 +596,7 @@ export const StoreManagement: React.FC<StoreManagementProps> = ({ onBack }) => {
               </tbody>
             </table>
           </div>
-          
+
           {filteredStores.length === 0 && (
             <div className="text-center py-12">
               <StoreIcon className="h-12 w-12 text-gray-400 mx-auto mb-4" />
@@ -764,29 +615,31 @@ export const StoreManagement: React.FC<StoreManagementProps> = ({ onBack }) => {
       </Card>
 
       {/* Paginación */}
-      {filteredStores.length > itemsPerPage && (
-        <div className="flex items-center justify-center gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
-            disabled={currentPage === 1}
-          >
-            Anterior
-          </Button>
-          <span className="text-sm text-gray-600">
-            Página {currentPage} de {Math.ceil(filteredStores.length / itemsPerPage)}
-          </span>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setCurrentPage(prev => Math.min(prev + 1, Math.ceil(filteredStores.length / itemsPerPage)))}
-            disabled={currentPage === Math.ceil(filteredStores.length / itemsPerPage)}
-          >
-            Siguiente
-          </Button>
-        </div>
-      )}
+      {
+        filteredStores.length > itemsPerPage && (
+          <div className="flex items-center justify-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
+              disabled={currentPage === 1}
+            >
+              Anterior
+            </Button>
+            <span className="text-sm text-gray-600">
+              Página {currentPage} de {Math.ceil(filteredStores.length / itemsPerPage)}
+            </span>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setCurrentPage(prev => Math.min(prev + 1, Math.ceil(filteredStores.length / itemsPerPage)))}
+              disabled={currentPage === Math.ceil(filteredStores.length / itemsPerPage)}
+            >
+              Siguiente
+            </Button>
+          </div>
+        )
+      }
 
       {/* Store Detail Dialog */}
       <Dialog open={showDetailDialog} onOpenChange={setShowDetailDialog}>
@@ -800,107 +653,52 @@ export const StoreManagement: React.FC<StoreManagementProps> = ({ onBack }) => {
               Información completa de la tienda seleccionada
             </DialogDescription>
           </DialogHeader>
-          
+
           {selectedStore && (
             <div className="space-y-6 px-6 py-4">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div className="space-y-4">
-                  <div>
-                    <Label className="text-sm font-medium text-gray-500">Nombre</Label>
-                    <p className="text-lg font-semibold">{selectedStore.name}</p>
-                  </div>
-                  
-                  <div>
-                    <Label className="text-sm font-medium text-gray-500">Número de Serie</Label>
-                    <p className="flex items-center gap-1">
-                      <Hash className="h-4 w-4 text-gray-400" />
-                      {selectedStore.serialNumber}
-                    </p>
-                  </div>
-                  
-                  <div>
-                    <Label className="text-sm font-medium text-gray-500">Estado</Label>
-                    <div className="mt-1">
-                      <Badge className={getStatusBadgeColor(selectedStore.isActive)}>
-                        {selectedStore.isActive ? 'Activa' : 'Inactiva'}
-                      </Badge>
-                    </div>
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-lg font-semibold text-gray-900">{selectedStore.name}</h3>
+                  <div className="flex items-center gap-1 mt-1 text-sm text-gray-500">
+                    <MapPin className="h-3.5 w-3.5" />
+                    <span>{getCityName(selectedStore.cityId)}</span>
                   </div>
                 </div>
-                
-                <div className="space-y-4">
-                  <div>
-                    <Label className="text-sm font-medium text-gray-500">Dirección</Label>
-                    <p className="flex items-start gap-1">
-                      <MapPin className="h-4 w-4 text-gray-400 mt-0.5" />
-                      <span>{selectedStore.address}</span>
-                    </p>
-                  </div>
-                  
-                  <div>
-                    <Label className="text-sm font-medium text-gray-500">Ciudad</Label>
-                    <p>{getCityName(selectedStore.cityId)}</p>
-                  </div>
-                  
-                  {selectedStore.manager && (
-                    <div>
-                      <Label className="text-sm font-medium text-gray-500">Gerente</Label>
-                      <p className="flex items-center gap-1">
-                        <User className="h-4 w-4 text-gray-400" />
-                        {selectedStore.manager}
-                      </p>
-                    </div>
-                  )}
-                </div>
+                <Badge className={getStatusBadgeColor(selectedStore.isActive)}>
+                  {selectedStore.isActive ? 'Activa' : 'Inactiva'}
+                </Badge>
               </div>
-              
-              {(selectedStore.phone || selectedStore.email) && (
-                <div className="border-t pt-4">
-                  <Label className="text-sm font-medium text-gray-500 mb-2 block">Contacto</Label>
-                  <div className="space-y-2">
-                    {selectedStore.phone && (
-                      <p className="flex items-center gap-2">
-                        <Phone className="h-4 w-4 text-gray-400" />
-                        {selectedStore.phone}
-                      </p>
-                    )}
-                    {selectedStore.email && (
-                      <p className="flex items-center gap-2">
-                        <Mail className="h-4 w-4 text-gray-400" />
-                        {selectedStore.email}
-                      </p>
-                    )}
-                  </div>
-                </div>
-              )}
-              
-              <div className="border-t pt-4 grid grid-cols-1 md:grid-cols-2 gap-4 text-sm text-gray-500">
+
+              <div className="bg-gray-50 rounded-lg p-4 border border-gray-100">
+                <Label className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2 block">
+                  Dirección
+                </Label>
+                <p className="text-sm text-gray-700 whitespace-pre-wrap">{selectedStore.address}</p>
+              </div>
+
+              <div className="grid grid-cols-2 gap-6 pt-2">
                 <div>
-                  <Label className="text-sm font-medium text-gray-500">Fecha de Registro</Label>
-                  <p>{new Date(selectedStore.createdAt).toLocaleDateString('es-ES', {
-                    year: 'numeric',
-                    month: 'long',
-                    day: 'numeric'
-                  })}</p>
+                  <Label className="text-xs font-medium text-gray-500 mb-1 block">Registrada el</Label>
+                  <p className="text-sm text-gray-900">
+                    {new Date(selectedStore.createdAt).toLocaleDateString()}
+                  </p>
                 </div>
                 <div>
-                  <Label className="text-sm font-medium text-gray-500">Última Actualización</Label>
-                  <p>{new Date(selectedStore.updatedAt).toLocaleDateString('es-ES', {
-                    year: 'numeric',
-                    month: 'long',
-                    day: 'numeric'
-                  })}</p>
+                  <Label className="text-xs font-medium text-gray-500 mb-1 block">Actualizada el</Label>
+                  <p className="text-sm text-gray-900">
+                    {new Date(selectedStore.updatedAt).toLocaleDateString()}
+                  </p>
                 </div>
               </div>
             </div>
           )}
-          
+
           <DialogFooter>
             <DialogClose asChild>
               <Button variant="outline">Cerrar</Button>
             </DialogClose>
             {selectedStore && (
-              <Button 
+              <Button
                 onClick={() => {
                   handleEditStore(selectedStore);
                   setShowDetailDialog(false);
@@ -914,6 +712,6 @@ export const StoreManagement: React.FC<StoreManagementProps> = ({ onBack }) => {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
+    </div >
   );
 };

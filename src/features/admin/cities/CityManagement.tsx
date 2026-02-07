@@ -5,25 +5,25 @@ import { Label } from '@/shared/components/base/Label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/shared/components/base/Card';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/shared/components/base/Dialog';
 
-import { 
-  Search, 
-  Plus, 
-  Edit, 
-  MapPin, 
+import {
+  Search,
+  Plus,
+  Edit,
+  MapPin,
   ArrowLeft,
   Building2,
   Eye,
   Globe
 } from 'lucide-react';
-import { getFromLocalStorage, setToLocalStorage } from '@/shared/services/database';
+import { getFromLocalStorage } from '@/shared/services/database';
 import { City } from '@/shared/types';
 import { toast } from '@/shared/components/base/Toast';
+import { citiesApi } from '@/shared/services/cities-api';
 
 interface CityFormData {
   name: string;
   state: string;
   country: string;
-  code: string;
 }
 
 interface CityManagementProps {
@@ -37,18 +37,17 @@ export function CityManagement({ onBack }: CityManagementProps) {
   const [searchTerm, setSearchTerm] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 6;
-  
+
   // Estados para el diálogo de ciudad
   const [showCityDialog, setShowCityDialog] = useState(false);
   const [editingCity, setEditingCity] = useState<City | null>(null);
   const [cityFormData, setCityFormData] = useState<CityFormData>({
     name: '',
     state: '',
-    country: 'España',
-    code: ''
+    country: 'USA'
   });
   const [cityFormLoading, setCityFormLoading] = useState(false);
-  
+
   // Estado para el diálogo de información
   const [showInfoDialog, setShowInfoDialog] = useState(false);
   const [selectedCity, setSelectedCity] = useState<City | null>(null);
@@ -63,14 +62,15 @@ export function CityManagement({ onBack }: CityManagementProps) {
     filterCities();
   }, [cities, searchTerm]);
 
-  const loadCities = () => {
+  const loadCities = async () => {
     setIsLoading(true);
     try {
-      const savedCities: City[] = getFromLocalStorage('app-cities') || [];
-      setCities(savedCities);
+      const list = await citiesApi.fetchAll();
+      setCities(list);
     } catch (error) {
       console.error('Error cargando ciudades:', error);
       toast.error('Error al cargar las ciudades');
+      setCities([]);
     } finally {
       setIsLoading(false);
     }
@@ -84,17 +84,11 @@ export function CityManagement({ onBack }: CityManagementProps) {
       filtered = filtered.filter(city =>
         city.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
         city.state?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        city.country.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        city.code?.toLowerCase().includes(searchTerm.toLowerCase())
+        city.country.toLowerCase().includes(searchTerm.toLowerCase())
       );
     }
 
     setFilteredCities(filtered);
-  };
-
-  const saveCities = (updatedCities: City[]) => {
-    setToLocalStorage('app-cities', updatedCities);
-    setCities(updatedCities);
   };
 
   const handleCreateCity = () => {
@@ -102,8 +96,7 @@ export function CityManagement({ onBack }: CityManagementProps) {
     setCityFormData({
       name: '',
       state: '',
-      country: 'España',
-      code: ''
+      country: 'USA'
     });
     setShowCityDialog(true);
   };
@@ -113,8 +106,7 @@ export function CityManagement({ onBack }: CityManagementProps) {
     setCityFormData({
       name: city.name,
       state: city.state || '',
-      country: city.country,
-      code: city.code || ''
+      country: city.country
     });
     setShowCityDialog(true);
   };
@@ -126,71 +118,38 @@ export function CityManagement({ onBack }: CityManagementProps) {
 
   const handleSaveCity = async () => {
     setCityFormLoading(true);
-    
+
     try {
-      // Validaciones
       if (!cityFormData.name.trim()) {
         toast.error('El nombre de la ciudad es obligatorio');
+        setCityFormLoading(false);
         return;
       }
-
       if (!cityFormData.country.trim()) {
         toast.error('El país es obligatorio');
+        setCityFormLoading(false);
         return;
       }
 
-      // Verificar si ya existe una ciudad con el mismo nombre en el mismo país/estado
-      const existingCity = cities.find(city => 
-        city.name.toLowerCase() === cityFormData.name.toLowerCase() &&
-        city.country.toLowerCase() === cityFormData.country.toLowerCase() &&
-        (city.state || '').toLowerCase() === (cityFormData.state || '').toLowerCase() &&
-        city.id !== editingCity?.id
-      );
-
-      if (existingCity) {
-        toast.error('Ya existe una ciudad con ese nombre en la misma ubicación');
-        return;
-      }
-
-      const now = new Date();
-      let updatedCities: City[];
+      const payload = {
+        name: cityFormData.name.trim(),
+        state: cityFormData.state.trim() || undefined,
+        country: cityFormData.country.trim()
+      };
 
       if (editingCity) {
-        // Actualizar ciudad existente
-        updatedCities = cities.map(city =>
-          city.id === editingCity.id
-            ? {
-                ...city,
-                name: cityFormData.name.trim(),
-                state: cityFormData.state.trim() || undefined,
-                country: cityFormData.country.trim(),
-                code: cityFormData.code.trim() || undefined,
-                updatedAt: now
-              }
-            : city
-        );
+        await citiesApi.update(editingCity.id, payload);
         toast.success('Ciudad actualizada correctamente');
       } else {
-        // Crear nueva ciudad
-        const newCity: City = {
-          id: `city_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-          name: cityFormData.name.trim(),
-          state: cityFormData.state.trim() || undefined,
-          country: cityFormData.country.trim(),
-          code: cityFormData.code.trim() || undefined,
-          createdAt: now,
-          updatedAt: now
-        };
-        updatedCities = [...cities, newCity];
+        await citiesApi.create(payload);
         toast.success('Ciudad creada correctamente');
       }
 
-      saveCities(updatedCities);
       setShowCityDialog(false);
-      
-    } catch (error) {
-      console.error('Error guardando ciudad:', error);
-      toast.error('Error al guardar la ciudad');
+      await loadCities();
+    } catch (error: any) {
+      const msg = error?.data?.message ?? error?.message ?? 'Error al guardar la ciudad';
+      toast.error(msg);
     } finally {
       setCityFormLoading(false);
     }
@@ -230,7 +189,7 @@ export function CityManagement({ onBack }: CityManagementProps) {
             <p className="text-gray-500">Administra las ciudades del sistema</p>
           </div>
         </div>
-        
+
         <Button onClick={handleCreateCity} className="bg-indigo-600 hover:bg-indigo-700">
           <Plus className="h-4 w-4 mr-2" />
           Nueva Ciudad
@@ -245,7 +204,7 @@ export function CityManagement({ onBack }: CityManagementProps) {
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
                 <Input
-                  placeholder="Buscar ciudades por nombre, estado, país o código..."
+                  placeholder="Buscar ciudades por nombre, estado o país..."
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
                   className="pl-10"
@@ -270,10 +229,9 @@ export function CityManagement({ onBack }: CityManagementProps) {
               </div>
               <CardDescription>
                 {city.state && `${city.state}, `}{city.country}
-                {city.code && ` - ${city.code}`}
               </CardDescription>
             </CardHeader>
-            
+
             <CardContent className="space-y-4">
               {/* Estadísticas */}
               <div className="flex items-center gap-4 text-sm text-gray-600">
@@ -282,13 +240,13 @@ export function CityManagement({ onBack }: CityManagementProps) {
                   <span>{getStoreCount(city.id)} tiendas</span>
                 </div>
               </div>
-              
+
               {/* Información adicional */}
               <div className="text-xs text-gray-500">
                 <p>Creada: {new Date(city.createdAt).toLocaleDateString('es-ES')}</p>
                 <p>Actualizada: {new Date(city.updatedAt).toLocaleDateString('es-ES')}</p>
               </div>
-              
+
               {/* Acciones */}
               <div className="flex gap-2 pt-2">
                 <Button
@@ -324,7 +282,7 @@ export function CityManagement({ onBack }: CityManagementProps) {
               {searchTerm ? 'No se encontraron ciudades' : 'No hay ciudades registradas'}
             </h3>
             <p className="text-gray-500 mb-6">
-              {searchTerm 
+              {searchTerm
                 ? 'Intenta con otros términos de búsqueda'
                 : 'Comienza creando tu primera ciudad'
               }
@@ -372,13 +330,13 @@ export function CityManagement({ onBack }: CityManagementProps) {
               {editingCity ? 'Editar Ciudad' : 'Nueva Ciudad'}
             </DialogTitle>
             <DialogDescription>
-              {editingCity 
+              {editingCity
                 ? 'Modifica los datos de la ciudad'
                 : 'Completa la información para crear una nueva ciudad'
               }
             </DialogDescription>
           </DialogHeader>
-          
+
           <div className="space-y-5 px-6 py-4">
             <div>
               <Label htmlFor="cityName">Nombre de la Ciudad *</Label>
@@ -386,46 +344,37 @@ export function CityManagement({ onBack }: CityManagementProps) {
                 id="cityName"
                 value={cityFormData.name}
                 onChange={(e) => setCityFormData(prev => ({ ...prev, name: e.target.value }))}
-                placeholder="Madrid, Barcelona, Valencia..."
+                placeholder="New York, Los Angeles, Chicago..."
               />
             </div>
-            
+
             <div>
               <Label htmlFor="cityState">Estado/Provincia</Label>
               <Input
                 id="cityState"
                 value={cityFormData.state}
                 onChange={(e) => setCityFormData(prev => ({ ...prev, state: e.target.value }))}
-                placeholder="Comunidad de Madrid, Cataluña..."
+                placeholder="New York, California, Texas..."
               />
             </div>
-            
+
             <div>
               <Label htmlFor="cityCountry">País *</Label>
               <Input
                 id="cityCountry"
                 value={cityFormData.country}
                 onChange={(e) => setCityFormData(prev => ({ ...prev, country: e.target.value }))}
-                placeholder="España"
+                placeholder="USA"
               />
             </div>
-            
-            <div>
-              <Label htmlFor="cityCode">Código Postal</Label>
-              <Input
-                id="cityCode"
-                value={cityFormData.code}
-                onChange={(e) => setCityFormData(prev => ({ ...prev, code: e.target.value }))}
-                placeholder="28001, 08001..."
-              />
-            </div>
+
           </div>
-          
+
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowCityDialog(false)}>
               Cancelar
             </Button>
-            <Button 
+            <Button
               onClick={handleSaveCity}
               disabled={cityFormLoading}
               className="bg-indigo-600 hover:bg-indigo-700"
@@ -452,7 +401,7 @@ export function CityManagement({ onBack }: CityManagementProps) {
               Información de la Ciudad
             </DialogTitle>
           </DialogHeader>
-          
+
           {selectedCity && (
             <div className="space-y-6 px-6 py-4">
               <div className="grid grid-cols-2 gap-6">
@@ -469,15 +418,11 @@ export function CityManagement({ onBack }: CityManagementProps) {
                   <p className="font-medium">{selectedCity.country}</p>
                 </div>
                 <div>
-                  <Label className="text-sm text-gray-500">Código</Label>
-                  <p className="font-medium">{selectedCity.code || 'No especificado'}</p>
-                </div>
-                <div>
                   <Label className="text-sm text-gray-500">Tiendas</Label>
                   <p className="font-medium">{getStoreCount(selectedCity.id)} tiendas</p>
                 </div>
               </div>
-              
+
               <div className="pt-4 border-t">
                 <div className="grid grid-cols-2 gap-4 text-sm text-gray-500">
                   <div>
@@ -492,7 +437,7 @@ export function CityManagement({ onBack }: CityManagementProps) {
               </div>
             </div>
           )}
-          
+
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowInfoDialog(false)}>
               Cerrar

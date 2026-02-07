@@ -28,29 +28,46 @@ export const API_CONFIG = {
       VERIFY_EMAIL: '/auth/verify-email'
     },
     USERS: {
-      GET_ALL: '/users',
-      GET_BY_ID: '/users/{id}',
-      CREATE: '/users',
-      UPDATE: '/users/{id}',
-      DELETE: '/users/{id}',
+      GET_ALL: '/users/users',
+      GET_BY_ID: '/users/users/{id}',
+      CREATE: '/users/users',
+      UPDATE: '/users/users/{id}',
+      DELETE: '/users/users/{id}',
+      DEACTIVATE: '/users/users/desactivate/{id}',
       GET_PROFILE: '/users/profile',
       UPDATE_PROFILE: '/users/profile'
     },
     DASHBOARD: {
       STATS: '/dashboard/stats',
       RECENT_ACTIVITY: '/dashboard/recent-activity'
+    },
+    CITIES: {
+      LIST: '/cities/cities',
+      GET_BY_ID: '/cities/cities/{id}',
+      GET_BY_NAME: '/cities/cities/by-name/{name}',
+      CREATE: '/cities/cities',
+      UPDATE: '/cities/cities/{id}'
+    },
+    STORES: {
+      LIST: '/stores/stores',
+      GET_BY_ID: '/stores/stores/{id}',
+      GET_BY_NAME: '/stores/stores/by-name/{name}',
+      CREATE: '/stores/stores',
+      UPDATE: '/stores/stores/{id}',
+      DEACTIVATE: '/stores/stores/deactivate/{id}',
+      GET_BY_CITY: '/stores/stores/by-city/{cityId}'
     }
   },
-  
+
   // Headers por defecto
   DEFAULT_HEADERS: {
     'Content-Type': 'application/json',
     'Accept': 'application/json'
   },
-  
+
   // Timeout para las peticiones (en ms)
   TIMEOUT: 10000,
-  
+
   // Configuración de reintentos
   RETRY: {
     attempts: 3,
@@ -79,16 +96,16 @@ export class ApiClient {
 
   private getHeaders(): Record<string, string> {
     const headers = { ...this.defaultHeaders };
-    
+
     if (this.token) {
       headers['Authorization'] = `Bearer ${this.token}`;
     }
-    
+
     return headers;
   }
 
   private async request<T = any>(
-    endpoint: string, 
+    endpoint: string,
     options: RequestInit = {}
   ): Promise<T> {
     // Si usamos proxy, construir la URL con /api/proxy
@@ -98,7 +115,7 @@ export class ApiClient {
     } else {
       url = `${this.baseURL}${endpoint}`;
     }
-    
+
     const config: RequestInit = {
       ...options,
       headers: {
@@ -111,18 +128,26 @@ export class ApiClient {
 
     try {
       const response = await fetch(url, config);
-      
+
       // Intentar parsear la respuesta como JSON
       let data: any;
       const contentType = response.headers.get('content-type');
-      
+
+      // Leemos el texto crudo primero para evitar errores de streaming si falla el JSON
+      const text = await response.text();
+
       if (contentType && contentType.includes('application/json')) {
-        data = await response.json();
+        try {
+          data = text ? JSON.parse(text) : {};
+        } catch (e) {
+          console.warn('[ApiClient] Error al parsear JSON, usando texto plano:', text);
+          // Si el servidor dice que es JSON pero envía texto plano (ej. un ID), lo devolvemos tal cual
+          data = text;
+        }
       } else {
-        const text = await response.text();
         data = text ? { message: text } : {};
       }
-      
+
       if (!response.ok) {
         // Crear un error con la respuesta para que pueda ser manejado
         const error: any = new Error(data.message || `HTTP error! status: ${response.status}`);
@@ -132,7 +157,7 @@ export class ApiClient {
         console.error(`[ApiClient] Error en respuesta: ${response.status}`, data);
         throw error;
       }
-      
+
       console.log(`[ApiClient] Respuesta exitosa de ${url}`);
       return data;
     } catch (error: any) {
@@ -140,10 +165,10 @@ export class ApiClient {
       if (error.response) {
         throw error;
       }
-      
+
       // Detectar el tipo de error de red
       let errorMessage = 'Error de conexión con el servidor';
-      
+
       if (error.name === 'TypeError' && error.message.includes('fetch')) {
         // Error de red (CORS, servidor no disponible, etc.)
         if (error.message.includes('Failed to fetch') || error.message.includes('NetworkError')) {
@@ -158,9 +183,9 @@ export class ApiClient {
       } else if (error.message) {
         errorMessage = error.message;
       }
-      
+
       console.error(`[ApiClient] Error de red en ${url}:`, error);
-      
+
       // Crear un error estructurado
       const networkError: any = new Error(errorMessage);
       networkError.originalError = error;

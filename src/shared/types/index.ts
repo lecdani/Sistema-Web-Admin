@@ -5,6 +5,7 @@ export interface User {
   password?: string;
   firstName: string;
   lastName: string;
+  phone?: string;
   role: 'admin' | 'user';
   cityId?: string;
   isActive: boolean;
@@ -39,20 +40,15 @@ export interface City {
   name: string;
   state?: string;
   country: string;
-  code?: string;
   createdAt: Date;
   updatedAt: Date;
 }
 
 export interface Store {
   id: string;
-  serialNumber: string;
   name: string;
   address: string;
   cityId: string;
-  phone?: string;
-  email?: string;
-  manager?: string;
   isActive: boolean;
   createdAt: Date;
   updatedAt: Date;
