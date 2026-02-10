@@ -84,6 +84,8 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onBack }) => {
     role: 'user',
     password: '',
   });
+  const [formErrors, setFormErrors] = useState<Partial<Record<keyof UserFormData, string>>>({});
+  const [passwordErrors, setPasswordErrors] = useState<string[]>([]);
 
   useEffect(() => {
     loadUsers();
@@ -146,48 +148,52 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onBack }) => {
       role: 'user',
       password: '',
     });
+    setFormErrors({});
+    setPasswordErrors([]);
     setEditingUser(null);
     setShowPassword(false);
   };
 
-
+  const getPasswordErrors = (password: string): string[] => {
+    const err: string[] = [];
+    if (!password) return err;
+    if (password.length < 8) err.push('Al menos 8 caracteres');
+    if (!/[A-Z]/.test(password)) err.push('Al menos una mayúscula');
+    if (!/[^A-Za-z0-9]/.test(password)) err.push('Al menos un carácter especial (!@#$%^&* etc.)');
+    return err;
+  };
 
   const validateForm = (): boolean => {
-    if (!formData.firstName.trim()) {
-      toast.error('El nombre es requerido');
-      return false;
-    }
-    if (!formData.lastName.trim()) {
-      toast.error('El apellido es requerido');
-      return false;
-    }
-    if (!formData.email.trim()) {
-      toast.error('El email es requerido');
-      return false;
-    }
-    if (!/\S+@\S+\.\S+/.test(formData.email)) {
-      toast.error('El email no es válido');
-      return false;
-    }
-    if (!editingUser && !formData.password.trim()) {
-      toast.error('La contraseña es requerida para nuevos usuarios');
-      return false;
-    }
-    if (formData.password && formData.password.length < 6) {
-      toast.error('La contraseña debe tener al menos 6 caracteres');
-      return false;
-    }
+    const err: Partial<Record<keyof UserFormData, string>> = {};
+    if (!formData.firstName.trim()) err.firstName = 'El nombre es obligatorio';
+    if (!formData.lastName.trim()) err.lastName = 'El apellido es obligatorio';
+    if (!formData.email.trim()) err.email = 'El correo es obligatorio';
+    else if (!/\S+@\S+\.\S+/.test(formData.email)) err.email = 'El correo no es válido';
+    if (!formData.phone.trim()) err.phone = 'El teléfono es obligatorio';
 
-    // Verificar email único
-    const existingUser = users.find(user =>
-      user.email === formData.email && (!editingUser || user.id !== editingUser.id)
+    const emailNorm = formData.email.trim().toLowerCase();
+    const existingEmail = users.find(
+      u => u.email.toLowerCase() === emailNorm && (!editingUser || u.id !== editingUser.id)
     );
-    if (existingUser) {
-      toast.error('Ya existe un usuario con ese email');
-      return false;
-    }
+    if (existingEmail) err.email = 'Ya existe un usuario con este correo';
 
-    return true;
+    const phoneNorm = formData.phone.trim();
+    const existingPhone = users.find(
+      u => (u.phone || '').trim() === phoneNorm && (!editingUser || u.id !== editingUser.id)
+    );
+    if (existingPhone) err.phone = 'Ya existe un usuario con este teléfono';
+
+    const isNewUser = !editingUser;
+    const hasPassword = formData.password.trim().length > 0;
+    if (isNewUser && !hasPassword) err.password = 'La contraseña es obligatoria para nuevos usuarios';
+    const pwdErrs = getPasswordErrors(formData.password.trim());
+    if (hasPassword && pwdErrs.length) {
+      setPasswordErrors(pwdErrs);
+      err.password = 'La contraseña no cumple los requisitos';
+    } else setPasswordErrors([]);
+
+    setFormErrors(err);
+    return Object.keys(err).length === 0 && (isNewUser ? pwdErrs.length === 0 : (hasPassword ? pwdErrs.length === 0 : true));
   };
 
   const handleSaveUser = async () => {
@@ -220,9 +226,16 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onBack }) => {
       resetForm();
       setShowAddDialog(false);
 
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error guardando usuario:', error);
-      toast.error('Error al guardar el usuario');
+      const msg =
+        error?.data?.message ??
+        error?.data?.title ??
+        (typeof error?.message === 'string' && error.message.includes('duplicate key')
+          ? 'Ya existe un usuario con ese correo en el sistema. Si ya se registró por la pantalla de registro, no es necesario crearlo aquí.'
+          : error?.message) ??
+        'Error al guardar el usuario';
+      toast.error(msg);
     }
   };
 
@@ -235,19 +248,16 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onBack }) => {
       role: user.role,
       password: ''
     });
+    setFormErrors({});
+    setPasswordErrors([]);
     setEditingUser(user);
     setShowAddDialog(true);
   };
 
   const handleToggleStatus = async (user: User) => {
     try {
-      if (user.isActive) {
-        // Desactivar
-        await usersApi.deactivate(user.id);
-      } else {
-        // Activar (update)
-        await usersApi.update(user.id, { isActive: true });
-      }
+      // Activar y desactivar usan el mismo endpoint (toggle en el backend)
+      await usersApi.deactivate(user.id);
 
       await loadUsers();
       toast.success(`Usuario ${!user.isActive ? 'activado' : 'desactivado'} correctamente`);
@@ -336,38 +346,53 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onBack }) => {
           <div className="space-y-5 px-6 py-4">
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <Label htmlFor="firstName">Nombre</Label>
+                <Label htmlFor="firstName">Nombre *</Label>
                 <Input
                   id="firstName"
                   value={formData.firstName}
-                  onChange={(e) => setFormData(prev => ({ ...prev, firstName: e.target.value }))}
+                  onChange={(e) => {
+                    setFormData(prev => ({ ...prev, firstName: e.target.value }));
+                    if (formErrors.firstName) setFormErrors(prev => ({ ...prev, firstName: undefined }));
+                  }}
                   placeholder="Nombre"
+                  className={formErrors.firstName ? 'border-red-500' : ''}
                 />
+                {formErrors.firstName && <p className="text-sm text-red-600 mt-1">{formErrors.firstName}</p>}
               </div>
               <div>
-                <Label htmlFor="lastName">Apellido</Label>
+                <Label htmlFor="lastName">Apellido *</Label>
                 <Input
                   id="lastName"
                   value={formData.lastName}
-                  onChange={(e) => setFormData(prev => ({ ...prev, lastName: e.target.value }))}
+                  onChange={(e) => {
+                    setFormData(prev => ({ ...prev, lastName: e.target.value }));
+                    if (formErrors.lastName) setFormErrors(prev => ({ ...prev, lastName: undefined }));
+                  }}
                   placeholder="Apellido"
+                  className={formErrors.lastName ? 'border-red-500' : ''}
                 />
+                {formErrors.lastName && <p className="text-sm text-red-600 mt-1">{formErrors.lastName}</p>}
               </div>
             </div>
 
             <div>
-              <Label htmlFor="email">Email</Label>
+              <Label htmlFor="email">Correo *</Label>
               <Input
                 id="email"
                 type="email"
                 value={formData.email}
-                onChange={(e) => setFormData(prev => ({ ...prev, email: e.target.value }))}
+                onChange={(e) => {
+                  setFormData(prev => ({ ...prev, email: e.target.value }));
+                  if (formErrors.email) setFormErrors(prev => ({ ...prev, email: undefined }));
+                }}
                 placeholder="usuario@empresa.com"
+                className={formErrors.email ? 'border-red-500' : ''}
               />
+              {formErrors.email && <p className="text-sm text-red-600 mt-1">{formErrors.email}</p>}
             </div>
 
             <div>
-              <Label htmlFor="role">Rol</Label>
+              <Label htmlFor="role">Rol *</Label>
               <Select
                 value={formData.role}
                 onValueChange={(value) =>
@@ -385,33 +410,41 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onBack }) => {
             </div>
 
             <div>
-              <Label htmlFor="phone">Teléfono</Label>
+              <Label htmlFor="phone">Teléfono *</Label>
               <div className="relative">
                 <Phone className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
                 <Input
                   id="phone"
                   value={formData.phone}
-                  onChange={(e) => setFormData(prev => ({ ...prev, phone: e.target.value }))}
+                  onChange={(e) => {
+                    setFormData(prev => ({ ...prev, phone: e.target.value }));
+                    if (formErrors.phone) setFormErrors(prev => ({ ...prev, phone: undefined }));
+                  }}
                   placeholder="+1 234 567 890"
-                  className="pl-10"
+                  className={`pl-10 ${formErrors.phone ? 'border-red-500' : ''}`}
                 />
               </div>
+              {formErrors.phone && <p className="text-sm text-red-600 mt-1">{formErrors.phone}</p>}
             </div>
-
-
 
             {(!editingUser || showPassword) && (
               <div>
                 <Label htmlFor="password">
-                  {editingUser ? 'Nueva Contraseña (opcional)' : 'Contraseña'}
+                  {editingUser ? 'Nueva Contraseña (opcional)' : 'Contraseña *'}
                 </Label>
                 <div className="relative">
                   <Input
                     id="password"
                     type={showPassword ? "text" : "password"}
                     value={formData.password}
-                    onChange={(e) => setFormData(prev => ({ ...prev, password: e.target.value }))}
-                    placeholder="Contraseña"
+                    onChange={(e) => {
+                      setFormData(prev => ({ ...prev, password: e.target.value }));
+                      const pwd = e.target.value.trim();
+                      setPasswordErrors(pwd ? getPasswordErrors(pwd) : []);
+                      if (formErrors.password) setFormErrors(prev => ({ ...prev, password: undefined }));
+                    }}
+                    placeholder="Mín. 8 caracteres, una mayúscula y un carácter especial"
+                    className={formErrors.password || passwordErrors.length ? 'border-red-500' : ''}
                   />
                   <Button
                     type="button"
@@ -423,6 +456,15 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onBack }) => {
                     {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                   </Button>
                 </div>
+                {(formErrors.password || passwordErrors.length > 0) && (
+                  <ul className="text-sm text-red-600 mt-1 list-disc list-inside">
+                    {formErrors.password && !passwordErrors.length ? (
+                      <li>{formErrors.password}</li>
+                    ) : (
+                      passwordErrors.map((msg, i) => <li key={i}>{msg}</li>)
+                    )}
+                  </ul>
+                )}
               </div>
             )}
 
@@ -577,9 +619,6 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onBack }) => {
                   <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                     Estado
                   </th>
-                  <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Fecha Registro
-                  </th>
                   <th className="px-6 py-4 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
                     Acciones
                   </th>
@@ -619,9 +658,6 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onBack }) => {
                       <Badge className={getStatusBadgeColor(user.isActive)}>
                         {user.isActive ? 'Activo' : 'Inactivo'}
                       </Badge>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                      {new Date(user.createdAt).toLocaleDateString('es-ES')}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                       <div className="flex items-center justify-end gap-2">
@@ -773,20 +809,6 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onBack }) => {
 
 
 
-              <div className="grid grid-cols-2 gap-6 pt-2 border-t border-gray-100">
-                <div>
-                  <Label className="text-xs font-medium text-gray-500 mb-1 block">Registrado el</Label>
-                  <p className="text-sm text-gray-900">
-                    {new Date(selectedUser.createdAt).toLocaleDateString()}
-                  </p>
-                </div>
-                <div>
-                  <Label className="text-xs font-medium text-gray-500 mb-1 block">Última Actualización</Label>
-                  <p className="text-sm text-gray-900">
-                    {new Date(selectedUser.updatedAt).toLocaleDateString()}
-                  </p>
-                </div>
-              </div>
             </div>
           )}
 

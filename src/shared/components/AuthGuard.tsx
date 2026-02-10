@@ -3,11 +3,15 @@
 import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/features/auth/hooks/useAuth';
+import { removeLoggedUser } from '@/shared/utils/auth';
+import { authService } from '@/features/auth/services/auth';
 
 interface AuthGuardProps {
   children: React.ReactNode;
   requiredRole?: 'admin' | 'user';
 }
+
+const ADMIN_ONLY_MESSAGE = 'No posee cuenta de administrador.';
 
 export function AuthGuard({ children, requiredRole }: AuthGuardProps) {
   const { isAuthenticated, isLoading, user } = useAuth();
@@ -20,15 +24,17 @@ export function AuthGuard({ children, requiredRole }: AuthGuardProps) {
         return;
       }
 
-      if (requiredRole && user.role !== requiredRole) {
-        // Redirigir según el rol del usuario
-        if (user.role === 'admin') {
-          router.push('/dashboard');
-        } else if (user.role === 'user') {
-          router.push('/sales');
-        } else {
-          router.push('/login');
+      if (requiredRole === 'admin') {
+        const isAdmin = user.role === 'admin';
+        const isActive = user.isActive !== false;
+        if (!isAdmin || !isActive) {
+          removeLoggedUser();
+          authService.logout();
+          router.push(`/login?message=${encodeURIComponent(ADMIN_ONLY_MESSAGE)}`);
+          return;
         }
+      } else if (requiredRole && user.role !== requiredRole) {
+        router.push('/login');
       }
     }
   }, [isAuthenticated, isLoading, user, requiredRole, router]);
@@ -48,11 +54,14 @@ export function AuthGuard({ children, requiredRole }: AuthGuardProps) {
   }
 
   if (!isAuthenticated || !user) {
-    return null; // El useEffect redirigirá
+    return null;
   }
 
-  if (requiredRole && user.role !== requiredRole) {
-    return null; // El useEffect redirigirá
+  if (requiredRole === 'admin' && (user.role !== 'admin' || user.isActive === false)) {
+    return null;
+  }
+  if (requiredRole && requiredRole !== 'admin' && user.role !== requiredRole) {
+    return null;
   }
 
   return <>{children}</>;

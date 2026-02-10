@@ -4,13 +4,16 @@ import type { User } from '@/shared/types';
 const E = API_CONFIG.ENDPOINTS.USERS;
 
 function toUser(raw: any): User {
+    const rawRole = String(raw.rol ?? raw.Rol ?? raw.role ?? raw.Role ?? 'user').toLowerCase();
+    const role: 'admin' | 'user' = rawRole.startsWith('admin') ? 'admin' : 'user'; // cualquier otro (Vendedor, etc.) se trata como usuario normal
+
     return {
         id: String(raw.id ?? raw.Id ?? ''),
         email: String(raw.email ?? raw.Email ?? ''),
         firstName: String(raw.name ?? raw.Name ?? raw.firstName ?? raw.FirstName ?? ''),
         lastName: String(raw.lastName ?? raw.LastName ?? ''),
         phone: String(raw.phone ?? raw.Phone ?? ''),
-        role: (String(raw.rol ?? raw.Rol ?? raw.role ?? raw.Role ?? 'user').toLowerCase()) as 'admin' | 'user',
+        role,
         cityId: raw.cityId ?? raw.CityId ?? undefined,
         isActive: typeof raw.isActive === 'boolean' ? raw.isActive : (raw.IsActive ?? true),
         createdAt: raw.createdAt ? new Date(raw.createdAt) : raw.CreatedAt ? new Date(raw.CreatedAt) : new Date(),
@@ -26,7 +29,7 @@ function toPayload(data: Partial<User> & { password?: string }) {
         name: data.firstName?.trim(),
         lastName: data.lastName?.trim(),
         phone: data.phone?.trim(),
-        rol: data.role,
+        rol: data.role ? toApiRol(data.role) : undefined,
         isActive: data.isActive
     };
 
@@ -55,24 +58,45 @@ export async function fetchUserById(id: string): Promise<User | null> {
     }
 }
 
-/** Crea un usuario */
+/** Valor de rol que espera la API Identity (PascalCase: Admin, Vendedor) */
+function toApiRol(role: string | undefined): string {
+    const r = (role ?? 'user').toLowerCase();
+    return r === 'admin' ? 'Admin' : 'Vendedor';
+}
+
+/** Crea un usuario vía POST /auth/register (email, password, name, lastName, rol, phone) */
 export async function createUser(data: Omit<User, 'id' | 'createdAt' | 'updatedAt' | 'lastLoginAt'> & { password?: string }): Promise<User> {
-    const res = await apiClient.post<any>(E.CREATE, toPayload(data));
+    const registerEndpoint = API_CONFIG.ENDPOINTS.AUTH.REGISTER;
+    const payload = {
+        email: (data.email ?? '').trim(),
+        password: data.password ?? '',
+        name: (data.firstName ?? '').trim(),
+        lastName: (data.lastName ?? '').trim(),
+        rol: toApiRol(data.role),
+        phone: (data.phone ?? '').trim()
+    };
 
-    if (typeof res === 'string') {
-        const fetched = await fetchUserById(res);
-        if (fetched) return fetched;
+    const res = await apiClient.post<any>(registerEndpoint, payload);
 
-        // Fallback
-        return {
-            id: res,
-            ...data,
-            createdAt: new Date(),
-            updatedAt: new Date()
-        } as User;
+    // La API puede devolver el usuario o solo éxito; si hay id, mapear; si no, buscar en lista por email
+    if (res && (res.id || res.email)) {
+        return toUser(res);
     }
+    const list = await fetchUsers();
+    const created = list.find(u => u.email.toLowerCase() === (data.email ?? '').toLowerCase());
+    if (created) return created;
 
-    return toUser(res);
+    return {
+        id: (res?.id ?? res?.userId ?? '').toString(),
+        email: data.email ?? '',
+        firstName: data.firstName ?? '',
+        lastName: data.lastName ?? '',
+        phone: data.phone ?? '',
+        role: (data.role ?? 'user') as 'admin' | 'user',
+        isActive: true,
+        createdAt: new Date(),
+        updatedAt: new Date()
+    } as User;
 }
 
 /** Actualiza un usuario */

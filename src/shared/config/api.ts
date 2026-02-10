@@ -56,6 +56,20 @@ export const API_CONFIG = {
       UPDATE: '/stores/stores/{id}',
       DEACTIVATE: '/stores/stores/deactivate/{id}',
       GET_BY_CITY: '/stores/stores/by-city/{cityId}'
+    },
+    PRODUCTS: {
+      LIST: '/products/products',
+      GET_BY_ID: '/products/products/{id}',
+      GET_BY_CATEGORY: '/products/products/category/{category}',
+      CREATE: '/products/products',
+      UPDATE: '/products/products/{id}',
+      DELETE: '/products/products/{id}'
+    },
+    HISTPRICES: {
+      CREATE: '/histprices/histprices',
+      GET_BY_PRODUCT: '/histprices/histprices/product/{productId}',
+      GET_LATEST: '/histprices/histprices/latest/{productId}',
+      GET_BY_DATE: '/histprices/histprices/by-date/{productId}/{date}'
     }
   },
 

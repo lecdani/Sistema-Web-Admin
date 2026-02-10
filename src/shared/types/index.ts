@@ -200,6 +200,7 @@ export interface DashboardStats {
   activeProducts: number;
   totalPlanograms: number;
   activePlanogram: number;
+  totalCities: number;
   systemHealth: 'healthy' | 'warning' | 'critical';
 }
 

@@ -1,6 +1,7 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { Button } from '@/shared/components/base/Button';
 import { Input } from '@/shared/components/base/Input';
 import { Label } from '@/shared/components/base/Label';
@@ -14,10 +15,18 @@ interface LoginFormProps {
 }
 
 export function LoginForm({ onForgotPassword }: LoginFormProps) {
+  const searchParams = useSearchParams();
   const { login, loading, error, clearError } = useAuthLogin();
   const [formData, setFormData] = useState<LoginCredentials>({ email: '', password: '' });
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [showPassword, setShowPassword] = useState(false);
+
+  useEffect(() => {
+    const message = searchParams.get('message');
+    if (message) {
+      setErrors(prev => ({ ...prev, submit: decodeURIComponent(message) }));
+    }
+  }, [searchParams]);
 
   const validateForm = (): boolean => {
     const newErrors: Record<string, string> = {};

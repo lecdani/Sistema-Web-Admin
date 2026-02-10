@@ -8,7 +8,8 @@ export interface LoginResponse {
   email: string;
   name: string;
   lastName: string;
-  role?: 'admin' | 'user'; // Si la API lo devuelve
+  role?: string; // Admin, Vendedor, etc.
+  isActive?: boolean;
   id?: string;
 }
 

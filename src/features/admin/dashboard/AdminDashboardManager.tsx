@@ -49,6 +49,7 @@ export const AdminDashboardManager: React.FC = () => {
           onNavigateToCities={() => handleNavigate('cities')}
           onNavigateToReports={() => handleNavigate('reports')}
           onNavigateToUnifiedFlow={() => handleNavigate('unified-flow')}
+          isVisible={currentPage === 'dashboard'}
         />;
     }
   };

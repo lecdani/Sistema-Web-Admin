@@ -23,6 +23,11 @@ import { useLanguage } from '@/shared/hooks/useLanguage';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { DashboardStats } from '@/shared/types';
 import { getFromLocalStorage } from '@/shared/services/database';
+import { citiesApi } from '@/shared/services/cities-api';
+import { usersApi } from '@/shared/services/users-api';
+import { storesApi } from '@/shared/services/stores-api';
+import { productsApi } from '@/shared/services/products-api';
+import { useRouter } from 'next/navigation';
 
 interface DashboardModule {
   id: string;
@@ -42,6 +47,8 @@ interface DashboardProps {
   onNavigateToCities?: () => void;
   onNavigateToReports?: () => void;
   onNavigateToUnifiedFlow?: () => void;
+  /** Si true, se refrescan los datos (útil al volver al dashboard) */
+  isVisible?: boolean;
 }
 
 export const Dashboard: React.FC<DashboardProps> = ({ 
@@ -51,8 +58,10 @@ export const Dashboard: React.FC<DashboardProps> = ({
   onNavigateToPlanograms, 
   onNavigateToCities, 
   onNavigateToReports,
-  onNavigateToUnifiedFlow
+  onNavigateToUnifiedFlow,
+  isVisible = true
 }) => {
+  const router = useRouter();
   const { translate } = useLanguage();
   const { user } = useAuth();
   const [stats, setStats] = useState<DashboardStats>({
@@ -65,32 +74,68 @@ export const Dashboard: React.FC<DashboardProps> = ({
     activeProducts: 0,
     totalPlanograms: 0,
     activePlanogram: 0,
+    totalCities: 0,
     systemHealth: 'healthy'
   });
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    loadDashboardData();
-  }, []);
+    if (isVisible) loadDashboardData();
+  }, [isVisible]);
 
   const loadDashboardData = async () => {
     try {
-      const users = getFromLocalStorage('app-users') || [];
+      let totalCities = 0;
+      let totalUsers = 0;
+      let activeUsers = 0;
+      let totalStores = 0;
+      let activeStores = 0;
+
+      try {
+        const citiesList = await citiesApi.fetchAll();
+        totalCities = citiesList.length;
+      } catch {
+        // Fallback: no API de ciudades o sin auth
+      }
+
+      try {
+        const usersList = await usersApi.fetchAll();
+        totalUsers = usersList.length;
+        activeUsers = usersList.filter((u: any) => u.isActive === true).length;
+      } catch {
+        const users = getFromLocalStorage('app-users') || [];
+        totalUsers = users.length;
+        activeUsers = users.filter((u: any) => u.isActive === true).length;
+      }
+
+      try {
+        const storesList = await storesApi.fetchAll();
+        totalStores = storesList.length;
+        activeStores = storesList.filter((s: any) => s.isActive === true).length;
+      } catch {
+        const stores = getFromLocalStorage('app-stores') || [];
+        totalStores = stores.length;
+        activeStores = stores.filter((s: any) => s.isActive === true).length;
+      }
+
+      let totalProducts = 0;
+      let activeProducts = 0;
+      try {
+        const productsList = await productsApi.fetchAll();
+        totalProducts = productsList.length;
+        activeProducts = productsList.filter((p: any) => p.isActive === true).length;
+      } catch {
+        const products = getFromLocalStorage('app-products') || [];
+        totalProducts = products.length;
+        activeProducts = products.filter((p: any) => p.isActive === true).length;
+      }
+
       const sessions = getFromLocalStorage('app-sessions') || [];
-      const stores = getFromLocalStorage('app-stores') || [];
-      const products = getFromLocalStorage('app-products') || [];
-      const planograms = getFromLocalStorage('app-planograms') || [];
-      
-      const totalUsers = users.length;
-      const activeUsers = users.filter((user: any) => user.isActive === true).length;
       const totalSessions = sessions.length;
-      const totalStores = stores.length;
-      const activeStores = stores.filter((store: any) => store.isActive === true).length;
-      const totalProducts = products.length;
-      const activeProducts = products.filter((product: any) => product.isActive === true).length;
+      const planograms = getFromLocalStorage('app-planograms') || [];
       const totalPlanograms = planograms.length;
-      const activePlanogram = planograms.filter((planogram: any) => planogram.isActive === true).length;
-      
+      const activePlanogram = planograms.filter((p: any) => p.isActive === true).length;
+
       setStats({
         totalUsers,
         activeUsers,
@@ -101,6 +146,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
         activeProducts,
         totalPlanograms,
         activePlanogram,
+        totalCities,
         systemHealth: totalUsers > 10 ? 'healthy' : totalUsers > 5 ? 'warning' : 'critical'
       });
     } catch (error) {
@@ -115,6 +161,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
         activeProducts: 0,
         totalPlanograms: 0,
         activePlanogram: 0,
+        totalCities: 0,
         systemHealth: 'healthy'
       });
     } finally {
@@ -123,6 +170,14 @@ export const Dashboard: React.FC<DashboardProps> = ({
   };
 
   const quickStats = [
+    {
+      title: 'Ciudades',
+      value: stats.totalCities.toString(),
+      change: 0,
+      icon: MapPin,
+      color: 'text-indigo-600',
+      bgColor: 'bg-indigo-50'
+    },
     {
       title: 'Tiendas Activas',
       value: stats.activeStores.toString(),
@@ -165,7 +220,10 @@ export const Dashboard: React.FC<DashboardProps> = ({
       icon: MapPin,
       color: 'text-indigo-600',
       bgColor: 'bg-indigo-50 hover:bg-indigo-100',
-      onClick: () => onNavigateToCities?.()
+      onClick: () => {
+        if (onNavigateToCities) onNavigateToCities();
+        else router.push('/cities');
+      }
     },
     {
       id: 'stores',
@@ -174,7 +232,10 @@ export const Dashboard: React.FC<DashboardProps> = ({
       icon: StoreIcon,
       color: 'text-blue-600',
       bgColor: 'bg-blue-50 hover:bg-blue-100',
-      onClick: () => onNavigateToStores?.()
+      onClick: () => {
+        if (onNavigateToStores) onNavigateToStores();
+        else router.push('/stores');
+      }
     },
     {
       id: 'users',
@@ -183,7 +244,10 @@ export const Dashboard: React.FC<DashboardProps> = ({
       icon: Users,
       color: 'text-green-600',
       bgColor: 'bg-green-50 hover:bg-green-100',
-      onClick: () => onNavigateToUsers?.()
+      onClick: () => {
+        if (onNavigateToUsers) onNavigateToUsers();
+        else router.push('/users');
+      }
     },
     {
       id: 'products',
@@ -192,7 +256,10 @@ export const Dashboard: React.FC<DashboardProps> = ({
       icon: Package,
       color: 'text-emerald-600',
       bgColor: 'bg-emerald-50 hover:bg-emerald-100',
-      onClick: () => onNavigateToProducts?.()
+      onClick: () => {
+        if (onNavigateToProducts) onNavigateToProducts();
+        else router.push('/products');
+      }
     },
     {
       id: 'planograms',
@@ -201,7 +268,10 @@ export const Dashboard: React.FC<DashboardProps> = ({
       icon: Layout,
       color: 'text-cyan-600',
       bgColor: 'bg-cyan-50 hover:bg-cyan-100',
-      onClick: () => onNavigateToPlanograms?.()
+      onClick: () => {
+        if (onNavigateToPlanograms) onNavigateToPlanograms();
+        else router.push('/planograms');
+      }
     },
     {
       id: 'sales-flow',
@@ -210,7 +280,10 @@ export const Dashboard: React.FC<DashboardProps> = ({
       icon: Workflow,
       color: 'text-purple-600',
       bgColor: 'bg-purple-50 hover:bg-purple-100',
-      onClick: () => onNavigateToUnifiedFlow?.()
+      onClick: () => {
+        if (onNavigateToUnifiedFlow) onNavigateToUnifiedFlow();
+        else router.push('/unified-flow');
+      }
     },
     {
       id: 'reports',
@@ -219,7 +292,10 @@ export const Dashboard: React.FC<DashboardProps> = ({
       icon: BarChart3,
       color: 'text-red-600',
       bgColor: 'bg-red-50 hover:bg-red-100',
-      onClick: () => onNavigateToReports?.()
+      onClick: () => {
+        if (onNavigateToReports) onNavigateToReports();
+        else router.push('/reports');
+      }
     }
   ];
 

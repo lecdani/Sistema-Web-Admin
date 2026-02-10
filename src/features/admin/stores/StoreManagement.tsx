@@ -77,6 +77,7 @@ export const StoreManagement: React.FC<StoreManagementProps> = ({ onBack }) => {
     address: '',
     cityId: '',
   });
+  const [formErrors, setFormErrors] = useState<Partial<Record<keyof StoreFormData, string>>>({});
 
   useEffect(() => {
     loadStores();
@@ -145,41 +146,40 @@ export const StoreManagement: React.FC<StoreManagementProps> = ({ onBack }) => {
   };
 
   const resetForm = () => {
-    setFormData({
-      name: '',
-      address: '',
-      cityId: '',
-    });
+    setFormData({ name: '', address: '', cityId: '' });
+    setFormErrors({});
     setEditingStore(null);
   };
 
-  const validateForm = (): boolean => {
-    if (!formData.name.trim()) {
-      toast.error('El nombre de la tienda es requerido');
-      return false;
-    }
-    if (!formData.address.trim()) {
-      toast.error('La dirección es requerida');
-      return false;
-    }
-    if (!formData.cityId.trim()) {
-      toast.error('La ciudad es requerida');
-      return false;
-    }
-    return true;
+  const validateStoreForm = (): boolean => {
+    const err: Partial<Record<keyof StoreFormData, string>> = {};
+    if (!formData.name.trim()) err.name = 'El nombre de la tienda es obligatorio';
+    if (!formData.address.trim()) err.address = 'La dirección es obligatoria';
+    if (!formData.cityId.trim()) err.cityId = 'Debe seleccionar una ciudad';
+
+    const nameNorm = formData.name.trim().toLowerCase();
+    const duplicate = stores.find(
+      s =>
+        s.name.trim().toLowerCase() === nameNorm &&
+        s.cityId === formData.cityId &&
+        (!editingStore || s.id !== editingStore.id)
+    );
+    if (duplicate) err.name = 'Ya existe una tienda con ese nombre en esta ciudad';
+
+    setFormErrors(err);
+    return Object.keys(err).length === 0;
   };
 
   const handleSaveStore = async () => {
-    if (!validateForm()) return;
+    if (!validateStoreForm()) return;
+
+    const cityExists = cities.find(c => c.id === formData.cityId);
+    if (!cityExists) {
+      setFormErrors(prev => ({ ...prev, cityId: 'La ciudad seleccionada no es válida' }));
+      return;
+    }
 
     try {
-      // Validar que la ciudad sigue existiendo
-      const cityExists = cities.find(c => c.id === formData.cityId);
-      if (!cityExists) {
-        toast.error('La ciudad seleccionada no es válida');
-        return;
-      }
-
       const storeData: any = {
         name: formData.name.trim(),
         address: formData.address.trim(),
@@ -194,12 +194,9 @@ export const StoreManagement: React.FC<StoreManagementProps> = ({ onBack }) => {
         toast.success('Tienda creada correctamente');
       }
 
-      loadStores(); // Recargar lista
-
-      // Limpiar formulario y cerrar diálogo
+      loadStores();
       resetForm();
       setShowAddDialog(false);
-
     } catch (error) {
       console.error('Error guardando tienda:', error);
       toast.error('Error al guardar la tienda');
@@ -212,6 +209,7 @@ export const StoreManagement: React.FC<StoreManagementProps> = ({ onBack }) => {
       address: store.address,
       cityId: store.cityId
     });
+    setFormErrors({});
     setEditingStore(store);
     setShowAddDialog(true);
   };
@@ -299,7 +297,6 @@ export const StoreManagement: React.FC<StoreManagementProps> = ({ onBack }) => {
             </DialogHeader>
 
             <div className="space-y-5 px-6 py-4">
-              {/* Mensaje de aviso si no hay ciudades disponibles */}
               {getUniqueCities().length === 0 && !editingStore && (
                 <div className="bg-yellow-50 border border-yellow-200 rounded-md p-3">
                   <div className="flex items-center gap-2">
@@ -319,10 +316,14 @@ export const StoreManagement: React.FC<StoreManagementProps> = ({ onBack }) => {
                 <Input
                   id="name"
                   value={formData.name}
-                  onChange={(e) => setFormData(prev => ({ ...prev, name: e.target.value }))}
+                  onChange={(e) => {
+                    setFormData(prev => ({ ...prev, name: e.target.value }));
+                    if (formErrors.name) setFormErrors(prev => ({ ...prev, name: undefined }));
+                  }}
                   placeholder="Ej: Tienda Centro"
-                  className="h-10"
+                  className={`h-10 ${formErrors.name ? 'border-red-500' : ''}`}
                 />
+                {formErrors.name && <p className="text-sm text-red-600">{formErrors.name}</p>}
               </div>
 
               <div className="space-y-2">
@@ -330,20 +331,27 @@ export const StoreManagement: React.FC<StoreManagementProps> = ({ onBack }) => {
                 <Textarea
                   id="address"
                   value={formData.address}
-                  onChange={(e) => setFormData(prev => ({ ...prev, address: e.target.value }))}
+                  onChange={(e) => {
+                    setFormData(prev => ({ ...prev, address: e.target.value }));
+                    if (formErrors.address) setFormErrors(prev => ({ ...prev, address: undefined }));
+                  }}
                   placeholder="Ej: Av. Principal 123"
                   rows={3}
-                  className="resize-none min-h-[80px]"
+                  className={`resize-none min-h-[80px] ${formErrors.address ? 'border-red-500' : ''}`}
                 />
+                {formErrors.address && <p className="text-sm text-red-600">{formErrors.address}</p>}
               </div>
 
               <div className="space-y-2">
                 <Label htmlFor="cityId">Ciudad *</Label>
                 <Select
                   value={formData.cityId}
-                  onValueChange={(value) => setFormData(prev => ({ ...prev, cityId: value }))}
+                  onValueChange={(value) => {
+                    setFormData(prev => ({ ...prev, cityId: value }));
+                    if (formErrors.cityId) setFormErrors(prev => ({ ...prev, cityId: undefined }));
+                  }}
                 >
-                  <SelectTrigger className="h-10">
+                  <SelectTrigger className={`h-10 ${formErrors.cityId ? 'border-red-500' : ''}`}>
                     <SelectValue placeholder="Seleccionar ciudad" />
                   </SelectTrigger>
                   <SelectContent>
@@ -360,6 +368,7 @@ export const StoreManagement: React.FC<StoreManagementProps> = ({ onBack }) => {
                     )}
                   </SelectContent>
                 </Select>
+                {formErrors.cityId && <p className="text-sm text-red-600">{formErrors.cityId}</p>}
               </div>
 
             </div>
@@ -497,9 +506,6 @@ export const StoreManagement: React.FC<StoreManagementProps> = ({ onBack }) => {
                   <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                     Estado
                   </th>
-                  <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Fecha Registro
-                  </th>
                   <th className="px-6 py-4 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
                     Acciones
                   </th>
@@ -530,9 +536,6 @@ export const StoreManagement: React.FC<StoreManagementProps> = ({ onBack }) => {
                       <Badge className={getStatusBadgeColor(store.isActive)}>
                         {store.isActive ? 'Activa' : 'Inactiva'}
                       </Badge>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                      {new Date(store.createdAt).toLocaleDateString('es-ES')}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                       <div className="flex items-center justify-end gap-2">
@@ -674,21 +677,6 @@ export const StoreManagement: React.FC<StoreManagementProps> = ({ onBack }) => {
                   Dirección
                 </Label>
                 <p className="text-sm text-gray-700 whitespace-pre-wrap">{selectedStore.address}</p>
-              </div>
-
-              <div className="grid grid-cols-2 gap-6 pt-2">
-                <div>
-                  <Label className="text-xs font-medium text-gray-500 mb-1 block">Registrada el</Label>
-                  <p className="text-sm text-gray-900">
-                    {new Date(selectedStore.createdAt).toLocaleDateString()}
-                  </p>
-                </div>
-                <div>
-                  <Label className="text-xs font-medium text-gray-500 mb-1 block">Actualizada el</Label>
-                  <p className="text-sm text-gray-900">
-                    {new Date(selectedStore.updatedAt).toLocaleDateString()}
-                  </p>
-                </div>
               </div>
             </div>
           )}

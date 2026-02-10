@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Package,
   Plus,
@@ -19,8 +19,7 @@ import {
   DollarSign,
   TrendingUp,
   History,
-  Calendar,
-  Clock
+  Calendar
 } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/shared/components/base/Card';
 import { Button } from '@/shared/components/base/Button';
@@ -49,12 +48,10 @@ import {
 } from '@/shared/components/base/AlertDialog';
 import { Label } from '@/shared/components/base/Label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/shared/components/base/Select';
-import { Textarea } from '@/shared/components/base/Textarea';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/shared/components/base/Tooltip';
-import { Product, PriceHistory } from '@/shared/types';
-import { useAuth } from '@/features/auth/hooks/useAuth';
-import { useData } from '@/shared/hooks/useData';
-import { getFromLocalStorage, setToLocalStorage } from '@/shared/services/database';
+import { Product } from '@/shared/types';
+import { productsApi } from '@/shared/services/products-api';
+import { histpricesApi, type HistPrice } from '@/shared/services/histprices-api';
 import { toast } from '@/shared/components/base/Toast';
 
 interface ProductManagementProps {
@@ -65,34 +62,17 @@ interface ProductFormData {
   sku: string;
   name: string;
   category: string;
-  description: string;
-  currentPrice: number;
   isActive: boolean;
+  initialPrice?: number;
 }
 
 interface PriceUpdateData {
   price: number;
-  reason: string;
 }
 
-const PRODUCT_CATEGORIES = [
-  'Electrónicos',
-  'Ropa',
-  'Calzado',
-  'Libros',
-  'Hogar',
-  'Deportes',
-  'Belleza',
-  'Juguetes',
-  'Automóviles',
-  'Otros'
-];
-
 export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) => {
-  const { user } = useAuth();
   const [products, setProducts] = useState<Product[]>([]);
   const [filteredProducts, setFilteredProducts] = useState<Product[]>([]);
-  const [priceHistories, setPriceHistories] = useState<PriceHistory[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [categoryFilter, setCategoryFilter] = useState<string>('all');
@@ -104,69 +84,61 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
   const [showDetailDialog, setShowDetailDialog] = useState(false);
   const [showPriceHistoryDialog, setShowPriceHistoryDialog] = useState(false);
   const [showUpdatePriceDialog, setShowUpdatePriceDialog] = useState(false);
-
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
-  
+  const [priceHistoryList, setPriceHistoryList] = useState<HistPrice[]>([]);
+  const [queryDate, setQueryDate] = useState<string>('');
+  const [queryResult, setQueryResult] = useState<HistPrice | null>(null);
+
   const [formData, setFormData] = useState<ProductFormData>({
     sku: '',
     name: '',
     category: '',
-    description: '',
-    currentPrice: 0,
     isActive: true
   });
 
   const [priceUpdateData, setPriceUpdateData] = useState<PriceUpdateData>({
-    price: 0,
-    reason: ''
+    price: 0
   });
-
-  const [queryDate, setQueryDate] = useState<string>('');
-  const [queryResult, setQueryResult] = useState<{
-    price: number;
-    effectiveDate: Date;
-    reason?: string;
-  } | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [formErrors, setFormErrors] = useState<Partial<Record<'sku' | 'name' | 'category' | 'initialPrice', string>>>({});
 
   useEffect(() => {
     loadProducts();
-    loadPriceHistories();
   }, []);
 
   useEffect(() => {
     applyFilters();
   }, [products, searchTerm, statusFilter, categoryFilter]);
 
-  const migrateProductsData = (products: any[]): Product[] => {
-    return products.map(product => ({
-      ...product,
-      // Agregar currentPrice si no existe, con valor por defecto de 0
-      currentPrice: product.currentPrice !== undefined ? product.currentPrice : 0
-    }));
-  };
-
   const loadProducts = async () => {
     try {
-      const rawProductData = getFromLocalStorage('app-products') || [];
-      const migratedProducts = migrateProductsData(rawProductData);
-      
-      // Guardar los productos migrados de vuelta al localStorage
-      setToLocalStorage('app-products', migratedProducts);
-      setProducts(migratedProducts);
-    } catch (error) {
+      setIsLoading(true);
+      setLoadError(null);
+      const list = await productsApi.fetchAll();
+      const withPrices = await Promise.all(
+        list.map(async (p) => {
+          try {
+            const latest = await histpricesApi.getLatest(p.id);
+            return { ...p, currentPrice: latest?.price ?? 0 };
+          } catch {
+            return { ...p, currentPrice: 0 };
+          }
+        })
+      );
+      setProducts(withPrices);
+    } catch (error: any) {
       console.error('Error cargando productos:', error);
-      toast.error('Error al cargar los productos');
+      const msg = error?.data?.message ?? error?.message ?? '';
+      const isNotImplemented = msg.includes('NotImplemented') || error?.status === 500;
+      setLoadError(
+        isNotImplemented
+          ? 'El servicio de productos no está disponible en este momento.'
+          : msg || 'Error al cargar los productos.'
+      );
+      toast.error('No se pudieron cargar los productos');
+      setProducts([]);
     } finally {
       setIsLoading(false);
-    }
-  };
-
-  const loadPriceHistories = async () => {
-    try {
-      const historyData = getFromLocalStorage('app-price-histories') || [];
-      setPriceHistories(historyData);
-    } catch (error) {
-      console.error('Error cargando historial de precios:', error);
     }
   };
 
@@ -204,238 +176,109 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
       sku: '',
       name: '',
       category: '',
-      description: '',
-      currentPrice: 0,
       isActive: true
     });
+    setFormErrors({});
     setEditingProduct(null);
   };
 
   const resetPriceForm = () => {
-    setPriceUpdateData({
-      price: 0,
-      reason: ''
-    });
-  };
-
-  const generateProductId = (): string => {
-    return Date.now().toString() + Math.random().toString(36).substr(2, 9);
+    setPriceUpdateData({ price: 0 });
   };
 
   const validateForm = (): boolean => {
-    if (!formData.sku.trim()) {
-      toast.error('El SKU es requerido');
-      return false;
-    }
-    if (!formData.name.trim()) {
-      toast.error('El nombre del producto es requerido');
-      return false;
-    }
-    if (!formData.category.trim()) {
-      toast.error('La categoría es requerida');
-      return false;
-    }
-    if (formData.currentPrice <= 0) {
-      toast.error('El precio debe ser mayor a 0');
-      return false;
-    }
-
-    // Verificar SKU único
+    const err: Partial<Record<'sku' | 'name' | 'category' | 'initialPrice', string>> = {};
+    if (!formData.sku.trim()) err.sku = 'El SKU es obligatorio';
+    if (!formData.name.trim()) err.name = 'El nombre es obligatorio';
+    if (!formData.category.trim()) err.category = 'El código de categoría es obligatorio';
     if (!editingProduct) {
-      const existingProduct = products.find(product => 
-        product.sku.toLowerCase() === formData.sku.toLowerCase().trim()
-      );
-      if (existingProduct) {
-        toast.error('Ya existe un producto con ese SKU');
-        return false;
-      }
-    } else {
-      // Si estamos editando, verificar que el SKU no esté siendo usado por otro producto
-      const existingProduct = products.find(product => 
-        product.id !== editingProduct.id && 
-        product.sku.toLowerCase() === formData.sku.toLowerCase().trim()
-      );
-      if (existingProduct) {
-        toast.error('Ya existe otro producto con ese SKU');
-        return false;
-      }
+      const price = formData.initialPrice ?? 0;
+      if (price <= 0) err.initialPrice = 'El precio inicial es obligatorio y debe ser mayor a 0';
     }
-
-    return true;
-  };
-
-  const addPriceHistoryEntry = async (productId: string, price: number, reason: string) => {
-    try {
-      const currentHistories = [...priceHistories];
-      const newEntry: PriceHistory = {
-        id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
-        productId,
-        price,
-        effectiveDate: new Date(),
-        reason,
-        createdBy: user?.id || 'system',
-        createdAt: new Date()
-      };
-      
-      currentHistories.push(newEntry);
-      setToLocalStorage('app-price-histories', currentHistories);
-      setPriceHistories(currentHistories);
-    } catch (error) {
-      console.error('Error guardando historial de precios:', error);
-    }
+    const existing = products.find(
+      p => p.sku.trim().toLowerCase() === formData.sku.trim().toLowerCase() && (!editingProduct || p.id !== editingProduct.id)
+    );
+    if (existing) err.sku = 'Ya existe un producto con ese SKU';
+    setFormErrors(err);
+    return Object.keys(err).length === 0;
   };
 
   const handleSaveProduct = async () => {
     if (!validateForm()) return;
-
     try {
-      const currentProducts = [...products];
-      const now = new Date();
-
+      const payload = {
+        name: formData.name.trim(),
+        category: formData.category.trim(),
+        sku: formData.sku.trim(),
+        isActive: editingProduct ? editingProduct.isActive : true
+      };
       if (editingProduct) {
-        // Editar producto existente
-        const productIndex = currentProducts.findIndex(p => p.id === editingProduct.id);
-        if (productIndex !== -1) {
-          const priceChanged = editingProduct.currentPrice !== formData.currentPrice;
-          
-          currentProducts[productIndex] = {
-            ...editingProduct,
-            sku: formData.sku.trim(),
-            name: formData.name.trim(),
-            category: formData.category.trim(),
-            description: formData.description.trim(),
-            currentPrice: formData.currentPrice,
-            isActive: formData.isActive,
-            updatedAt: now
-          };
-
-          // Si el precio cambió, agregar entrada al historial
-          if (priceChanged) {
-            await addPriceHistoryEntry(editingProduct.id, formData.currentPrice, 'Actualización de producto');
-          }
-        }
+        await productsApi.update(editingProduct.id, payload);
         toast.success('Producto actualizado correctamente');
       } else {
-        // Crear nuevo producto
-        const newProduct: Product = {
-          id: generateProductId(),
-          sku: formData.sku.trim(),
-          name: formData.name.trim(),
-          category: formData.category.trim(),
-          description: formData.description.trim(),
-          currentPrice: formData.currentPrice,
-          isActive: formData.isActive,
-          createdAt: now,
-          updatedAt: now
-        };
-        currentProducts.push(newProduct);
-        
-        // Agregar entrada inicial al historial de precios
-        await addPriceHistoryEntry(newProduct.id, formData.currentPrice, 'Precio inicial');
-        
+        const created = await productsApi.create(payload);
+        const initialPrice = Number(formData.initialPrice) || 0;
+        if (initialPrice > 0) {
+          const now = new Date();
+          await histpricesApi.create({
+            productId: created.id,
+            price: initialPrice,
+            startDate: now,
+            endDate: now
+          });
+        }
         toast.success('Producto creado correctamente');
       }
-
-      // Guardar productos actualizados
-      setToLocalStorage('app-products', currentProducts);
-      setProducts(currentProducts);
-
-      // Limpiar formulario y cerrar diálogo
       resetForm();
       setShowAddDialog(false);
-      
-    } catch (error) {
-      console.error('Error guardando producto:', error);
-      toast.error('Error al guardar el producto');
+      await loadProducts();
+    } catch (error: any) {
+      const msg = error?.data?.message ?? error?.message ?? 'Error al guardar el producto';
+      toast.error(msg);
     }
   };
 
   const handleUpdatePrice = async () => {
     if (!selectedProduct) return;
-    
     if (priceUpdateData.price <= 0) {
       toast.error('El precio debe ser mayor a 0');
       return;
     }
-    
-    if (!priceUpdateData.reason.trim()) {
-      toast.error('Debe especificar un motivo para el cambio de precio');
-      return;
-    }
-
     try {
-      const currentProducts = [...products];
-      const productIndex = currentProducts.findIndex(p => p.id === selectedProduct.id);
-      
-      if (productIndex !== -1) {
-        currentProducts[productIndex] = {
-          ...selectedProduct,
-          currentPrice: priceUpdateData.price,
-          updatedAt: new Date()
-        };
-
-        // Agregar entrada al historial
-        await addPriceHistoryEntry(selectedProduct.id, priceUpdateData.price, priceUpdateData.reason);
-
-        // Guardar productos actualizados
-        setToLocalStorage('app-products', currentProducts);
-        setProducts(currentProducts);
-
-        toast.success('Precio actualizado correctamente');
-        resetPriceForm();
-        setShowUpdatePriceDialog(false);
-        setSelectedProduct(null);
-      }
-    } catch (error) {
-      console.error('Error actualizando precio:', error);
-      toast.error('Error al actualizar el precio');
+      const now = new Date();
+      await histpricesApi.create({
+        productId: selectedProduct.id,
+        price: priceUpdateData.price,
+        startDate: now,
+        endDate: now
+      });
+      toast.success('Precio actualizado correctamente');
+      resetPriceForm();
+      setShowUpdatePriceDialog(false);
+      setSelectedProduct(null);
+      await loadProducts();
+    } catch (error: any) {
+      const msg = error?.data?.message ?? error?.message ?? 'Error al actualizar el precio';
+      toast.error(msg);
     }
   };
 
-  const getProductPriceHistory = (productId: string): PriceHistory[] => {
-    return priceHistories
-      .filter(history => history.productId === productId)
-      .sort((a, b) => new Date(b.effectiveDate).getTime() - new Date(a.effectiveDate).getTime());
-  };
-
-  const getPriceAtDate = (productId: string, queryDate: string): {
-    price: number;
-    effectiveDate: Date;
-    reason?: string;
-  } | null => {
-    if (!queryDate || !productId) return null;
-    
-    const productHistory = getProductPriceHistory(productId);
-    if (productHistory.length === 0) return null;
-    
-    // Convertir la fecha de consulta a Date y establecer al final del día
-    const targetDate = new Date(queryDate + 'T23:59:59.999');
-    
-    // Buscar la entrada de precio más reciente que sea efectiva en la fecha consultada
-    // El historial ya está ordenado por fecha descendente
-    for (const history of productHistory) {
-      const effectiveDate = new Date(history.effectiveDate);
-      if (effectiveDate <= targetDate) {
-        return {
-          price: history.price,
-          effectiveDate: history.effectiveDate,
-          reason: history.reason
-        };
-      }
+  const loadPriceHistoryForDialog = async (productId: string) => {
+    try {
+      const list = await histpricesApi.getByProduct(productId);
+      setPriceHistoryList(list.sort((a, b) => new Date(b.startDate).getTime() - new Date(a.startDate).getTime()));
+    } catch {
+      setPriceHistoryList([]);
     }
-
-    return null;
   };
 
-  // Consulta automática cuando cambia la fecha
   useEffect(() => {
     if (queryDate && selectedProduct) {
-      const result = getPriceAtDate(selectedProduct.id, queryDate);
-      setQueryResult(result);
+      histpricesApi.getByDate(selectedProduct.id, queryDate).then(setQueryResult).catch(() => setQueryResult(null));
     } else {
       setQueryResult(null);
     }
-  }, [queryDate, selectedProduct]);
+  }, [queryDate, selectedProduct?.id]);
 
   const resetQueryForm = () => {
     setQueryDate('');
@@ -447,47 +290,21 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
       sku: product.sku,
       name: product.name,
       category: product.category,
-      description: product.description || '',
-      currentPrice: product.currentPrice || 0,
       isActive: product.isActive
     });
+    setFormErrors({});
     setEditingProduct(product);
     setShowAddDialog(true);
   };
 
   const handleToggleStatus = async (product: Product) => {
     try {
-      // Verificar si el producto está asignado a algún planograma activo
-      const distributions = getFromLocalStorage('app-distributions') || [];
-      const isInActivePlanogram = distributions.some((dist: any) => 
-        dist.productId === product.id
-      );
-
-      if (product.isActive && isInActivePlanogram) {
-        toast.error('No se puede desactivar un producto que está asignado a un planograma activo');
-        return;
-      }
-
-      const currentProducts = [...products];
-      const productIndex = currentProducts.findIndex(p => p.id === product.id);
-      
-      if (productIndex !== -1) {
-        currentProducts[productIndex] = {
-          ...product,
-          isActive: !product.isActive,
-          updatedAt: new Date()
-        };
-
-        setToLocalStorage('app-products', currentProducts);
-        setProducts(currentProducts);
-
-        toast.success(
-          `Producto ${!product.isActive ? 'activado' : 'desactivado'} correctamente`
-        );
-      }
-    } catch (error) {
-      console.error('Error cambiando estado del producto:', error);
-      toast.error('Error al cambiar el estado del producto');
+      await productsApi.delete(product.id);
+      toast.success(`Producto ${!product.isActive ? 'activado' : 'desactivado'} correctamente`);
+      await loadProducts();
+    } catch (error: any) {
+      const msg = error?.data?.message ?? error?.message ?? 'Error al cambiar el estado';
+      toast.error(msg);
     }
   };
 
@@ -562,67 +379,61 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
                 <Input
                   id="sku"
                   value={formData.sku}
-                  onChange={(e) => setFormData({...formData, sku: e.target.value})}
-                  placeholder="Ej: PROD-001"
+                  onChange={(e) => {
+                    setFormData({ ...formData, sku: e.target.value });
+                    if (formErrors.sku) setFormErrors(prev => ({ ...prev, sku: undefined }));
+                  }}
+                  className={formErrors.sku ? 'border-red-500' : ''}
                 />
+                {formErrors.sku && <p className="text-sm text-red-600">{formErrors.sku}</p>}
               </div>
-              
               <div className="space-y-2">
                 <Label htmlFor="name">Nombre *</Label>
                 <Input
                   id="name"
                   value={formData.name}
-                  onChange={(e) => setFormData({...formData, name: e.target.value})}
-                  placeholder="Nombre del producto"
+                  onChange={(e) => {
+                    setFormData({ ...formData, name: e.target.value });
+                    if (formErrors.name) setFormErrors(prev => ({ ...prev, name: undefined }));
+                  }}
+                  className={formErrors.name ? 'border-red-500' : ''}
                 />
+                {formErrors.name && <p className="text-sm text-red-600">{formErrors.name}</p>}
               </div>
-              
               <div className="space-y-2">
-                <Label htmlFor="category">Categoría *</Label>
-                <Select 
-                  value={formData.category} 
-                  onValueChange={(value) => setFormData({...formData, category: value})}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Selecciona una categoría" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {PRODUCT_CATEGORIES.map((category) => (
-                      <SelectItem key={category} value={category}>
-                        {category}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <Label htmlFor="category">Código de categoría *</Label>
+                <Input
+                  id="category"
+                  value={formData.category}
+                  onChange={(e) => {
+                    setFormData({ ...formData, category: e.target.value });
+                    if (formErrors.category) setFormErrors(prev => ({ ...prev, category: undefined }));
+                  }}
+                  className={formErrors.category ? 'border-red-500' : ''}
+                />
+                {formErrors.category && <p className="text-sm text-red-600">{formErrors.category}</p>}
               </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="currentPrice">Precio *</Label>
-                <div className="relative">
-                  <DollarSign className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
-                  <Input
-                    id="currentPrice"
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    value={formData.currentPrice}
-                    onChange={(e) => setFormData({...formData, currentPrice: parseFloat(e.target.value) || 0})}
-                    placeholder="0.00"
-                    className="pl-10"
-                  />
+              {!editingProduct && (
+                <div className="space-y-2">
+                  <Label htmlFor="initialPrice">Precio inicial *</Label>
+                  <div className="relative">
+                    <DollarSign className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                    <Input
+                      id="initialPrice"
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={formData.initialPrice ?? ''}
+                      onChange={(e) => {
+                        setFormData({ ...formData, initialPrice: e.target.value ? parseFloat(e.target.value) : undefined });
+                        if (formErrors.initialPrice) setFormErrors(prev => ({ ...prev, initialPrice: undefined }));
+                      }}
+                      className={`pl-10 ${formErrors.initialPrice ? 'border-red-500' : ''}`}
+                    />
+                  </div>
+                  {formErrors.initialPrice && <p className="text-sm text-red-600">{formErrors.initialPrice}</p>}
                 </div>
-              </div>
-              
-              <div className="space-y-2">
-                <Label htmlFor="description">Descripción</Label>
-                <Textarea
-                  id="description"
-                  value={formData.description}
-                  onChange={(e) => setFormData({...formData, description: e.target.value})}
-                  placeholder="Descripción opcional del producto"
-                  rows={3}
-                />
-              </div>
+              )}
             </div>
             
             <DialogFooter>
@@ -759,7 +570,7 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
               <thead className="bg-gray-50">
                 <tr>
                   <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Producto
+                    Producto / SKU
                   </th>
                   <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                     Categoría
@@ -769,9 +580,6 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
                   </th>
                   <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                     Estado
-                  </th>
-                  <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Fecha Registro
                   </th>
                   <th className="px-6 py-4 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
                     Acciones
@@ -820,7 +628,7 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
                             <button
                               onClick={() => {
                                 setSelectedProduct(product);
-                                setPriceUpdateData({ price: product.currentPrice || 0, reason: '' });
+                                setPriceUpdateData({ price: product.currentPrice || 0 });
                                 setShowUpdatePriceDialog(true);
                               }}
                               className="inline-flex items-center justify-center h-8 w-8 rounded-md text-blue-600 hover:text-blue-700 hover:bg-blue-50 transition-colors"
@@ -838,6 +646,7 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
                               onClick={() => {
                                 setSelectedProduct(product);
                                 resetQueryForm();
+                                loadPriceHistoryForDialog(product.id);
                                 setShowPriceHistoryDialog(true);
                               }}
                               className="inline-flex items-center justify-center h-8 w-8 rounded-md text-green-600 hover:text-green-700 hover:bg-green-50 transition-colors"
@@ -856,27 +665,14 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
                         {product.isActive ? 'Activo' : 'Inactivo'}
                       </Badge>
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                      {new Date(product.createdAt).toLocaleDateString('es-ES')}
-                    </td>
                     <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                       <div className="flex items-center justify-end gap-2">
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => handleViewDetail(product)}
-                        >
+                        <Button size="sm" variant="outline" onClick={() => handleViewDetail(product)}>
                           <Eye className="h-4 w-4" />
                         </Button>
-                        
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => handleEditProduct(product)}
-                        >
+                        <Button size="sm" variant="outline" onClick={() => handleEditProduct(product)}>
                           <Edit3 className="h-4 w-4" />
                         </Button>
-                        
                         <AlertDialog>
                           <AlertDialogTrigger asChild>
                             <Button
@@ -890,11 +686,10 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
                           <AlertDialogContent>
                             <AlertDialogHeader>
                               <AlertDialogTitle>
-                                {product.isActive ? 'Desactivar' : 'Activar'} Producto
+                                {product.isActive ? 'Desactivar' : 'Activar'} producto
                               </AlertDialogTitle>
                               <AlertDialogDescription>
-                                ¿Estás seguro de que deseas {product.isActive ? 'desactivar' : 'activar'} el producto "{product.name}"?
-                                {product.isActive && ' Los productos desactivados no aparecerán en los planogramas.'}
+                                ¿Estás seguro de que deseas {product.isActive ? 'desactivar' : 'activar'} "{product.name}"?
                               </AlertDialogDescription>
                             </AlertDialogHeader>
                             <AlertDialogFooter>
@@ -916,7 +711,15 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
             </table>
           </div>
           
-          {filteredProducts.length === 0 && (
+          {loadError && (
+            <div className="p-4 bg-amber-50 border border-amber-200 rounded-lg mx-4 mt-4">
+              <p className="text-sm text-amber-800">{loadError}</p>
+              <Button variant="outline" size="sm" className="mt-2" onClick={() => loadProducts()}>
+                Reintentar
+              </Button>
+            </div>
+          )}
+          {filteredProducts.length === 0 && !loadError && (
             <div className="text-center py-12">
               <Archive className="h-12 w-12 text-gray-400 mx-auto mb-4" />
               <h3 className="text-lg font-medium text-gray-900 mb-2">No se encontraron productos</h3>
@@ -1054,12 +857,6 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
                 </div>
               </div>
               
-              {selectedProduct.description && (
-                <div className="border-t pt-4">
-                  <Label className="text-sm font-medium text-gray-500 mb-2 block">Descripción</Label>
-                  <p className="text-gray-700">{selectedProduct.description}</p>
-                </div>
-              )}
             </div>
           )}
           
@@ -1116,22 +913,11 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
                   min="0"
                   step="0.01"
                   value={priceUpdateData.price}
-                  onChange={(e) => setPriceUpdateData({...priceUpdateData, price: parseFloat(e.target.value) || 0})}
+                  onChange={(e) => setPriceUpdateData({ price: parseFloat(e.target.value) || 0 })}
                   placeholder="0.00"
                   className="pl-10"
                 />
               </div>
-            </div>
-            
-            <div className="space-y-2">
-              <Label htmlFor="reason">Motivo del Cambio *</Label>
-              <Textarea
-                id="reason"
-                value={priceUpdateData.reason}
-                onChange={(e) => setPriceUpdateData({...priceUpdateData, reason: e.target.value})}
-                placeholder="Ej: Ajuste por inflación, promoción, etc."
-                rows={3}
-              />
             </div>
           </div>
           
@@ -1190,20 +976,13 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
 
                 {queryResult && (
                   <div className="mt-3 p-3 bg-blue-50 rounded border-l-4 border-blue-400">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <span className="text-sm text-blue-700">Precio en {new Date(queryDate).toLocaleDateString('es-ES')}:</span>
-                        <span className="ml-2 font-bold text-blue-900">
-                          ${queryResult.price.toLocaleString('es-ES', { 
-                            minimumFractionDigits: 2, 
-                            maximumFractionDigits: 2 
-                          })}
-                        </span>
-                      </div>
-                      <span className="text-xs text-blue-600 bg-blue-100 px-2 py-1 rounded">
-                        {queryResult.reason}
-                      </span>
-                    </div>
+                    <span className="text-sm text-blue-700">Precio en {queryDate}:</span>
+                    <span className="ml-2 font-bold text-blue-900">
+                      ${queryResult.price.toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </span>
+                    <span className="ml-2 text-xs text-blue-600">
+                      (vigente desde {new Date(queryResult.startDate).toLocaleDateString('es-ES')})
+                    </span>
                   </div>
                 )}
 
@@ -1222,41 +1001,40 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
                   <div className="flex items-center justify-between">
                     <span className="text-sm font-medium">Historial completo</span>
                     <Badge variant="outline" className="text-xs">
-                      {getProductPriceHistory(selectedProduct.id).length} registros
+                      {priceHistoryList.length} registros
                     </Badge>
                   </div>
                 </div>
-                
                 <div className="max-h-64 overflow-y-auto">
-                  {getProductPriceHistory(selectedProduct.id).length === 0 ? (
+                  {priceHistoryList.length === 0 ? (
                     <div className="text-center py-8">
                       <History className="h-8 w-8 text-gray-400 mx-auto mb-2" />
                       <p className="text-sm text-gray-500">Sin historial de precios</p>
                     </div>
                   ) : (
                     <div>
-                      {getProductPriceHistory(selectedProduct.id).map((history, index) => (
+                      {priceHistoryList.map((history, index) => (
                         <div key={history.id} className="px-4 py-3 border-b last:border-b-0 hover:bg-gray-50">
                           <div className="flex items-center justify-between">
                             <div className="flex items-center gap-3">
                               <span className="font-semibold text-gray-900">
-                                ${history.price.toLocaleString('es-ES', { 
-                                  minimumFractionDigits: 2, 
-                                  maximumFractionDigits: 2 
-                                })}
+                                ${history.price.toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                               </span>
                               {index === 0 && (
                                 <Badge className="bg-green-100 text-green-800 text-xs">Actual</Badge>
                               )}
-                              <span className="text-sm text-gray-600">{history.reason}</span>
                             </div>
                             <span className="text-xs text-gray-500">
-                              {new Date(history.effectiveDate).toLocaleDateString('es-ES', {
+                              {new Date(history.startDate).toLocaleDateString('es-ES', {
                                 day: '2-digit',
                                 month: '2-digit',
-                                year: 'numeric',
-                                hour: '2-digit',
-                                minute: '2-digit'
+                                year: 'numeric'
+                              })}
+                              {' – '}
+                              {new Date(history.endDate).toLocaleDateString('es-ES', {
+                                day: '2-digit',
+                                month: '2-digit',
+                                year: 'numeric'
                               })}
                             </span>
                           </div>

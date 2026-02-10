@@ -3,6 +3,7 @@ import { getFromLocalStorage, setToLocalStorage, getUserByEmail } from '@/shared
 import { apiClient, API_CONFIG } from '@/shared/config/api';
 import { loginService } from '@/shared/services/apiService';
 import { setLoggedUser } from '@/shared/utils/auth';
+import { fetchUserById, fetchUsers } from '@/shared/services/users-api';
 
 export class AuthService {
   private static instance: AuthService;
@@ -68,13 +69,62 @@ export class AuthService {
         password: credentials.password
       });
 
+      const roleRaw = (response as any).role ?? (response as any).Role ?? '';
+      let effectiveRole = roleRaw;
+      if (!effectiveRole && (response as any).token) {
+        try {
+          const token = (response as any).token;
+          const parts = token.split('.');
+          if (parts.length >= 2) {
+            const payload = JSON.parse(atob(parts[1].replace(/-/g, '+').replace(/_/g, '/')));
+            const claim = payload.role ?? payload.Role ?? payload['http://schemas.microsoft.com/ws/2008/06/identity/claims/role'];
+            effectiveRole = (claim ?? '').toString().trim();
+          }
+        } catch {}
+      }
+      const effectiveNorm = effectiveRole.toLowerCase();
+      const effectiveIsAdmin = effectiveNorm === 'admin' || effectiveNorm === 'administrator';
+      if (!effectiveIsAdmin) {
+        return {
+          success: false,
+          message: 'No posee cuenta de administrador.'
+        };
+      }
+
+      // Verificar estado activo desde GET /users (fuente fiable)
+      const token = (response as any).token;
+      if (token) apiClient.setAuthToken(token);
+      try {
+        let userId: string | undefined = (response as any).id ?? (response as any).Id ?? (response as any).email;
+        if (!userId && (response as any).email) {
+          const list = await fetchUsers();
+          const byEmail = list.find((u) => (u.email || '').toLowerCase() === ((response as any).email || '').toLowerCase());
+          userId = byEmail?.id;
+        }
+        if (!userId) {
+          if (token) apiClient.clearAuthToken();
+          return { success: false, message: 'No se pudo verificar el estado de la cuenta.' };
+        }
+        const fullUser = await fetchUserById(userId);
+        if (!fullUser) {
+          if (token) apiClient.clearAuthToken();
+          return { success: false, message: 'No se pudo verificar el estado de la cuenta.' };
+        }
+        if (fullUser.isActive === false) {
+          if (token) apiClient.clearAuthToken();
+          return { success: false, message: 'Su cuenta de administrador está inactiva. Contacte al administrador del sistema.' };
+        }
+      } finally {
+        if (token) apiClient.clearAuthToken();
+      }
+
       const userId = response.id || response.email;
       const user: User = {
         id: userId,
         email: response.email,
         firstName: response.name,
         lastName: response.lastName,
-        role: response.role === 'user' ? 'user' : 'admin',
+        role: 'admin',
         isActive: true,
         createdAt: new Date(),
         updatedAt: new Date()
@@ -86,7 +136,7 @@ export class AuthService {
       else users.push(user);
       setToLocalStorage('app-users', users);
 
-      setLoggedUser(response);
+      setLoggedUser({ ...response, role: 'admin', Role: 'Admin', isActive: true, IsActive: true });
       apiClient.setAuthToken(response.token);
 
       const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
@@ -115,42 +165,53 @@ export class AuthService {
     }
   }
 
+  /** Registro de usuario vía API POST /auth/register (email, password, name, lastName, rol, phone) */
   async register(data: RegisterData): Promise<ApiResponse<User>> {
     try {
-      const existingUser = await this.findUserByEmail(data.email);
-      
-      if (existingUser) {
-        return {
-          success: false,
-          message: 'El correo electrónico ya está registrado'
-        };
-      }
+      const payload = {
+        email: data.email.trim(),
+        password: data.password,
+        name: data.firstName.trim(),
+        lastName: data.lastName.trim(),
+        // En el registro público, los usuarios son Vendedores por defecto
+        rol: 'Vendedor',
+        phone: (data as any).phone ?? ''
+      };
 
+      const res = await apiClient.post<any>(API_CONFIG.ENDPOINTS.AUTH.REGISTER, payload);
+
+      const raw = res?.data ?? res;
       const newUser: User = {
-        id: Date.now().toString(),
-        email: data.email,
-        password: data.password, // Guardar contraseña (en producción debería estar hasheada)
-        firstName: data.firstName,
-        lastName: data.lastName,
-        role: 'user',
-        isActive: true,
-        createdAt: new Date(),
-        updatedAt: new Date()
+        id: raw?.id ?? raw?.userId ?? Date.now().toString(),
+        email: raw?.email ?? data.email,
+        firstName: raw?.firstName ?? raw?.name ?? data.firstName,
+        lastName: raw?.lastName ?? data.lastName,
+        role: (raw?.role === 'admin' ? 'admin' : 'user') as 'admin' | 'user',
+        isActive: raw?.isActive ?? true,
+        createdAt: raw?.createdAt ? new Date(raw.createdAt) : new Date(),
+        updatedAt: raw?.updatedAt ? new Date(raw.updatedAt) : new Date()
       };
 
       const users: User[] = getFromLocalStorage('app-users') || [];
-      users.push(newUser);
+      const idx = users.findIndex(u => u.id === newUser.id || u.email === newUser.email);
+      if (idx >= 0) users[idx] = newUser;
+      else users.push(newUser);
       setToLocalStorage('app-users', users);
 
       return {
         success: true,
         data: newUser,
-        message: 'Usuario registrado exitosamente'
+        message: res?.message ?? 'Usuario registrado exitosamente'
       };
-    } catch (error) {
+    } catch (err: any) {
+      const message =
+        err?.data?.message ??
+        err?.data?.errors?.join?.(' ') ??
+        err?.message ??
+        'Error al registrar. Verifica los datos e intenta de nuevo.';
       return {
         success: false,
-        message: 'Error interno del servidor'
+        message
       };
     }
   }

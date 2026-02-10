@@ -13,14 +13,18 @@ interface AuthState {
 }
 
 /** Convierte el usuario de la API (LoggedOrderItAppUser) al formato User de la app */
-function loggedUserToUser(logged: { email: string; name: string; lastName: string; token: string; role?: string; id?: string }): User {
+function loggedUserToUser(logged: { email: string; name: string; lastName: string; token: string; role?: string; id?: string; isActive?: boolean }): User {
+  const roleRaw = (logged as any).role ?? (logged as any).Role ?? '';
+  const roleNorm = String(roleRaw).toLowerCase().trim();
+  const isAdmin = roleNorm === 'admin' || roleNorm === 'administrator';
+  const isActive = (logged as any).isActive !== false && (logged as any).IsActive !== false;
   return {
-    id: logged.id || logged.email,
+    id: (logged as any).id || logged.email,
     email: logged.email,
     firstName: logged.name,
     lastName: logged.lastName,
-    role: (logged.role === 'user' ? 'user' : 'admin') as 'admin' | 'user',
-    isActive: true,
+    role: isAdmin ? 'admin' : 'user',
+    isActive,
     createdAt: new Date(),
     updatedAt: new Date(),
   };

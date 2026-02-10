@@ -3,7 +3,8 @@ import { Button } from '@/shared/components/base/Button';
 import { Input } from '@/shared/components/base/Input';
 import { Label } from '@/shared/components/base/Label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/shared/components/base/Card';
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/shared/components/base/Dialog';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/shared/components/base/Dialog';
+import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/shared/components/base/Select';
 
 import {
   Search,
@@ -15,16 +16,43 @@ import {
   Eye,
   Globe
 } from 'lucide-react';
-import { getFromLocalStorage } from '@/shared/services/database';
-import { City } from '@/shared/types';
+import { City, Store } from '@/shared/types';
 import { toast } from '@/shared/components/base/Toast';
 import { citiesApi } from '@/shared/services/cities-api';
+import { storesApi } from '@/shared/services/stores-api';
 
 interface CityFormData {
   name: string;
   state: string;
   country: string;
 }
+
+const COUNTRIES = [
+  'USA',
+  'México',
+  'España',
+  'Colombia',
+  'Argentina',
+  'Chile',
+  'Perú',
+  'Ecuador',
+  'Venezuela',
+  'Guatemala',
+  'Cuba',
+  'Bolivia',
+  'República Dominicana',
+  'Honduras',
+  'Paraguay',
+  'El Salvador',
+  'Nicaragua',
+  'Costa Rica',
+  'Panamá',
+  'Uruguay',
+  'Puerto Rico',
+  'Canadá',
+  'Brasil',
+  'Otro'
+];
 
 interface CityManagementProps {
   onBack: () => void;
@@ -46,11 +74,13 @@ export function CityManagement({ onBack }: CityManagementProps) {
     state: '',
     country: 'USA'
   });
+  const [cityFormErrors, setCityFormErrors] = useState<Partial<Record<keyof CityFormData, string>>>({});
   const [cityFormLoading, setCityFormLoading] = useState(false);
 
   // Estado para el diálogo de información
   const [showInfoDialog, setShowInfoDialog] = useState(false);
   const [selectedCity, setSelectedCity] = useState<City | null>(null);
+  const [storeCounts, setStoreCounts] = useState<Record<string, number>>({});
 
   // Cargar ciudades al montar
   useEffect(() => {
@@ -65,12 +95,25 @@ export function CityManagement({ onBack }: CityManagementProps) {
   const loadCities = async () => {
     setIsLoading(true);
     try {
-      const list = await citiesApi.fetchAll();
+      const [list, stores] = await Promise.all([
+        citiesApi.fetchAll(),
+        storesApi.fetchAll().catch(() => [] as Store[])
+      ]);
+
       setCities(list);
+
+      const counts: Record<string, number> = {};
+      (stores as Store[]).forEach((store) => {
+        const key = store.cityId;
+        if (!key) return;
+        counts[key] = (counts[key] || 0) + 1;
+      });
+      setStoreCounts(counts);
     } catch (error) {
       console.error('Error cargando ciudades:', error);
       toast.error('Error al cargar las ciudades');
       setCities([]);
+      setStoreCounts({});
     } finally {
       setIsLoading(false);
     }
@@ -93,11 +136,8 @@ export function CityManagement({ onBack }: CityManagementProps) {
 
   const handleCreateCity = () => {
     setEditingCity(null);
-    setCityFormData({
-      name: '',
-      state: '',
-      country: 'USA'
-    });
+    setCityFormData({ name: '', state: '', country: 'USA' });
+    setCityFormErrors({});
     setShowCityDialog(true);
   };
 
@@ -108,6 +148,7 @@ export function CityManagement({ onBack }: CityManagementProps) {
       state: city.state || '',
       country: city.country
     });
+    setCityFormErrors({});
     setShowCityDialog(true);
   };
 
@@ -116,24 +157,36 @@ export function CityManagement({ onBack }: CityManagementProps) {
     setShowInfoDialog(true);
   };
 
+  const validateCityForm = (): boolean => {
+    const err: Partial<Record<keyof CityFormData, string>> = {};
+    if (!cityFormData.name.trim()) err.name = 'El nombre de la ciudad es obligatorio';
+    if (!cityFormData.state.trim()) err.state = 'El estado o provincia es obligatorio';
+    if (!cityFormData.country.trim()) err.country = 'El país es obligatorio';
+
+    const nameNorm = cityFormData.name.trim().toLowerCase();
+    const stateNorm = cityFormData.state.trim().toLowerCase();
+    const countryNorm = cityFormData.country.trim().toLowerCase();
+    const duplicate = cities.find(
+      c =>
+        c.name.trim().toLowerCase() === nameNorm &&
+        (c.state || '').trim().toLowerCase() === stateNorm &&
+        c.country.trim().toLowerCase() === countryNorm &&
+        (!editingCity || c.id !== editingCity.id)
+    );
+    if (duplicate) err.name = 'Ya existe una ciudad con este nombre, estado y país';
+
+    setCityFormErrors(err);
+    return Object.keys(err).length === 0;
+  };
+
   const handleSaveCity = async () => {
+    if (!validateCityForm()) return;
+
     setCityFormLoading(true);
-
     try {
-      if (!cityFormData.name.trim()) {
-        toast.error('El nombre de la ciudad es obligatorio');
-        setCityFormLoading(false);
-        return;
-      }
-      if (!cityFormData.country.trim()) {
-        toast.error('El país es obligatorio');
-        setCityFormLoading(false);
-        return;
-      }
-
       const payload = {
         name: cityFormData.name.trim(),
-        state: cityFormData.state.trim() || undefined,
+        state: cityFormData.state.trim(),
         country: cityFormData.country.trim()
       };
 
@@ -146,6 +199,7 @@ export function CityManagement({ onBack }: CityManagementProps) {
       }
 
       setShowCityDialog(false);
+      setCityFormErrors({});
       await loadCities();
     } catch (error: any) {
       const msg = error?.data?.message ?? error?.message ?? 'Error al guardar la ciudad';
@@ -158,8 +212,7 @@ export function CityManagement({ onBack }: CityManagementProps) {
 
 
   const getStoreCount = (cityId: string) => {
-    const stores = getFromLocalStorage('app-stores') || [];
-    return stores.filter((store: any) => store.cityId === cityId).length;
+    return storeCounts[cityId] ?? 0;
   };
 
   if (isLoading) {
@@ -233,18 +286,11 @@ export function CityManagement({ onBack }: CityManagementProps) {
             </CardHeader>
 
             <CardContent className="space-y-4">
-              {/* Estadísticas */}
               <div className="flex items-center gap-4 text-sm text-gray-600">
                 <div className="flex items-center gap-1">
                   <Building2 className="h-4 w-4" />
                   <span>{getStoreCount(city.id)} tiendas</span>
                 </div>
-              </div>
-
-              {/* Información adicional */}
-              <div className="text-xs text-gray-500">
-                <p>Creada: {new Date(city.createdAt).toLocaleDateString('es-ES')}</p>
-                <p>Actualizada: {new Date(city.updatedAt).toLocaleDateString('es-ES')}</p>
               </div>
 
               {/* Acciones */}
@@ -343,29 +389,58 @@ export function CityManagement({ onBack }: CityManagementProps) {
               <Input
                 id="cityName"
                 value={cityFormData.name}
-                onChange={(e) => setCityFormData(prev => ({ ...prev, name: e.target.value }))}
+                onChange={(e) => {
+                  setCityFormData(prev => ({ ...prev, name: e.target.value }));
+                  if (cityFormErrors.name) setCityFormErrors(prev => ({ ...prev, name: undefined }));
+                }}
                 placeholder="New York, Los Angeles, Chicago..."
+                className={cityFormErrors.name ? 'border-red-500' : ''}
               />
+              {cityFormErrors.name && (
+                <p className="text-sm text-red-600 mt-1">{cityFormErrors.name}</p>
+              )}
             </div>
 
             <div>
-              <Label htmlFor="cityState">Estado/Provincia</Label>
+              <Label htmlFor="cityState">Estado/Provincia *</Label>
               <Input
                 id="cityState"
                 value={cityFormData.state}
-                onChange={(e) => setCityFormData(prev => ({ ...prev, state: e.target.value }))}
+                onChange={(e) => {
+                  setCityFormData(prev => ({ ...prev, state: e.target.value }));
+                  setCityFormErrors(prev => ({ ...prev, state: undefined, name: undefined }));
+                }}
                 placeholder="New York, California, Texas..."
+                className={cityFormErrors.state ? 'border-red-500' : ''}
               />
+              {cityFormErrors.state && (
+                <p className="text-sm text-red-600 mt-1">{cityFormErrors.state}</p>
+              )}
             </div>
 
-            <div>
+            <div className="relative">
               <Label htmlFor="cityCountry">País *</Label>
-              <Input
-                id="cityCountry"
+              <Select
                 value={cityFormData.country}
-                onChange={(e) => setCityFormData(prev => ({ ...prev, country: e.target.value }))}
-                placeholder="USA"
-              />
+                onValueChange={(value) => {
+                  setCityFormData(prev => ({ ...prev, country: value }));
+                  setCityFormErrors(prev => ({ ...prev, country: undefined, name: undefined }));
+                }}
+              >
+                <SelectTrigger id="cityCountry" className={`w-full ${cityFormErrors.country ? 'border-red-500' : ''}`}>
+                  <SelectValue placeholder="Selecciona un país" />
+                </SelectTrigger>
+                <SelectContent className="max-h-64">
+                  {COUNTRIES.map((country) => (
+                    <SelectItem key={country} value={country}>
+                      {country}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {cityFormErrors.country && (
+                <p className="text-sm text-red-600 mt-1">{cityFormErrors.country}</p>
+              )}
             </div>
 
           </div>
@@ -420,19 +495,6 @@ export function CityManagement({ onBack }: CityManagementProps) {
                 <div>
                   <Label className="text-sm text-gray-500">Tiendas</Label>
                   <p className="font-medium">{getStoreCount(selectedCity.id)} tiendas</p>
-                </div>
-              </div>
-
-              <div className="pt-4 border-t">
-                <div className="grid grid-cols-2 gap-4 text-sm text-gray-500">
-                  <div>
-                    <Label className="text-xs text-gray-400">Fecha de Creación</Label>
-                    <p>{new Date(selectedCity.createdAt).toLocaleString('es-ES')}</p>
-                  </div>
-                  <div>
-                    <Label className="text-xs text-gray-400">Última Actualización</Label>
-                    <p>{new Date(selectedCity.updatedAt).toLocaleString('es-ES')}</p>
-                  </div>
                 </div>
               </div>
             </div>
