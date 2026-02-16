@@ -25,7 +25,8 @@ export const API_CONFIG = {
       REFRESH: '/auth/refresh',
       FORGOT_PASSWORD: '/auth/forgot-password',
       RESET_PASSWORD: '/auth/reset-password',
-      VERIFY_EMAIL: '/auth/verify-email'
+      VERIFY_EMAIL: '/auth/verify-email',
+      CHANGE_PASSWORD: '/auth/change-password'
     },
     USERS: {
       GET_ALL: '/users/users',
@@ -65,11 +66,40 @@ export const API_CONFIG = {
       UPDATE: '/products/products/{id}',
       DELETE: '/products/products/{id}'
     },
+    BRANDS: {
+      LIST: '/brands/brands',
+      GET_BY_ID: '/brands/brands/{id}',
+      CREATE: '/brands/brands',
+      UPDATE: '/brands/brands/{id}',
+      DEACTIVATE: '/brands/brands/desactivate/{id}'
+    },
+    CATEGORIES: {
+      LIST: '/categories/categories',
+      GET_BY_ID: '/categories/categories/{id}',
+      CREATE: '/categories/categories',
+      UPDATE: '/categories/categories/{id}',
+      DEACTIVATE: '/categories/categories/desactivate/{id}'
+    },
     HISTPRICES: {
       CREATE: '/histprices/histprices',
       GET_BY_PRODUCT: '/histprices/histprices/product/{productId}',
       GET_LATEST: '/histprices/histprices/latest/{productId}',
       GET_BY_DATE: '/histprices/histprices/by-date/{productId}/{date}'
+    },
+    PLANOGRAMS: {
+      LIST: '/planograms/planograms',
+      GET_BY_ID: '/planograms/planograms/{id}',
+      CREATE: '/planograms/planograms',
+      UPDATE: '/planograms/planograms/{id}',
+      DELETE: '/planograms/planograms/{id}',
+      DEACTIVATE: '/planograms/planograms/desactivate/{id}'
+    },
+    DISTRIBUTIONS: {
+      LIST_BY_PLANOGRAM: '/distributions/distributions/planogram/{id}',
+      CREATE: '/distributions/distributions',
+      UPDATE: '/distributions/distribution/{id}',
+      DELETE: '/distributions/distributions/{id}',
+      DEACTIVATE: '/distributions/distributions/desactivate/{id}'
     }
   },
 

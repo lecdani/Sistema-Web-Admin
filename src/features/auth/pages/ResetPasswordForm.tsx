@@ -9,6 +9,7 @@ import { Label } from '@/shared/components/base/Label';
 import { Card, CardContent } from '@/shared/components/base/Card';
 import { Alert, AlertDescription } from '@/shared/components/base/Alert';
 import { useAuth } from '../hooks/useAuth';
+import { useLanguage } from '@/shared/hooks/useLanguage';
 import { validatePasswordStrength } from '@/shared/utils/validation';
 
 interface ResetPasswordFormProps {
@@ -18,6 +19,7 @@ interface ResetPasswordFormProps {
 
 export const ResetPasswordForm: React.FC<ResetPasswordFormProps> = ({ token, email }) => {
   const { confirmResetPassword } = useAuth();
+  const { translate } = useLanguage();
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showNewPassword, setShowNewPassword] = useState(false);
@@ -31,18 +33,18 @@ export const ResetPasswordForm: React.FC<ResetPasswordFormProps> = ({ token, ema
     const errors: { newPassword?: string; confirmPassword?: string } = {};
 
     if (!newPassword.trim()) {
-      errors.newPassword = 'La nueva contraseña es obligatoria';
+      errors.newPassword = translate('newPasswordRequired');
     } else {
       const strength = validatePasswordStrength(newPassword);
       if (!strength.isValid && strength.feedback.length > 0) {
-        errors.newPassword = strength.feedback[0] || 'La contraseña no cumple los requisitos';
+        errors.newPassword = strength.feedback[0] || translate('passwordRequirements');
       }
     }
 
     if (!confirmPassword.trim()) {
-      errors.confirmPassword = 'Debes confirmar la contraseña';
+      errors.confirmPassword = translate('confirmPasswordRequired');
     } else if (newPassword !== confirmPassword) {
-      errors.confirmPassword = 'Las contraseñas no coinciden';
+      errors.confirmPassword = translate('passwordMismatch');
     }
 
     setFieldErrors(errors);
@@ -67,7 +69,7 @@ export const ResetPasswordForm: React.FC<ResetPasswordFormProps> = ({ token, ema
     if (result.success) {
       setIsSuccess(true);
     } else {
-      setError(result.message || 'Error al restablecer la contraseña');
+      setError(result.message || translate('resetPasswordError'));
     }
   };
 
@@ -89,9 +91,9 @@ export const ResetPasswordForm: React.FC<ResetPasswordFormProps> = ({ token, ema
               </div>
             </div>
             <div className="space-y-3">
-              <h2 className="text-2xl font-bold text-gray-900">Contraseña restablecida</h2>
+              <h2 className="text-2xl font-bold text-gray-900">{translate('resetPasswordSuccessTitle')}</h2>
               <p className="text-gray-600">
-                Ya puedes iniciar sesión con tu nueva contraseña.
+                {translate('resetPasswordSuccessDesc')}
               </p>
             </div>
             <Link
@@ -99,7 +101,7 @@ export const ResetPasswordForm: React.FC<ResetPasswordFormProps> = ({ token, ema
               className="inline-flex items-center justify-center gap-2 w-full h-12 rounded-lg font-medium bg-blue-600 text-white hover:bg-blue-700 focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 transition-all"
             >
               <ArrowLeft className="h-4 w-4" />
-              Ir al inicio de sesión
+              {translate('backToLogin')}
             </Link>
           </div>
         </CardContent>
@@ -112,9 +114,9 @@ export const ResetPasswordForm: React.FC<ResetPasswordFormProps> = ({ token, ema
       <CardContent className="p-8">
         <div className="space-y-6">
           <div className="text-center space-y-3">
-            <h2 className="text-2xl font-bold text-gray-900">Nueva contraseña</h2>
+            <h2 className="text-2xl font-bold text-gray-900">{translate('resetPasswordTitle')}</h2>
             <p className="text-gray-600">
-              Ingresa tu nueva contraseña y confírmala. Luego podrás iniciar sesión.
+              {translate('resetPasswordFormDesc')}
             </p>
             {email && (
               <p className="text-sm text-gray-500 truncate px-2" title={email}>
@@ -132,7 +134,7 @@ export const ResetPasswordForm: React.FC<ResetPasswordFormProps> = ({ token, ema
           <form onSubmit={handleSubmit} className="space-y-6">
             <div className="space-y-2">
               <Label htmlFor="new-password" className="text-gray-700 font-medium">
-                Nueva contraseña
+                {translate('newPasswordLabel')}
               </Label>
               <div className={inputWrapperClass(!!fieldErrors.newPassword)}>
                 <span className="flex-shrink-0 pl-3 text-gray-400" aria-hidden>
@@ -141,7 +143,7 @@ export const ResetPasswordForm: React.FC<ResetPasswordFormProps> = ({ token, ema
                 <input
                   id="new-password"
                   type={showNewPassword ? 'text' : 'password'}
-                  placeholder="Mínimo 8 caracteres"
+                  placeholder={translate('minPasswordPlaceholder')}
                   value={newPassword}
                   onChange={(e) => {
                     setNewPassword(e.target.value);
@@ -170,7 +172,7 @@ export const ResetPasswordForm: React.FC<ResetPasswordFormProps> = ({ token, ema
 
             <div className="space-y-2">
               <Label htmlFor="confirm-password" className="text-gray-700 font-medium">
-                Confirmar contraseña
+                {translate('confirmPassword')}
               </Label>
               <div className={inputWrapperClass(!!fieldErrors.confirmPassword)}>
                 <span className="flex-shrink-0 pl-3 text-gray-400" aria-hidden>
@@ -179,7 +181,7 @@ export const ResetPasswordForm: React.FC<ResetPasswordFormProps> = ({ token, ema
                 <input
                   id="confirm-password"
                   type={showConfirmPassword ? 'text' : 'password'}
-                  placeholder="Repite la contraseña"
+                  placeholder={translate('repeatPasswordPlaceholder')}
                   value={confirmPassword}
                   onChange={(e) => {
                     setConfirmPassword(e.target.value);
@@ -216,10 +218,10 @@ export const ResetPasswordForm: React.FC<ResetPasswordFormProps> = ({ token, ema
                 {isLoading ? (
                   <div className="flex items-center justify-center gap-2">
                     <Loader2 className="h-4 w-4 animate-spin" />
-                    <span>Guardando...</span>
+                    <span>{translate('saving')}</span>
                   </div>
                 ) : (
-                  'Restablecer contraseña'
+                  {translate('resetPasswordButton')}
                 )}
               </Button>
               <Link
@@ -227,7 +229,7 @@ export const ResetPasswordForm: React.FC<ResetPasswordFormProps> = ({ token, ema
                 className="inline-flex items-center justify-center gap-2 w-full h-12 rounded-lg font-medium text-gray-600 hover:text-gray-800 hover:bg-gray-50 focus-visible:ring-2 focus-visible:ring-offset-2 transition-all"
               >
                 <ArrowLeft className="h-4 w-4" />
-                Volver al inicio de sesión
+                {translate('backToLogin')}
               </Link>
             </div>
           </form>

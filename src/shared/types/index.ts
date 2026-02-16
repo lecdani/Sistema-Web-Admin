@@ -54,11 +54,29 @@ export interface Store {
   updatedAt: Date;
 }
 
+export interface Brand {
+  id: string;
+  name: string;
+  isActive: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface Category {
+  id: string;
+  name: string;
+  isActive: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
 export interface Product {
   id: string;
   sku: string;
   name: string;
   category: string;
+  brandId?: string;
+  categoryId?: string;
   description?: string;
   currentPrice: number;
   isActive: boolean;

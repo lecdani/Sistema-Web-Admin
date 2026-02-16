@@ -19,7 +19,9 @@ import {
   DollarSign,
   TrendingUp,
   History,
-  Calendar
+  Calendar,
+  Award,
+  FolderTree
 } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/shared/components/base/Card';
 import { Button } from '@/shared/components/base/Button';
@@ -49,8 +51,12 @@ import {
 import { Label } from '@/shared/components/base/Label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/shared/components/base/Select';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/shared/components/base/Tooltip';
-import { Product } from '@/shared/types';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/shared/components/base/Tabs';
+import { Product, Brand, Category } from '@/shared/types';
+import { useLanguage } from '@/shared/hooks/useLanguage';
 import { productsApi } from '@/shared/services/products-api';
+import { brandsApi } from '@/shared/services/brands-api';
+import { categoriesApi } from '@/shared/services/categories-api';
 import { histpricesApi, type HistPrice } from '@/shared/services/histprices-api';
 import { toast } from '@/shared/components/base/Toast';
 
@@ -62,6 +68,8 @@ interface ProductFormData {
   sku: string;
   name: string;
   category: string;
+  brandId: string;
+  categoryId: string;
   isActive: boolean;
   initialPrice?: number;
 }
@@ -71,8 +79,11 @@ interface PriceUpdateData {
 }
 
 export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) => {
+  const { translate } = useLanguage();
   const [products, setProducts] = useState<Product[]>([]);
   const [filteredProducts, setFilteredProducts] = useState<Product[]>([]);
+  const [brands, setBrands] = useState<Brand[]>([]);
+  const [categories, setCategories] = useState<Category[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [categoryFilter, setCategoryFilter] = useState<string>('all');
@@ -88,11 +99,19 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
   const [priceHistoryList, setPriceHistoryList] = useState<HistPrice[]>([]);
   const [queryDate, setQueryDate] = useState<string>('');
   const [queryResult, setQueryResult] = useState<HistPrice | null>(null);
+  const [showBrandDialog, setShowBrandDialog] = useState(false);
+  const [editingBrand, setEditingBrand] = useState<Brand | null>(null);
+  const [brandName, setBrandName] = useState('');
+  const [showCategoryDialog, setShowCategoryDialog] = useState(false);
+  const [editingCategory, setEditingCategory] = useState<Category | null>(null);
+  const [categoryName, setCategoryName] = useState('');
 
   const [formData, setFormData] = useState<ProductFormData>({
     sku: '',
     name: '',
     category: '',
+    brandId: '',
+    categoryId: '',
     isActive: true
   });
 
@@ -100,7 +119,7 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
     price: 0
   });
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [formErrors, setFormErrors] = useState<Partial<Record<'sku' | 'name' | 'category' | 'initialPrice', string>>>({});
+  const [formErrors, setFormErrors] = useState<Partial<Record<'sku' | 'name' | 'category' | 'brandId' | 'categoryId' | 'initialPrice', string>>>({});
 
   useEffect(() => {
     loadProducts();
@@ -111,10 +130,46 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
   }, [products, searchTerm, statusFilter, categoryFilter]);
 
   const loadProducts = async () => {
+    setIsLoading(true);
+    setLoadError(null);
+
+    const [productsResult, brandsResult, categoriesResult] = await Promise.allSettled([
+      productsApi.fetchAll(),
+      brandsApi.fetchAll(),
+      categoriesApi.fetchAll()
+    ]);
+
+    if (brandsResult.status === 'fulfilled') {
+      setBrands(brandsResult.value);
+    } else {
+      console.warn('Error cargando marcas:', brandsResult.reason);
+      setBrands([]);
+    }
+    if (categoriesResult.status === 'fulfilled') {
+      setCategories(categoriesResult.value);
+    } else {
+      console.warn('Error cargando categorías:', categoriesResult.reason);
+      setCategories([]);
+    }
+
+    if (productsResult.status === 'rejected') {
+      const error = productsResult.reason;
+      console.error('Error cargando productos:', error);
+      const msg = error?.data?.message ?? error?.message ?? '';
+      const isNotImplemented = msg.includes('NotImplemented') || error?.status === 500;
+      setLoadError(
+        isNotImplemented
+          ? translate('productServiceUnavailable')
+          : msg || translate('errorLoadProducts')
+      );
+      toast.error(translate('errorLoadProducts'));
+      setProducts([]);
+      setIsLoading(false);
+      return;
+    }
+
+    const list = productsResult.value;
     try {
-      setIsLoading(true);
-      setLoadError(null);
-      const list = await productsApi.fetchAll();
       const withPrices = await Promise.all(
         list.map(async (p) => {
           try {
@@ -126,17 +181,8 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
         })
       );
       setProducts(withPrices);
-    } catch (error: any) {
-      console.error('Error cargando productos:', error);
-      const msg = error?.data?.message ?? error?.message ?? '';
-      const isNotImplemented = msg.includes('NotImplemented') || error?.status === 500;
-      setLoadError(
-        isNotImplemented
-          ? 'El servicio de productos no está disponible en este momento.'
-          : msg || 'Error al cargar los productos.'
-      );
-      toast.error('No se pudieron cargar los productos');
-      setProducts([]);
+    } catch {
+      setProducts(list.map((p) => ({ ...p, currentPrice: 0 })));
     } finally {
       setIsLoading(false);
     }
@@ -176,6 +222,8 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
       sku: '',
       name: '',
       category: '',
+      brandId: '',
+      categoryId: '',
       isActive: true
     });
     setFormErrors({});
@@ -187,18 +235,19 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
   };
 
   const validateForm = (): boolean => {
-    const err: Partial<Record<'sku' | 'name' | 'category' | 'initialPrice', string>> = {};
-    if (!formData.sku.trim()) err.sku = 'El SKU es obligatorio';
-    if (!formData.name.trim()) err.name = 'El nombre es obligatorio';
-    if (!formData.category.trim()) err.category = 'El código de categoría es obligatorio';
+    const err: Partial<Record<'sku' | 'name' | 'category' | 'brandId' | 'categoryId' | 'initialPrice', string>> = {};
+    if (!formData.sku.trim()) err.sku = translate('skuRequired');
+    if (!formData.name.trim()) err.name = translate('nameRequired');
+    if (!formData.brandId) err.brandId = translate('brandRequired');
+    if (!formData.categoryId) err.categoryId = translate('categoryRequired');
     if (!editingProduct) {
       const price = formData.initialPrice ?? 0;
-      if (price <= 0) err.initialPrice = 'El precio inicial es obligatorio y debe ser mayor a 0';
+      if (price <= 0) err.initialPrice = translate('initialPriceRequired');
     }
     const existing = products.find(
       p => p.sku.trim().toLowerCase() === formData.sku.trim().toLowerCase() && (!editingProduct || p.id !== editingProduct.id)
     );
-    if (existing) err.sku = 'Ya existe un producto con ese SKU';
+    if (existing) err.sku = translate('duplicateSku');
     setFormErrors(err);
     return Object.keys(err).length === 0;
   };
@@ -206,15 +255,18 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
   const handleSaveProduct = async () => {
     if (!validateForm()) return;
     try {
+      const cat = categories.find(c => c.id === formData.categoryId);
       const payload = {
         name: formData.name.trim(),
-        category: formData.category.trim(),
+        category: cat?.name ?? formData.category.trim(),
         sku: formData.sku.trim(),
+        brandId: formData.brandId || undefined,
+        categoryId: formData.categoryId || undefined,
         isActive: editingProduct ? editingProduct.isActive : true
       };
       if (editingProduct) {
         await productsApi.update(editingProduct.id, payload);
-        toast.success('Producto actualizado correctamente');
+        toast.success(translate('productSaved'));
       } else {
         const created = await productsApi.create(payload);
         const initialPrice = Number(formData.initialPrice) || 0;
@@ -227,13 +279,13 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
             endDate: now
           });
         }
-        toast.success('Producto creado correctamente');
+        toast.success(translate('productCreated'));
       }
       resetForm();
       setShowAddDialog(false);
       await loadProducts();
     } catch (error: any) {
-      const msg = error?.data?.message ?? error?.message ?? 'Error al guardar el producto';
+      const msg = error?.data?.message ?? error?.message ?? translate('errorSaveProduct');
       toast.error(msg);
     }
   };
@@ -241,7 +293,7 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
   const handleUpdatePrice = async () => {
     if (!selectedProduct) return;
     if (priceUpdateData.price <= 0) {
-      toast.error('El precio debe ser mayor a 0');
+      toast.error(translate('priceMustBePositive'));
       return;
     }
     try {
@@ -252,13 +304,13 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
         startDate: now,
         endDate: now
       });
-      toast.success('Precio actualizado correctamente');
+      toast.success(translate('priceUpdatedSuccess'));
       resetPriceForm();
       setShowUpdatePriceDialog(false);
       setSelectedProduct(null);
       await loadProducts();
     } catch (error: any) {
-      const msg = error?.data?.message ?? error?.message ?? 'Error al actualizar el precio';
+      const msg = error?.data?.message ?? error?.message ?? translate('errorUpdatePrice');
       toast.error(msg);
     }
   };
@@ -286,10 +338,13 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
   };
 
   const handleEditProduct = (product: Product) => {
+    const categoryId = product.categoryId ?? categories.find(c => c.name === product.category)?.id ?? '';
     setFormData({
       sku: product.sku,
       name: product.name,
       category: product.category,
+      brandId: product.brandId ?? '',
+      categoryId,
       isActive: product.isActive
     });
     setFormErrors({});
@@ -300,10 +355,10 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
   const handleToggleStatus = async (product: Product) => {
     try {
       await productsApi.delete(product.id);
-      toast.success(`Producto ${!product.isActive ? 'activado' : 'desactivado'} correctamente`);
+      toast.success(!product.isActive ? translate('productActivatedSuccess') : translate('productDeactivatedSuccess'));
       await loadProducts();
     } catch (error: any) {
-      const msg = error?.data?.message ?? error?.message ?? 'Error al cambiar el estado';
+      const msg = error?.data?.message ?? error?.message ?? translate('errorToggleProduct');
       toast.error(msg);
     }
   };
@@ -318,8 +373,80 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
   };
 
   const getUniqueCategories = (): string[] => {
-    const categories = products.map(p => p.category);
-    return Array.from(new Set(categories)).sort();
+    const fromProducts = products.map(p => p.category).filter(Boolean);
+    const fromList = categories.map(c => c.name);
+    return Array.from(new Set([...fromList, ...fromProducts])).sort();
+  };
+
+  const activeBrands = brands.filter(b => b.isActive);
+  const activeCategories = categories.filter(c => c.isActive);
+
+  const handleSaveBrand = async () => {
+    const name = brandName.trim();
+    if (!name) {
+      toast.error(translate('brandNameRequired'));
+      return;
+    }
+    try {
+      if (editingBrand) {
+        const updated = await brandsApi.update(editingBrand.id, { name });
+        setBrands((prev) => prev.map((b) => (b.id === editingBrand.id ? updated : b)));
+        toast.success(translate('brandUpdated'));
+      } else {
+        const created = await brandsApi.create({ name });
+        setBrands((prev) => [...prev, created]);
+        toast.success(translate('brandCreated'));
+      }
+      setBrandName('');
+      setEditingBrand(null);
+      setShowBrandDialog(false);
+    } catch (e: any) {
+      toast.error(e?.message ?? translate('errorSaveBrand'));
+    }
+  };
+
+  const handleSaveCategory = async () => {
+    const name = categoryName.trim();
+    if (!name) {
+      toast.error(translate('categoryNameRequired'));
+      return;
+    }
+    try {
+      if (editingCategory) {
+        const updated = await categoriesApi.update(editingCategory.id, { name });
+        setCategories((prev) => prev.map((c) => (c.id === editingCategory.id ? updated : c)));
+        toast.success(translate('categoryUpdated'));
+      } else {
+        const created = await categoriesApi.create({ name });
+        setCategories((prev) => [...prev, created]);
+        toast.success(translate('categoryCreated'));
+      }
+      setCategoryName('');
+      setEditingCategory(null);
+      setShowCategoryDialog(false);
+    } catch (e: any) {
+      toast.error(e?.message ?? translate('errorSaveCategory'));
+    }
+  };
+
+  const handleToggleBrand = async (brand: Brand) => {
+    try {
+      await brandsApi.toggleActive(brand.id);
+      setBrands((prev) => prev.map((b) => (b.id === brand.id ? { ...b, isActive: !b.isActive } : b)));
+      toast.success(brand.isActive ? translate('brandDeactivated') : translate('brandActivated'));
+    } catch (e: any) {
+      toast.error(e?.message ?? translate('errorToggleStatusGeneric'));
+    }
+  };
+
+  const handleToggleCategory = async (category: Category) => {
+    try {
+      await categoriesApi.toggleActive(category.id);
+      setCategories((prev) => prev.map((c) => (c.id === category.id ? { ...c, isActive: !c.isActive } : c)));
+      toast.success(category.isActive ? translate('categoryDeactivated') : translate('categoryActivated'));
+    } catch (e: any) {
+      toast.error(e?.message ?? translate('errorToggleStatusGeneric'));
+    }
   };
 
   if (isLoading) {
@@ -327,7 +454,7 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
       <div className="flex items-center justify-center min-h-96">
         <div className="text-center space-y-4">
           <div className="animate-spin rounded-full h-12 w-12 border-4 border-indigo-600 border-t-transparent mx-auto"></div>
-          <p className="text-gray-600">Cargando productos...</p>
+          <p className="text-gray-600">{translate('loadingProducts')}</p>
         </div>
       </div>
     );
@@ -345,8 +472,8 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
             <Package className="h-5 w-5 text-indigo-600" />
           </div>
           <div>
-            <h1 className="text-2xl font-bold text-gray-900">Gestión de Productos</h1>
-            <p className="text-gray-500">Administra el catálogo de productos del sistema</p>
+            <h1 className="text-2xl font-bold text-gray-900">{translate('productsTitle')}</h1>
+            <p className="text-gray-500">{translate('productsSubtitleCatalog')}</p>
           </div>
         </div>
         
@@ -360,22 +487,22 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
               className="bg-indigo-600 hover:bg-indigo-700"
             >
               <Plus className="h-4 w-4 mr-2" />
-              Nuevo Producto
+              {translate('createProduct')}
             </Button>
           </DialogTrigger>
           <DialogContent className="sm:max-w-xl">
             <DialogHeader>
               <DialogTitle>
-                {editingProduct ? 'Editar Producto' : 'Nuevo Producto'}
+                {editingProduct ? translate('editProduct') : translate('createProduct')}
               </DialogTitle>
               <DialogDescription>
-                {editingProduct ? 'Modifica los datos del producto' : 'Completa la información del nuevo producto'}
+                {editingProduct ? translate('editProductDesc') : translate('newProductDesc')}
               </DialogDescription>
             </DialogHeader>
             
             <div className="space-y-5 px-6 py-4">
               <div className="space-y-2">
-                <Label htmlFor="sku">SKU *</Label>
+                <Label htmlFor="sku">{translate('sku')} *</Label>
                 <Input
                   id="sku"
                   value={formData.sku}
@@ -388,7 +515,7 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
                 {formErrors.sku && <p className="text-sm text-red-600">{formErrors.sku}</p>}
               </div>
               <div className="space-y-2">
-                <Label htmlFor="name">Nombre *</Label>
+                <Label htmlFor="name">{translate('name')} *</Label>
                 <Input
                   id="name"
                   value={formData.name}
@@ -401,21 +528,59 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
                 {formErrors.name && <p className="text-sm text-red-600">{formErrors.name}</p>}
               </div>
               <div className="space-y-2">
-                <Label htmlFor="category">Código de categoría *</Label>
-                <Input
-                  id="category"
-                  value={formData.category}
-                  onChange={(e) => {
-                    setFormData({ ...formData, category: e.target.value });
-                    if (formErrors.category) setFormErrors(prev => ({ ...prev, category: undefined }));
+                <Label>{translate('brands')} *</Label>
+                <Select
+                  value={formData.brandId || undefined}
+                  onValueChange={(v) => {
+                    setFormData({ ...formData, brandId: v });
+                    if (formErrors.brandId) setFormErrors(prev => ({ ...prev, brandId: undefined }));
                   }}
-                  className={formErrors.category ? 'border-red-500' : ''}
-                />
-                {formErrors.category && <p className="text-sm text-red-600">{formErrors.category}</p>}
+                >
+                  <SelectTrigger className={formErrors.brandId ? 'border-red-500' : ''}>
+                    <SelectValue placeholder={translate('selectBrand')}>
+                      {activeBrands.find((b) => b.id === formData.brandId)?.name}
+                    </SelectValue>
+                  </SelectTrigger>
+                  <SelectContent>
+                    {activeBrands.map((b) => (
+                      <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {formErrors.brandId && <p className="text-sm text-red-600">{formErrors.brandId}</p>}
+                {activeBrands.length === 0 && (
+                  <p className="text-xs text-amber-600">{translate('addBrandsFirst')}</p>
+                )}
+              </div>
+              <div className="space-y-2">
+                <Label>{translate('categories')} *</Label>
+                <Select
+                  value={formData.categoryId || undefined}
+                  onValueChange={(v) => {
+                    const cat = categories.find(c => c.id === v);
+                    setFormData({ ...formData, categoryId: v, category: cat?.name ?? '' });
+                    if (formErrors.categoryId) setFormErrors(prev => ({ ...prev, categoryId: undefined }));
+                  }}
+                >
+                  <SelectTrigger className={formErrors.categoryId ? 'border-red-500' : ''}>
+                    <SelectValue placeholder={translate('selectCategory')}>
+                      {activeCategories.find((c) => c.id === formData.categoryId)?.name}
+                    </SelectValue>
+                  </SelectTrigger>
+                  <SelectContent>
+                    {activeCategories.map((c) => (
+                      <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {formErrors.categoryId && <p className="text-sm text-red-600">{formErrors.categoryId}</p>}
+                {activeCategories.length === 0 && (
+                  <p className="text-xs text-amber-600">{translate('addCategoriesFirst')}</p>
+                )}
               </div>
               {!editingProduct && (
                 <div className="space-y-2">
-                  <Label htmlFor="initialPrice">Precio inicial *</Label>
+                  <Label htmlFor="initialPrice">{translate('initialPriceLabel')}</Label>
                   <div className="relative">
                     <DollarSign className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
                     <Input
@@ -439,25 +604,38 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
             <DialogFooter>
               <DialogClose asChild>
                 <Button variant="outline" onClick={resetForm}>
-                  Cancelar
+                  {translate('cancel')}
                 </Button>
               </DialogClose>
               <Button onClick={handleSaveProduct} className="bg-indigo-600 hover:bg-indigo-700">
                 <Save className="h-4 w-4 mr-2" />
-                {editingProduct ? 'Actualizar' : 'Crear'}
+                {editingProduct ? translate('update') : translate('create')}
               </Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
       </div>
 
+      <Tabs defaultValue="products" className="space-y-6">
+        <TabsList className="grid w-full max-w-md grid-cols-2">
+          <TabsTrigger value="products" className="flex items-center gap-2">
+            <Package className="h-4 w-4" />
+            {translate('tabProducts')}
+          </TabsTrigger>
+          <TabsTrigger value="catalog" className="flex items-center gap-2">
+            <Award className="h-4 w-4" />
+            {translate('tabBrandsCategories')}
+          </TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="products" className="space-y-6 mt-6">
       {/* Stats Cards */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
         <Card className="hover:shadow-md transition-all duration-200">
           <div className="p-4">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-xs font-medium text-gray-500">Total Productos</p>
+                <p className="text-xs font-medium text-gray-500">{translate('totalProducts')}</p>
                 <p className="text-2xl font-bold text-gray-900 mt-1">{products.length}</p>
               </div>
               <div className="p-2.5 bg-indigo-100 rounded-lg flex items-center justify-center">
@@ -471,7 +649,7 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
           <div className="p-4">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-xs font-medium text-gray-500">Productos Activos</p>
+                <p className="text-xs font-medium text-gray-500">{translate('activeProducts')}</p>
                 <p className="text-2xl font-bold text-green-600 mt-1">
                   {products.filter(p => p.isActive).length}
                 </p>
@@ -487,7 +665,7 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
           <div className="p-4">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-xs font-medium text-gray-500">Productos Inactivos</p>
+                <p className="text-xs font-medium text-gray-500">{translate('inactiveProducts')}</p>
                 <p className="text-2xl font-bold text-red-600 mt-1">
                   {products.filter(p => !p.isActive).length}
                 </p>
@@ -503,7 +681,7 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
           <div className="p-4">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-xs font-medium text-gray-500">Categorías</p>
+                <p className="text-xs font-medium text-gray-500">{translate('categories')}</p>
                 <p className="text-2xl font-bold text-blue-600 mt-1">
                   {getUniqueCategories().length}
                 </p>
@@ -524,7 +702,7 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
                 <Input
-                  placeholder="Buscar productos por nombre, SKU, categoría..."
+                  placeholder={translate('searchProductsPlaceholder')}
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
                   className="pl-10"
@@ -536,22 +714,28 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
               <Select value={statusFilter} onValueChange={setStatusFilter}>
                 <SelectTrigger className="w-48">
                   <Filter className="h-4 w-4 mr-2" />
-                  <SelectValue placeholder="Filtrar por estado" />
+                  <SelectValue placeholder={translate('filterByStatus')}>
+                    {statusFilter === 'all-status' && translate('allStatuses')}
+                    {statusFilter === 'active' && translate('active')}
+                    {statusFilter === 'inactive' && translate('inactive')}
+                  </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all-status">Todos los estados</SelectItem>
-                  <SelectItem value="active">Activos</SelectItem>
-                  <SelectItem value="inactive">Inactivos</SelectItem>
+                  <SelectItem value="all-status">{translate('allStatuses')}</SelectItem>
+                  <SelectItem value="active">{translate('active')}</SelectItem>
+                  <SelectItem value="inactive">{translate('inactive')}</SelectItem>
                 </SelectContent>
               </Select>
 
               <Select value={categoryFilter} onValueChange={setCategoryFilter}>
                 <SelectTrigger className="w-48">
                   <Tag className="h-4 w-4 mr-2" />
-                  <SelectValue placeholder="Filtrar por categoría" />
+                  <SelectValue placeholder={translate('filterByCategory')}>
+                    {categoryFilter === 'all-categories' ? translate('allCategories') : categoryFilter}
+                  </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all-categories">Todas las categorías</SelectItem>
+                  <SelectItem value="all-categories">{translate('allCategories')}</SelectItem>
                   {getUniqueCategories().map((category) => (
                     <SelectItem key={category} value={category}>{category}</SelectItem>
                   ))}
@@ -570,19 +754,22 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
               <thead className="bg-gray-50">
                 <tr>
                   <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Producto / SKU
+                    {translate('productSkuHeader')}
                   </th>
                   <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Categoría
+                    {translate('brandHeader')}
                   </th>
                   <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Precio
+                    {translate('categoryHeader')}
                   </th>
                   <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Estado
+                    {translate('priceHeader')}
+                  </th>
+                  <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    {translate('status')}
                   </th>
                   <th className="px-6 py-4 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Acciones
+                    {translate('actions')}
                   </th>
                 </tr>
               </thead>
@@ -606,6 +793,9 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
                           </div>
                         </div>
                       </div>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
+                      {brands.find(b => b.id === product.brandId)?.name ?? '-'}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <Badge variant="outline" className="text-sm">
@@ -637,7 +827,7 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
                             </button>
                           </TooltipTrigger>
                           <TooltipContent>
-                            <p>Actualizar precio</p>
+                            <p>{translate('updatePrice')}</p>
                           </TooltipContent>
                         </Tooltip>
                         <Tooltip>
@@ -655,14 +845,14 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
                             </button>
                           </TooltipTrigger>
                           <TooltipContent>
-                            <p>Ver historial de precios y consultar por fecha</p>
+                            <p>{translate('priceHistoryTooltip')}</p>
                           </TooltipContent>
                         </Tooltip>
                       </div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <Badge className={getStatusBadgeColor(product.isActive)}>
-                        {product.isActive ? 'Activo' : 'Inactivo'}
+                        {product.isActive ? translate('active') : translate('inactive')}
                       </Badge>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
@@ -686,19 +876,19 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
                           <AlertDialogContent>
                             <AlertDialogHeader>
                               <AlertDialogTitle>
-                                {product.isActive ? 'Desactivar' : 'Activar'} producto
+                                {product.isActive ? translate('deactivate') : translate('activate')} {translate('product')}
                               </AlertDialogTitle>
                               <AlertDialogDescription>
-                                ¿Estás seguro de que deseas {product.isActive ? 'desactivar' : 'activar'} "{product.name}"?
+                                {translate('confirmDeactivateProduct').replace('{action}', product.isActive ? translate('deactivate') : translate('activate')).replace('{name}', product.name)}
                               </AlertDialogDescription>
                             </AlertDialogHeader>
                             <AlertDialogFooter>
-                              <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                              <AlertDialogCancel>{translate('cancel')}</AlertDialogCancel>
                               <AlertDialogAction
                                 onClick={() => handleToggleStatus(product)}
                                 className={product.isActive ? 'bg-red-600 hover:bg-red-700' : 'bg-green-600 hover:bg-green-700'}
                               >
-                                {product.isActive ? 'Desactivar' : 'Activar'}
+                                {product.isActive ? translate('deactivate') : translate('activate')}
                               </AlertDialogAction>
                             </AlertDialogFooter>
                           </AlertDialogContent>
@@ -715,18 +905,18 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
             <div className="p-4 bg-amber-50 border border-amber-200 rounded-lg mx-4 mt-4">
               <p className="text-sm text-amber-800">{loadError}</p>
               <Button variant="outline" size="sm" className="mt-2" onClick={() => loadProducts()}>
-                Reintentar
+                {translate('retry')}
               </Button>
             </div>
           )}
           {filteredProducts.length === 0 && !loadError && (
             <div className="text-center py-12">
               <Archive className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-              <h3 className="text-lg font-medium text-gray-900 mb-2">No se encontraron productos</h3>
+              <h3 className="text-lg font-medium text-gray-900 mb-2">{translate('noProductsSearch')}</h3>
               <p className="text-gray-500 mb-4">
                 {searchTerm || statusFilter !== 'all' || categoryFilter !== 'all'
-                  ? 'Intenta ajustar los filtros de búsqueda'
-                  : 'Comienza creando tu primer producto'
+                  ? translate('tryOtherSearchProducts')
+                  : translate('createFirstProductHint')
                 }
               </p>
               {!searchTerm && statusFilter === 'all' && categoryFilter === 'all' && (
@@ -735,7 +925,7 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
                   className="bg-indigo-600 hover:bg-indigo-700"
                 >
                   <Plus className="h-4 w-4 mr-2" />
-                  Crear Primer Producto
+                  {translate('createFirstProduct')}
                 </Button>
               )}
             </div>
@@ -752,10 +942,10 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
             onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
             disabled={currentPage === 1}
           >
-            Anterior
+            {translate('previous')}
           </Button>
           <span className="text-sm text-gray-600">
-            Página {currentPage} de {Math.ceil(filteredProducts.length / itemsPerPage)}
+            {translate('page')} {currentPage} {translate('pageOf')} {Math.ceil(filteredProducts.length / itemsPerPage)}
           </span>
           <Button
             variant="outline"
@@ -763,18 +953,128 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
             onClick={() => setCurrentPage(prev => Math.min(prev + 1, Math.ceil(filteredProducts.length / itemsPerPage)))}
             disabled={currentPage === Math.ceil(filteredProducts.length / itemsPerPage)}
           >
-            Siguiente
+            {translate('next')}
           </Button>
         </div>
       )}
+        </TabsContent>
+
+        <TabsContent value="catalog" className="mt-6 space-y-6">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <Card>
+              <CardContent className="p-0">
+                <div className="flex items-center justify-between px-4 py-3.5 border-b-2 border-indigo-200 bg-indigo-50/80 rounded-t-lg">
+                  <span className="text-base font-bold text-indigo-900">{translate('brands')}</span>
+                  <button
+                    type="button"
+                    onClick={() => { setEditingBrand(null); setBrandName(''); setShowBrandDialog(true); }}
+                    className="text-indigo-600 hover:text-indigo-800 font-medium flex items-center gap-1.5"
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                    {translate('addBrand')}
+                  </button>
+                </div>
+                <div className="divide-y divide-gray-200 bg-white">
+                  {brands.length === 0 ? (
+                    <p className="px-4 py-8 text-sm text-gray-500 text-center">{translate('noBrands')}</p>
+                  ) : (
+                    brands.map((b) => (
+                      <div key={b.id} className="flex items-center justify-between px-4 py-3 hover:bg-gray-50 group">
+                        <span className="text-sm font-medium text-gray-900">{b.name}</span>
+                        <div className="flex items-center gap-1 opacity-70 group-hover:opacity-100">
+                          <span className={`text-xs px-1.5 py-0.5 rounded ${b.isActive ? 'text-green-600 bg-green-50' : 'text-gray-400 bg-gray-100'}`}>
+                            {b.isActive ? translate('activeBadge') : translate('inactiveBadge')}
+                          </span>
+                          <button type="button" onClick={() => { setEditingBrand(b); setBrandName(b.name); setShowBrandDialog(true); }} className="p-1.5 rounded-md text-indigo-500 hover:text-indigo-600 hover:bg-indigo-50" aria-label={translate('edit')}>
+                            <Edit3 className="h-3.5 w-3.5" />
+                          </button>
+                          <AlertDialog>
+                            <AlertDialogTrigger asChild>
+                              <button type="button" className="p-1.5 rounded-md hover:bg-gray-100" aria-label="Activar/Desactivar">
+                                {b.isActive ? <PowerOff className="h-3.5 w-3.5 text-red-500 hover:text-red-600" /> : <Power className="h-3.5 w-3.5 text-green-600 hover:text-green-700" />}
+                              </button>
+                            </AlertDialogTrigger>
+                            <AlertDialogContent>
+                              <AlertDialogHeader>
+                                <AlertDialogTitle>{b.isActive ? translate('deactivate') : translate('activate')} {translate('brands').toLowerCase()}</AlertDialogTitle>
+                                <AlertDialogDescription>{translate('confirmDeactivateBrand').replace('{name}', b.name)}</AlertDialogDescription>
+                              </AlertDialogHeader>
+                              <AlertDialogFooter>
+                                <AlertDialogCancel>{translate('cancel')}</AlertDialogCancel>
+                                <AlertDialogAction onClick={() => handleToggleBrand(b)}>{translate('confirm')}</AlertDialogAction>
+                              </AlertDialogFooter>
+                            </AlertDialogContent>
+                          </AlertDialog>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardContent className="p-0">
+                <div className="flex items-center justify-between px-4 py-3.5 border-b-2 border-indigo-200 bg-indigo-50/80 rounded-t-lg">
+                  <span className="text-base font-bold text-indigo-900">{translate('categories')}</span>
+                  <button
+                    type="button"
+                    onClick={() => { setEditingCategory(null); setCategoryName(''); setShowCategoryDialog(true); }}
+                    className="text-indigo-600 hover:text-indigo-800 font-medium flex items-center gap-1.5"
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                    {translate('addCategory')}
+                  </button>
+                </div>
+                <div className="divide-y divide-gray-200 bg-white">
+                  {categories.length === 0 ? (
+                    <p className="px-4 py-8 text-sm text-gray-500 text-center">{translate('noCategories')}</p>
+                  ) : (
+                    categories.map((c) => (
+                      <div key={c.id} className="flex items-center justify-between px-4 py-3 hover:bg-gray-50 group">
+                        <span className="text-sm font-medium text-gray-900">{c.name}</span>
+                        <div className="flex items-center gap-1 opacity-70 group-hover:opacity-100">
+                          <span className={`text-xs px-1.5 py-0.5 rounded ${c.isActive ? 'text-green-600 bg-green-50' : 'text-gray-400 bg-gray-100'}`}>
+                            {c.isActive ? translate('activeBadge') : translate('inactiveBadge')}
+                          </span>
+                          <button type="button" onClick={() => { setEditingCategory(c); setCategoryName(c.name); setShowCategoryDialog(true); }} className="p-1.5 rounded-md text-indigo-500 hover:text-indigo-600 hover:bg-indigo-50" aria-label={translate('edit')}>
+                            <Edit3 className="h-3.5 w-3.5" />
+                          </button>
+                          <AlertDialog>
+                            <AlertDialogTrigger asChild>
+                              <button type="button" className="p-1.5 rounded-md hover:bg-gray-100" aria-label="Activar/Desactivar">
+                                {c.isActive ? <PowerOff className="h-3.5 w-3.5 text-red-500 hover:text-red-600" /> : <Power className="h-3.5 w-3.5 text-green-600 hover:text-green-700" />}
+                              </button>
+                            </AlertDialogTrigger>
+                            <AlertDialogContent>
+                              <AlertDialogHeader>
+                                <AlertDialogTitle>{c.isActive ? translate('deactivate') : translate('activate')} {translate('categories').toLowerCase()}</AlertDialogTitle>
+                                <AlertDialogDescription>{translate('confirmDeactivateCategory').replace('{name}', c.name)}</AlertDialogDescription>
+                              </AlertDialogHeader>
+                              <AlertDialogFooter>
+                                <AlertDialogCancel>{translate('cancel')}</AlertDialogCancel>
+                                <AlertDialogAction onClick={() => handleToggleCategory(c)}>{translate('confirm')}</AlertDialogAction>
+                              </AlertDialogFooter>
+                            </AlertDialogContent>
+                          </AlertDialog>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        </TabsContent>
+      </Tabs>
 
       {/* Product Detail Dialog */}
       <Dialog open={showDetailDialog} onOpenChange={setShowDetailDialog}>
         <DialogContent className="sm:max-w-xl">
           <DialogHeader>
-            <DialogTitle>Detalles del Producto</DialogTitle>
+            <DialogTitle>{translate('productDetails')}</DialogTitle>
             <DialogDescription>
-              Información completa del producto seleccionado
+              {translate('productInfoDescription')}
             </DialogDescription>
           </DialogHeader>
           
@@ -792,7 +1092,7 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
                         {selectedProduct.name}
                       </h3>
                       <Badge className={getStatusBadgeColor(selectedProduct.isActive)}>
-                        {selectedProduct.isActive ? 'Activo' : 'Inactivo'}
+                        {selectedProduct.isActive ? translate('active') : translate('inactive')}
                       </Badge>
                     </div>
                     <div className="flex items-center gap-4 text-sm text-gray-500">
@@ -817,7 +1117,7 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div className="space-y-4">
                   <div>
-                    <Label className="text-sm font-medium text-gray-500">Categoría</Label>
+                    <Label className="text-sm font-medium text-gray-500">{translate('categoryHeader')}</Label>
                     <p className="flex items-center gap-1">
                       <Tag className="h-4 w-4 text-gray-400" />
                       {selectedProduct.category}
@@ -832,7 +1132,7 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
                 
                 <div className="space-y-4">
                   <div>
-                    <Label className="text-sm font-medium text-gray-500">Fecha de Registro</Label>
+                    <Label className="text-sm font-medium text-gray-500">{translate('registrationDate')}</Label>
                     <p className="flex items-center gap-1">
                       <Calendar className="h-4 w-4 text-gray-400" />
                       {new Date(selectedProduct.createdAt).toLocaleDateString('es-ES', {
@@ -844,7 +1144,7 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
                   </div>
                   
                   <div>
-                    <Label className="text-sm font-medium text-gray-500">Última Actualización</Label>
+                    <Label className="text-sm font-medium text-gray-500">{translate('lastUpdate')}</Label>
                     <p className="flex items-center gap-1">
                       <Calendar className="h-4 w-4 text-gray-400" />
                       {new Date(selectedProduct.updatedAt).toLocaleDateString('es-ES', {
@@ -862,7 +1162,7 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
           
           <DialogFooter>
             <DialogClose asChild>
-              <Button variant="outline">Cerrar</Button>
+              <Button variant="outline">{translate('close')}</Button>
             </DialogClose>
             {selectedProduct && (
               <Button 
@@ -873,7 +1173,7 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
                 className="bg-indigo-600 hover:bg-indigo-700"
               >
                 <Edit3 className="h-4 w-4 mr-2" />
-                Editar
+                {translate('edit')}
               </Button>
             )}
           </DialogFooter>
@@ -884,16 +1184,16 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
       <Dialog open={showUpdatePriceDialog} onOpenChange={setShowUpdatePriceDialog}>
         <DialogContent className="sm:max-w-xl">
           <DialogHeader>
-            <DialogTitle>Actualizar Precio</DialogTitle>
+            <DialogTitle>{translate('updatePriceTitle')}</DialogTitle>
             <DialogDescription>
-              {selectedProduct && `Actualizar el precio de "${selectedProduct.name}"`}
+              {selectedProduct && translate('updatePriceDesc').replace('{name}', selectedProduct.name)}
             </DialogDescription>
           </DialogHeader>
           
           <div className="space-y-5 px-6 py-4">
             {selectedProduct && (
               <div className="bg-gray-50 p-4 rounded-lg">
-                <p className="text-sm text-gray-600">Precio actual:</p>
+                <p className="text-sm text-gray-600">{translate('currentPrice')}:</p>
                 <p className="text-lg font-semibold text-green-600">
                   ${(selectedProduct.currentPrice || 0).toLocaleString('es-ES', { 
                     minimumFractionDigits: 2, 
@@ -904,7 +1204,7 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
             )}
             
             <div className="space-y-2">
-              <Label htmlFor="newPrice">Nuevo Precio *</Label>
+              <Label htmlFor="newPrice">{translate('newPriceLabel')}</Label>
               <div className="relative">
                 <DollarSign className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
                 <Input
@@ -924,12 +1224,12 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
           <DialogFooter>
             <DialogClose asChild>
               <Button variant="outline" onClick={resetPriceForm}>
-                Cancelar
+                {translate('cancel')}
               </Button>
             </DialogClose>
             <Button onClick={handleUpdatePrice} className="bg-green-600 hover:bg-green-700">
               <Save className="h-4 w-4 mr-2" />
-              Actualizar Precio
+              {translate('updatePrice')}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -939,7 +1239,7 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
       <Dialog open={showPriceHistoryDialog} onOpenChange={setShowPriceHistoryDialog}>
         <DialogContent className="max-w-2xl">
           <DialogHeader>
-            <DialogTitle>Historial de Precios</DialogTitle>
+            <DialogTitle>{translate('priceHistoryTitle')}</DialogTitle>
             <DialogDescription>
               {selectedProduct && `${selectedProduct.name} • SKU: ${selectedProduct.sku}`}
             </DialogDescription>
@@ -951,7 +1251,7 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
               <div className="bg-gray-50 p-3 rounded-lg border">
                 <div className="flex items-center gap-4">
                   <div className="flex items-center gap-2">
-                    <span className="text-sm font-medium">Precio actual:</span>
+                    <span className="text-sm font-medium">{translate('currentPrice')}:</span>
                     <span className="text-lg font-bold text-green-600">
                       ${(selectedProduct.currentPrice || 0).toLocaleString('es-ES', { 
                         minimumFractionDigits: 2, 
@@ -963,7 +1263,7 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
                   <div className="flex-1"></div>
                   
                   <div className="flex items-center gap-2">
-                    <span className="text-sm">Consultar fecha:</span>
+                    <span className="text-sm">{translate('queryDateLabel')}</span>
                     <Input
                       type="date"
                       value={queryDate}
@@ -976,7 +1276,7 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
 
                 {queryResult && (
                   <div className="mt-3 p-3 bg-blue-50 rounded border-l-4 border-blue-400">
-                    <span className="text-sm text-blue-700">Precio en {queryDate}:</span>
+                    <span className="text-sm text-blue-700">{translate('priceOnDate').replace('{date}', queryDate)}</span>
                     <span className="ml-2 font-bold text-blue-900">
                       ${queryResult.price.toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </span>
@@ -989,7 +1289,7 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
                 {queryDate && !queryResult && (
                   <div className="mt-3 p-3 bg-amber-50 rounded border-l-4 border-amber-400">
                     <span className="text-sm text-amber-700">
-                      No hay precio registrado para la fecha seleccionada
+                      {translate('noPriceForDate')}
                     </span>
                   </div>
                 )}
@@ -999,9 +1299,9 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
               <div className="border rounded-lg overflow-hidden">
                 <div className="bg-gray-100 px-4 py-2 border-b">
                   <div className="flex items-center justify-between">
-                    <span className="text-sm font-medium">Historial completo</span>
+                    <span className="text-sm font-medium">{translate('fullHistory')}</span>
                     <Badge variant="outline" className="text-xs">
-                      {priceHistoryList.length} registros
+                      {priceHistoryList.length} {translate('records')}
                     </Badge>
                   </div>
                 </div>
@@ -1009,7 +1309,7 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
                   {priceHistoryList.length === 0 ? (
                     <div className="text-center py-8">
                       <History className="h-8 w-8 text-gray-400 mx-auto mb-2" />
-                      <p className="text-sm text-gray-500">Sin historial de precios</p>
+                      <p className="text-sm text-gray-500">{translate('noPriceHistory')}</p>
                     </div>
                   ) : (
                     <div>
@@ -1021,7 +1321,7 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
                                 ${history.price.toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                               </span>
                               {index === 0 && (
-                                <Badge className="bg-green-100 text-green-800 text-xs">Actual</Badge>
+                                <Badge className="bg-green-100 text-green-800 text-xs">{translate('currentBadge')}</Badge>
                               )}
                             </div>
                             <span className="text-xs text-gray-500">
@@ -1055,13 +1355,57 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
                 setShowPriceHistoryDialog(false);
               }}
             >
-              Cerrar
+              {translate('close')}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
+      {/* Brand dialog */}
+      <Dialog open={showBrandDialog} onOpenChange={setShowBrandDialog}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>{editingBrand ? translate('editBrand') : translate('newBrand')}</DialogTitle>
+            <DialogDescription>{editingBrand ? translate('editBrandDesc') : translate('newBrandDesc')}</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <Label htmlFor="brandName">{translate('name')} *</Label>
+            <Input
+              id="brandName"
+              value={brandName}
+              onChange={(e) => setBrandName(e.target.value)}
+              placeholder="Ej. Acme"
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => { setShowBrandDialog(false); setBrandName(''); setEditingBrand(null); }}>{translate('cancel')}</Button>
+            <Button onClick={handleSaveBrand} className="bg-indigo-600 hover:bg-indigo-700">{translate('save')}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
+      {/* Category dialog */}
+      <Dialog open={showCategoryDialog} onOpenChange={setShowCategoryDialog}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>{editingCategory ? translate('editCategory') : translate('newCategory')}</DialogTitle>
+            <DialogDescription>{editingCategory ? translate('editCategoryDesc') : translate('newCategoryDesc')}</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <Label htmlFor="categoryName">{translate('name')} *</Label>
+            <Input
+              id="categoryName"
+              value={categoryName}
+              onChange={(e) => setCategoryName(e.target.value)}
+              placeholder="Ej. Bebidas"
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => { setShowCategoryDialog(false); setCategoryName(''); setEditingCategory(null); }}>{translate('cancel')}</Button>
+            <Button onClick={handleSaveCategory} className="bg-indigo-600 hover:bg-indigo-700">{translate('save')}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

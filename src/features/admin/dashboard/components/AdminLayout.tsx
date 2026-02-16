@@ -67,72 +67,27 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ children, currentPage,
   };
 
   const coreNavigation = [
-    {
-      name: 'Panel Principal',
-      href: '/dashboard',
-      icon: LayoutDashboard,
-      current: activePage === 'dashboard'
-    },
-    {
-      name: 'Gestión de Ciudades',
-      href: '/cities',
-      icon: MapPin,
-      current: activePage === 'cities'
-    },
-    {
-      name: 'Gestión de Tiendas',
-      href: '/stores',
-      icon: StoreIcon,
-      current: activePage === 'stores'
-    },
-    {
-      name: 'Gestión de Usuarios',
-      href: '/users',
-      icon: Users,
-      current: activePage === 'users'
-    }
+    { nameKey: 'navMainPanel', href: '/dashboard', icon: LayoutDashboard, current: activePage === 'dashboard' },
+    { nameKey: 'navCities', href: '/cities', icon: MapPin, current: activePage === 'cities' },
+    { nameKey: 'navStores', href: '/stores', icon: StoreIcon, current: activePage === 'stores' },
+    { nameKey: 'navUsers', href: '/users', icon: Users, current: activePage === 'users' }
   ];
 
   const catalogNavigation = [
-    {
-      name: 'Gestión de Productos',
-      href: '/products',
-      icon: Package,
-      current: activePage === 'products'
-    },
-    {
-      name: 'Planogramas',
-      href: '/planograms',
-      icon: Layout,
-      current: activePage === 'planograms'
-    }
+    { nameKey: 'navProducts', href: '/products', icon: Package, current: activePage === 'products' },
+    { nameKey: 'navPlanograms', href: '/planograms', icon: Layout, current: activePage === 'planograms' }
   ];
 
   const salesNavigation = [
-    {
-      name: 'Gestión de Pedidos',
-      href: '/orders',
-      icon: ShoppingCart,
-      current: activePage === 'orders' || activePage === 'unified-flow'
-    }
+    { nameKey: 'navOrders', href: '/orders', icon: ShoppingCart, current: activePage === 'orders' || activePage === 'unified-flow' }
   ];
 
   const analyticsNavigation = [
-    {
-      name: 'Reportes de Ventas',
-      href: '/reports',
-      icon: BarChart3,
-      current: activePage === 'reports'
-    }
+    { nameKey: 'navReports', href: '/reports', icon: BarChart3, current: activePage === 'reports' }
   ];
 
   const userNavigation = [
-    {
-      name: 'Mi Perfil',
-      href: '/profile',
-      icon: UserIcon,
-      current: activePage === 'profile'
-    }
+    { nameKey: 'navMyProfile', href: '/profile', icon: UserIcon, current: activePage === 'profile' }
   ];
 
   const getUserInitials = () => {
@@ -150,22 +105,22 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ children, currentPage,
 
   const getRoleLabel = (role?: string) => {
     switch (role) {
-      case 'admin': return 'Administrador';
-      case 'user': return 'Vendedor';
-      default: return 'Usuario';
+      case 'admin': return translate('admin');
+      case 'user': return translate('roleSeller');
+      default: return translate('user');
     }
   };
 
-  const NavSection = ({ title, items }: { title: string; items: any[] }) => (
+  const NavSection = ({ titleKey, items }: { titleKey: string; items: typeof coreNavigation }) => (
     <div className="space-y-2">
       <div className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3 px-3">
-        {title}
+        {translate(titleKey)}
       </div>
       {items.map((item) => {
         const Icon = item.icon;
         return (
           <Link
-            key={item.name}
+            key={item.nameKey}
             href={item.href}
             onClick={() => handleNavigate(item.href.replace('/', ''))}
             className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200 ${
@@ -175,7 +130,7 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ children, currentPage,
             }`}
           >
             <Icon className="h-5 w-5" />
-            {item.name}
+            {translate(item.nameKey)}
           </Link>
         );
       })}
@@ -212,28 +167,15 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ children, currentPage,
 
           {/* Navigation */}
           <nav className="flex-1 px-4 py-6 space-y-6 overflow-y-auto">
-            {/* Core Administration */}
-            <NavSection title="Administración" items={coreNavigation} />
-            
+            <NavSection titleKey="sectionAdministration" items={coreNavigation} />
             <Separator className="mx-3" />
-            
-            {/* Catalog Management */}
-            <NavSection title="Catálogo y Planogramas" items={catalogNavigation} />
-            
+            <NavSection titleKey="sectionCatalog" items={catalogNavigation} />
             <Separator className="mx-3" />
-            
-            {/* Sales & Operations */}
-            <NavSection title="Ventas y Operaciones" items={salesNavigation} />
-            
+            <NavSection titleKey="sectionSales" items={salesNavigation} />
             <Separator className="mx-3" />
-            
-            {/* Analytics */}
-            <NavSection title="Análisis" items={analyticsNavigation} />
-            
+            <NavSection titleKey="sectionAnalytics" items={analyticsNavigation} />
             <Separator className="mx-3" />
-            
-            {/* User Management */}
-            <NavSection title="Usuario" items={userNavigation} />
+            <NavSection titleKey="sectionUser" items={userNavigation} />
           </nav>
 
           {/* User info */}
@@ -315,12 +257,12 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ children, currentPage,
                   <DropdownMenuSeparator />
                   <DropdownMenuItem onClick={() => handleNavigate('profile')}>
                     <UserIcon className="mr-2 h-4 w-4" />
-                    <span>Mi Perfil</span>
+                    <span>{translate('myProfile')}</span>
                   </DropdownMenuItem>
                   <DropdownMenuSeparator />
                   <DropdownMenuItem onClick={handleLogout} className="text-red-600">
                     <LogOut className="mr-2 h-4 w-4" />
-                    <span>Cerrar Sesión</span>
+                    <span>{translate('signOut')}</span>
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>

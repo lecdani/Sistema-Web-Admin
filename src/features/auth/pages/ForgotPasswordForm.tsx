@@ -55,7 +55,7 @@ export const ForgotPasswordForm: React.FC<ForgotPasswordFormProps> = ({ onBackTo
     if (result.success) {
       setIsSuccess(true);
     } else {
-      setError(result.message || 'Error al enviar el enlace de recuperación');
+      setError(result.message || translate('resetError'));
     }
   };
 
@@ -84,10 +84,10 @@ export const ForgotPasswordForm: React.FC<ForgotPasswordFormProps> = ({ onBackTo
             
             <div className="space-y-3">
               <h2 className="text-2xl font-bold text-gray-900">
-                ¡Enlace Enviado!
+                {translate('linkSentTitle')}
               </h2>
               <p className="text-gray-600">
-                Hemos enviado un enlace de recuperación a
+                {translate('linkSentMessage')}
               </p>
               <p className="font-semibold text-primary">
                 {email}
@@ -96,7 +96,7 @@ export const ForgotPasswordForm: React.FC<ForgotPasswordFormProps> = ({ onBackTo
 
             <div className="space-y-4 pt-4">
               <p className="text-sm text-gray-500">
-                Si no recibes el correo en unos minutos, revisa tu carpeta de spam.
+                {translate('checkSpam')}
               </p>
               
               <Button
@@ -105,7 +105,7 @@ export const ForgotPasswordForm: React.FC<ForgotPasswordFormProps> = ({ onBackTo
                 className="w-full h-12 border-gray-200 hover:bg-gray-50"
               >
                 <ArrowLeft className="mr-2 h-4 w-4" />
-                Volver al inicio de sesión
+                {translate('backToLogin')}
               </Button>
             </div>
           </div>
@@ -120,10 +120,10 @@ export const ForgotPasswordForm: React.FC<ForgotPasswordFormProps> = ({ onBackTo
         <div className="space-y-6">
           <div className="text-center space-y-3">
             <h2 className="text-2xl font-bold text-gray-900">
-              Recuperar Contraseña
+              {translate('recoverPassword')}
             </h2>
             <p className="text-gray-600">
-              Ingresa tu correo electrónico y te enviaremos un enlace para restablecer tu contraseña.
+              {translate('recoverPasswordDesc')}
             </p>
           </div>
 
@@ -138,14 +138,14 @@ export const ForgotPasswordForm: React.FC<ForgotPasswordFormProps> = ({ onBackTo
           <form onSubmit={handleSubmit} className="space-y-6">
             <div className="space-y-2">
               <Label htmlFor="reset-email" className="text-gray-700 font-medium">
-                Correo electrónico
+                {translate('email')}
               </Label>
               <div className="relative">
                 <Mail className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
                 <Input
                   id="reset-email"
                   type="email"
-                  placeholder="tu@empresa.com"
+                  placeholder={translate('emailPlaceholder')}
                   value={email}
                   onChange={(e) => handleInputChange(e.target.value)}
                   className={`pl-10 h-12 border-gray-200 focus:border-primary focus:ring-primary/20 ${
@@ -172,10 +172,10 @@ export const ForgotPasswordForm: React.FC<ForgotPasswordFormProps> = ({ onBackTo
                 {isLoading ? (
                   <div className="flex items-center justify-center gap-2">
                     <Loader2 className="h-4 w-4 animate-spin" />
-                    <span>Enviando enlace...</span>
+                    <span>{translate('sendingLink')}</span>
                   </div>
                 ) : (
-                  'Enviar Enlace de Recuperación'
+                  {translate('sendRecoveryLink')}
                 )}
               </Button>
 
@@ -187,7 +187,7 @@ export const ForgotPasswordForm: React.FC<ForgotPasswordFormProps> = ({ onBackTo
                 disabled={isLoading}
               >
                 <ArrowLeft className="mr-2 h-4 w-4" />
-                Volver al inicio de sesión
+                {translate('backToLogin')}
               </Button>
             </div>
           </form>

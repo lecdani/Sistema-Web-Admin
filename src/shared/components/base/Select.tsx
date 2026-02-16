@@ -67,11 +67,17 @@ export const SelectTrigger = React.forwardRef<HTMLButtonElement, SelectTriggerPr
 
 SelectTrigger.displayName = 'SelectTrigger';
 
-export const SelectValue: React.FC<{ placeholder?: string }> = ({ placeholder }) => {
+/** Muestra el valor seleccionado. Si pasas children, se muestra ese contenido (ej. nombre) en lugar del value (ej. id). */
+export const SelectValue: React.FC<{ placeholder?: string; children?: React.ReactNode }> = ({ placeholder, children }) => {
   const context = useContext(SelectContext);
   if (!context) throw new Error('SelectValue must be used within Select');
 
-  return <span className={context.value ? 'text-gray-900' : 'text-gray-400'}>{context.value || placeholder}</span>;
+  const display = context.value ? (children ?? context.value) : null;
+  return (
+    <span className={display ? 'text-gray-900' : 'text-gray-400'}>
+      {display || placeholder}
+    </span>
+  );
 };
 
 export interface SelectContentProps extends React.HTMLAttributes<HTMLDivElement> { }

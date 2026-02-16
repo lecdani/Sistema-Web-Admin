@@ -16,6 +16,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/shared/components/ba
 import { Badge } from '@/shared/components/base/Badge';
 import { Label } from '@/shared/components/base/Label';
 import { ScrollArea } from '@/shared/components/base/ScrollArea';
+import { useLanguage } from '@/shared/hooks/useLanguage';
 import { PlanogramWithDistribution, Product } from '@/shared/types';
 
 interface PlanogramViewerProps {
@@ -25,6 +26,7 @@ interface PlanogramViewerProps {
 const GRID_SIZE = 10;
 
 export const PlanogramViewer: React.FC<PlanogramViewerProps> = ({ planogram }) => {
+  const { translate } = useLanguage();
   // Crear grilla visual
   const createGrid = () => {
     const grid: (Product | null)[][] = [];
@@ -37,12 +39,13 @@ export const PlanogramViewer: React.FC<PlanogramViewerProps> = ({ planogram }) =
       }
     }
 
-    // Llenar grilla con productos
+    // Llenar grilla con productos (xPosition = fila, yPosition = columna, igual que en el editor)
     planogram.distributions.forEach(distribution => {
       const product = planogram.products?.find(p => p.id === distribution.productId);
-      if (product && distribution.xPosition < GRID_SIZE && distribution.yPosition < GRID_SIZE) {
-        grid[distribution.xPosition][distribution.yPosition] = product;
-      }
+      if (!product) return;
+      const row = Math.min(GRID_SIZE - 1, Math.max(0, distribution.xPosition));
+      const col = Math.min(GRID_SIZE - 1, Math.max(0, distribution.yPosition));
+      grid[row][col] = product;
     });
 
     return grid;
@@ -99,13 +102,13 @@ export const PlanogramViewer: React.FC<PlanogramViewerProps> = ({ planogram }) =
           <div className="flex items-center gap-3">
             <div className="flex items-center gap-2">
               <Grid3x3 className="h-4 w-4 text-green-600" />
-              <span className="font-bold text-gray-900">Visualizador de Planograma</span>
+              <span className="font-bold text-gray-900">{translate('planogramViewerTitle')}</span>
             </div>
             <Badge variant="outline" className="text-xs">10×10</Badge>
             {planogram.isActive && (
               <Badge className="bg-green-100 text-green-800 text-xs flex items-center gap-1">
                 <CheckCircle className="h-3 w-3" />
-                Activo
+                {translate('active')}
               </Badge>
             )}
           </div>
@@ -113,15 +116,15 @@ export const PlanogramViewer: React.FC<PlanogramViewerProps> = ({ planogram }) =
           <div className="flex items-center gap-4">
             <div className="text-center">
               <div className="text-sm font-bold text-blue-600">{planogram.products?.length || 0}</div>
-              <div className="text-[10px] text-gray-600">Productos</div>
+              <div className="text-[10px] text-gray-600">{translate('productsLabel')}</div>
             </div>
             <div className="text-center">
               <div className="text-sm font-bold text-green-600">{((planogram.products?.length || 0 / (GRID_SIZE * GRID_SIZE)) * 100).toFixed(1)}%</div>
-              <div className="text-[10px] text-gray-600">Ocupación</div>
+              <div className="text-[10px] text-gray-600">{translate('occupancy')}</div>
             </div>
             <div className="text-center">
               <div className="text-sm font-bold text-purple-600">v{planogram.version}</div>
-              <div className="text-[10px] text-gray-600">Versión</div>
+              <div className="text-[10px] text-gray-600">{translate('versions')}</div>
             </div>
           </div>
         </div>
@@ -133,17 +136,17 @@ export const PlanogramViewer: React.FC<PlanogramViewerProps> = ({ planogram }) =
         <div className="flex-1 overflow-auto bg-gray-50 rounded-lg p-2">
           <div className="flex items-center justify-between mb-2">
             <div className="flex items-center gap-2">
-              <span className="text-xs font-semibold text-gray-900">Distribución de Productos</span>
-              <span className="text-[10px] text-gray-500">Vista de solo lectura</span>
+              <span className="text-xs font-semibold text-gray-900">{translate('distributionGrid')}</span>
+              <span className="text-[10px] text-gray-500">{translate('readOnlyView')}</span>
             </div>
             <div className="flex items-center gap-2 text-[10px]">
               <div className="flex items-center gap-0.5">
                 <div className="w-2.5 h-2.5 bg-green-200 border border-green-600 rounded"></div>
-                <span>Ocupada</span>
+                <span>{translate('occupied')}</span>
               </div>
               <div className="flex items-center gap-0.5">
                 <div className="w-2.5 h-2.5 bg-white border border-gray-600 rounded"></div>
-                <span>Vacía</span>
+                <span>{translate('empty')}</span>
               </div>
             </div>
           </div>
@@ -187,7 +190,7 @@ export const PlanogramViewer: React.FC<PlanogramViewerProps> = ({ planogram }) =
                         title={
                           product 
                             ? `${product.name} (${product.sku}) - Celda ${cellRef}` 
-                            : `Celda ${cellRef} - Vacía`
+                            : translate('cellEmpty').replace('{ref}', cellRef)
                         }
                       >
                         {product ? (
@@ -220,7 +223,7 @@ export const PlanogramViewer: React.FC<PlanogramViewerProps> = ({ planogram }) =
             <CardHeader className="pb-2 flex-shrink-0 p-2">
               <CardTitle className="text-xs flex items-center gap-1.5">
                 <Package className="h-3.5 w-3.5" />
-                Productos ({planogram.products?.length || 0})
+                {translate('productsLabel')} ({planogram.products?.length || 0})
               </CardTitle>
             </CardHeader>
             <CardContent className="p-0 flex-1 overflow-hidden">
@@ -255,7 +258,7 @@ export const PlanogramViewer: React.FC<PlanogramViewerProps> = ({ planogram }) =
                   ) : (
                     <div className="text-center py-8 text-gray-500">
                       <Package className="h-8 w-8 mx-auto mb-2 text-gray-400" />
-                      <p className="text-xs">Sin productos</p>
+                      <p className="text-xs">{translate('noProductsShort')}</p>
                     </div>
                   )}
                 </div>

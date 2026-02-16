@@ -29,6 +29,8 @@ import { useAuth } from '@/features/auth/hooks/useAuth';
 import { useLanguage } from '@/shared/hooks/useLanguage';
 import { getFromLocalStorage, setToLocalStorage } from '@/shared/services/database';
 import { User as UserType, AppSettings } from '@/shared/types';
+import { usersApi } from '@/shared/services/users-api';
+import { getLoggedUser, setLoggedUser } from '@/shared/utils/auth';
 import { validateProfileData, validatePasswordStrength } from '@/shared/utils/validation';
 import { toast } from '@/shared/components/base/Toast';
 
@@ -54,10 +56,9 @@ interface UserProfileProps {
 }
 
 export function UserProfile({ onBack }: UserProfileProps) {
-  const { user, logout } = useAuth();
-  const { language, setLanguage, t } = useLanguage();
+  const { user, refreshUser } = useAuth();
+  const { language, setLanguage, translate } = useLanguage();
   
-  // Estados para la información del perfil
   const [profileData, setProfileData] = useState<ProfileData>({
     firstName: user?.firstName || '',
     lastName: user?.lastName || '',
@@ -70,6 +71,7 @@ export function UserProfile({ onBack }: UserProfileProps) {
   const [originalProfileData, setOriginalProfileData] = useState<ProfileData>(profileData);
   const [isEditingProfile, setIsEditingProfile] = useState(false);
   const [profileLoading, setProfileLoading] = useState(false);
+  const [profileLoadError, setProfileLoadError] = useState<string | null>(null);
   
   // Estados para el cambio de contraseña
   const [passwordData, setPasswordData] = useState<PasswordData>({
@@ -96,131 +98,123 @@ export function UserProfile({ onBack }: UserProfileProps) {
   
   const [showPasswordDialog, setShowPasswordDialog] = useState(false);
 
-  // Cargar configuraciones del usuario al montar
+  // Cargar perfil desde API y configuraciones locales al montar
   useEffect(() => {
-    if (user) {
-      // Cargar datos del perfil extendidos si existen
-      const userProfiles = getFromLocalStorage('user-profiles') || {};
-      const userProfile = userProfiles[user.id];
-      
-      if (userProfile) {
-        setProfileData(prev => ({ ...prev, ...userProfile }));
-        setOriginalProfileData(prev => ({ ...prev, ...userProfile }));
-      }
-      
+    if (!user) return;
 
-      
-      // Cargar configuraciones de la app
+    const loadProfile = async () => {
+      try {
+        setProfileLoadError(null);
+        const profile = await usersApi.getProfile();
+        if (profile) {
+          const data: ProfileData = {
+            firstName: profile.firstName,
+            lastName: profile.lastName,
+            email: profile.email,
+            phone: profile.phone ?? '',
+            address: (profile as any).address ?? '',
+            avatar: profile.avatar
+          };
+          setProfileData(data);
+          setOriginalProfileData(data);
+        } else {
+          setProfileData(prev => ({
+            ...prev,
+            firstName: user.firstName,
+            lastName: user.lastName,
+            email: user.email,
+            phone: user.phone ?? '',
+            avatar: user.avatar
+          }));
+          setOriginalProfileData(prev => ({ ...prev, firstName: user.firstName, lastName: user.lastName, email: user.email, phone: user.phone ?? '', avatar: user.avatar }));
+        }
+      } catch {
+        setProfileLoadError(translate('errorLoadUsers'));
+        setProfileData(prev => ({
+          ...prev,
+          firstName: user.firstName,
+          lastName: user.lastName,
+          email: user.email,
+          phone: user.phone ?? '',
+          avatar: user.avatar
+        }));
+        setOriginalProfileData(prev => ({ ...prev, firstName: user.firstName, lastName: user.lastName, email: user.email, phone: user.phone ?? '' }));
+      }
+
       const appConfigs = getFromLocalStorage('user-app-settings') || {};
       const userAppConfig = appConfigs[user.id];
-      
-      if (userAppConfig) {
-        setAppSettings(userAppConfig);
-      }
-    }
-  }, [user]);
+      if (userAppConfig) setAppSettings(userAppConfig);
+    };
+
+    loadProfile();
+  }, [user?.id]);
 
   const handleProfileSave = async () => {
+    const validationErrors = validateProfileData(profileData);
+    if (Object.keys(validationErrors).length > 0) {
+      const firstError = Object.values(validationErrors)[0];
+      toast.error(firstError);
+      return;
+    }
+
     setProfileLoading(true);
-    
     try {
-      // Validar datos del perfil
-      const validationErrors = validateProfileData(profileData);
-      if (Object.keys(validationErrors).length > 0) {
-        const firstError = Object.values(validationErrors)[0];
-        toast.error(firstError);
-        return;
-      }
-      
-      // Guardar en localStorage
-      const userProfiles = getFromLocalStorage('user-profiles') || {};
-      userProfiles[user!.id] = {
+      await usersApi.updateProfile({
         firstName: profileData.firstName,
         lastName: profileData.lastName,
         email: profileData.email,
         phone: profileData.phone,
-        address: profileData.address,
-        avatar: profileData.avatar
-      };
-      setToLocalStorage('user-profiles', userProfiles);
-      
-      // Actualizar también los datos del usuario principal
-      const users: UserType[] = getFromLocalStorage('app-users') || [];
-      const userIndex = users.findIndex(u => u.id === user!.id);
-      if (userIndex !== -1) {
-        users[userIndex] = {
-          ...users[userIndex],
-          firstName: profileData.firstName,
+        avatar: profileData.avatar,
+        address: profileData.address
+      });
+
+      const logged = getLoggedUser();
+      if (logged) {
+        setLoggedUser({
+          ...logged,
+          name: profileData.firstName,
           lastName: profileData.lastName,
           email: profileData.email,
-          updatedAt: new Date()
-        };
-        setToLocalStorage('app-users', users);
+          phone: profileData.phone,
+          avatar: profileData.avatar
+        } as any);
       }
-      
+      refreshUser?.();
       setOriginalProfileData(profileData);
       setIsEditingProfile(false);
-      toast.success('Perfil actualizado correctamente');
-      
-    } catch (error) {
-      toast.error('Error al actualizar el perfil');
+      toast.success(translate('userSaved'));
+    } catch (err: any) {
+      const msg = err?.data?.message ?? err?.message ?? translate('errorSaveUser');
+      toast.error(msg);
     } finally {
       setProfileLoading(false);
     }
   };
 
   const handlePasswordChange = async () => {
+    if (!passwordData.currentPassword || !passwordData.newPassword || !passwordData.confirmPassword) {
+      toast.error(translate('firstNameRequired'));
+      return;
+    }
+    if (passwordData.newPassword !== passwordData.confirmPassword) {
+      toast.error(translate('passwordMismatch'));
+      return;
+    }
+    const strengthValidation = validatePasswordStrength(passwordData.newPassword);
+    if (!strengthValidation.isValid) {
+      toast.error(`${translate('weakPassword')}: ${strengthValidation.feedback.join(', ')}`);
+      return;
+    }
+
     setPasswordLoading(true);
-    
     try {
-      // Validaciones
-      if (!passwordData.currentPassword || !passwordData.newPassword || !passwordData.confirmPassword) {
-        toast.error('Todos los campos son obligatorios');
-        return;
-      }
-      
-      if (passwordData.newPassword !== passwordData.confirmPassword) {
-        toast.error('Las contraseñas nuevas no coinciden');
-        return;
-      }
-      
-      // Validar fortaleza de la contraseña
-      const strengthValidation = validatePasswordStrength(passwordData.newPassword);
-      if (!strengthValidation.isValid) {
-        toast.error(`Contraseña débil: ${strengthValidation.feedback.join(', ')}`);
-        return;
-      }
-      
-      // Verificar contraseña actual
-      const users: UserType[] = getFromLocalStorage('app-users') || [];
-      const currentUser = users.find(u => u.id === user!.id);
-      
-      if (!currentUser || currentUser.password !== passwordData.currentPassword) {
-        toast.error('La contraseña actual es incorrecta');
-        return;
-      }
-      
-      // Actualizar contraseña
-      const userIndex = users.findIndex(u => u.id === user!.id);
-      users[userIndex] = {
-        ...users[userIndex],
-        password: passwordData.newPassword,
-        updatedAt: new Date()
-      };
-      setToLocalStorage('app-users', users);
-      
-      // Limpiar formulario
-      setPasswordData({
-        currentPassword: '',
-        newPassword: '',
-        confirmPassword: ''
-      });
-      
+      await usersApi.changePassword(passwordData.currentPassword, passwordData.newPassword);
+      setPasswordData({ currentPassword: '', newPassword: '', confirmPassword: '' });
       setShowPasswordDialog(false);
-      toast.success('Contraseña actualizada correctamente');
-      
-    } catch (error) {
-      toast.error('Error al cambiar la contraseña');
+      toast.success(translate('passwordResetSuccess'));
+    } catch (err: any) {
+      const msg = err?.data?.message ?? err?.message ?? translate('errorSaveUser');
+      toast.error(msg);
     } finally {
       setPasswordLoading(false);
     }
@@ -237,9 +231,9 @@ export function UserProfile({ onBack }: UserProfileProps) {
       // Aplicar cambio de idioma inmediatamente
       setLanguage(appSettings.language);
       
-      toast.success('Configuración de aplicación actualizada');
+      toast.success(translate('userSaved'));
     } catch (error) {
-      toast.error('Error al guardar configuración de aplicación');
+      toast.error(translate('errorSaveUser'));
     }
   };
 
@@ -254,9 +248,9 @@ export function UserProfile({ onBack }: UserProfileProps) {
 
   const getRoleBadge = (role: string) => {
     if (role === 'admin') {
-      return <Badge className="bg-indigo-100 text-indigo-800">Administrador</Badge>;
+      return <Badge className="bg-indigo-100 text-indigo-800">{translate('admin')}</Badge>;
     }
-    return <Badge variant="secondary">Vendedor</Badge>;
+    return <Badge variant="secondary">{translate('roleSeller')}</Badge>;
   };
 
   if (!user) {
@@ -264,7 +258,7 @@ export function UserProfile({ onBack }: UserProfileProps) {
       <div className="min-h-screen flex items-center justify-center">
         <div className="text-center">
           <User className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-          <p className="text-gray-500">No se pudo cargar el perfil del usuario</p>
+          <p className="text-gray-500">{translate('errorLoadUsers')}</p>
         </div>
       </div>
     );
@@ -285,8 +279,8 @@ export function UserProfile({ onBack }: UserProfileProps) {
                 <X className="h-5 w-5" />
               </Button>
               <div>
-                <h1 className="text-xl font-semibold text-gray-900">Mi Perfil</h1>
-                <p className="text-sm text-gray-500">Gestiona tu información personal y configuraciones</p>
+                <h1 className="text-xl font-semibold text-gray-900">{translate('myProfile')}</h1>
+                <p className="text-sm text-gray-500">{translate('usersSubtitle')}</p>
               </div>
             </div>
             
@@ -297,7 +291,7 @@ export function UserProfile({ onBack }: UserProfileProps) {
                   onClick={handleCancelEdit}
                   disabled={profileLoading}
                 >
-                  Cancelar
+                  {translate('cancel')}
                 </Button>
                 <Button
                   onClick={handleProfileSave}
@@ -307,12 +301,12 @@ export function UserProfile({ onBack }: UserProfileProps) {
                   {profileLoading ? (
                     <>
                       <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent mr-2" />
-                      Guardando...
+                      {translate('saving')}
                     </>
                   ) : (
                     <>
                       <Save className="h-4 w-4 mr-2" />
-                      Guardar
+                      {translate('saveProfile')}
                     </>
                   )}
                 </Button>
@@ -348,20 +342,20 @@ export function UserProfile({ onBack }: UserProfileProps) {
                   <div className="space-y-3 text-sm">
                     <div className="flex items-center text-gray-600">
                       <Calendar className="h-4 w-4 mr-2" />
-                      <span>Miembro desde {new Date(user.createdAt).toLocaleDateString('es-ES', { month: 'short', year: 'numeric' })}</span>
+                      <span>{translate('memberSince')} {new Date(user.createdAt).toLocaleDateString('es-ES', { month: 'short', year: 'numeric' })}</span>
                     </div>
                     
                     {user.lastLoginAt && (
                       <div className="flex items-center text-gray-600">
                         <Clock className="h-4 w-4 mr-2" />
-                        <span>Último acceso: {new Date(user.lastLoginAt).toLocaleDateString('es-ES')}</span>
+                        <span>{translate('lastAccess')}: {new Date(user.lastLoginAt).toLocaleDateString('es-ES')}</span>
                       </div>
                     )}
                     
                     <div className="flex items-center">
                       <UserCheck className="h-4 w-4 mr-2" />
                       <span className={user.isActive ? "text-green-600" : "text-red-600"}>
-                        {user.isActive ? "Cuenta activa" : "Cuenta inactiva"}
+                        {user.isActive ? translate('activeAccount') : translate('inactiveAccount')}
                       </span>
                     </div>
                   </div>
@@ -376,27 +370,32 @@ export function UserProfile({ onBack }: UserProfileProps) {
               <TabsList className="grid w-full grid-cols-3">
                 <TabsTrigger value="profile" className="flex items-center gap-2">
                   <User className="h-4 w-4" />
-                  Perfil
+                  {translate('profileTab')}
                 </TabsTrigger>
                 <TabsTrigger value="settings" className="flex items-center gap-2">
                   <Settings className="h-4 w-4" />
-                  Configuración
+                  {translate('settingsTab')}
                 </TabsTrigger>
                 <TabsTrigger value="notifications" className="flex items-center gap-2">
                   <Bell className="h-4 w-4" />
-                  Notificaciones
+                  {translate('notificationsTab')}
                 </TabsTrigger>
               </TabsList>
 
               {/* Tab de Perfil */}
               <TabsContent value="profile" className="space-y-6">
+                {profileLoadError && (
+                  <div className="rounded-lg bg-amber-50 border border-amber-200 px-4 py-3 text-sm text-amber-800">
+                    {profileLoadError}. {translate('sessionDataShown')}
+                  </div>
+                )}
                 <Card>
                   <CardHeader>
                     <div className="flex items-center justify-between">
                       <div>
-                        <CardTitle>Información Personal</CardTitle>
+                        <CardTitle>{translate('personalInfo')}</CardTitle>
                         <CardDescription>
-                          Actualiza tu información de perfil y datos de contacto
+                          {translate('updateProfileDesc')}
                         </CardDescription>
                       </div>
                       {!isEditingProfile && (
@@ -405,7 +404,7 @@ export function UserProfile({ onBack }: UserProfileProps) {
                           onClick={() => setIsEditingProfile(true)}
                         >
                           <Edit3 className="h-4 w-4 mr-2" />
-                          Editar
+                          {translate('editProfile')}
                         </Button>
                       )}
                     </div>
@@ -413,7 +412,7 @@ export function UserProfile({ onBack }: UserProfileProps) {
                   <CardContent className="space-y-4">
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       <div>
-                        <Label htmlFor="firstName">Nombre</Label>
+                        <Label htmlFor="firstName">{translate('firstName')}</Label>
                         <Input
                           id="firstName"
                           value={profileData.firstName}
@@ -424,7 +423,7 @@ export function UserProfile({ onBack }: UserProfileProps) {
                       </div>
                       
                       <div>
-                        <Label htmlFor="lastName">Apellido</Label>
+                        <Label htmlFor="lastName">{translate('lastName')}</Label>
                         <Input
                           id="lastName"
                           value={profileData.lastName}
@@ -436,7 +435,7 @@ export function UserProfile({ onBack }: UserProfileProps) {
                     </div>
                     
                     <div>
-                      <Label htmlFor="email">Email</Label>
+                      <Label htmlFor="email">{translate('email')}</Label>
                       <Input
                         id="email"
                         type="email"
@@ -448,7 +447,7 @@ export function UserProfile({ onBack }: UserProfileProps) {
                     </div>
                     
                     <div>
-                      <Label htmlFor="phone">Teléfono (opcional)</Label>
+                      <Label htmlFor="phone">{translate('phoneOptional')}</Label>
                       <Input
                         id="phone"
                         value={profileData.phone || ''}
@@ -460,7 +459,7 @@ export function UserProfile({ onBack }: UserProfileProps) {
                     </div>
                     
                     <div>
-                      <Label htmlFor="address">Dirección (opcional)</Label>
+                      <Label htmlFor="address">{translate('addressOptional')}</Label>
                       <Input
                         id="address"
                         value={profileData.address || ''}
@@ -480,9 +479,9 @@ export function UserProfile({ onBack }: UserProfileProps) {
               <TabsContent value="settings" className="space-y-6">
                 <Card>
                   <CardHeader>
-                    <CardTitle>Seguridad</CardTitle>
+                    <CardTitle>{translate('security')}</CardTitle>
                     <CardDescription>
-                      Mantén tu cuenta segura con una contraseña fuerte
+                      {translate('securityDesc')}
                     </CardDescription>
                   </CardHeader>
                   <CardContent>
@@ -490,20 +489,20 @@ export function UserProfile({ onBack }: UserProfileProps) {
                       <DialogTrigger asChild>
                         <Button variant="outline">
                           <Key className="h-4 w-4 mr-2" />
-                          Cambiar Contraseña
+                          {translate('changePassword')}
                         </Button>
                       </DialogTrigger>
                       <DialogContent>
                         <DialogHeader>
-                          <DialogTitle>Cambiar Contraseña</DialogTitle>
+                          <DialogTitle>{translate('changePassword')}</DialogTitle>
                           <DialogDescription>
-                            Ingresa tu contraseña actual y la nueva contraseña
+                            {translate('changePasswordDesc')}
                           </DialogDescription>
                         </DialogHeader>
                         
                         <div className="space-y-4">
                           <div>
-                            <Label htmlFor="currentPassword">Contraseña actual</Label>
+                            <Label htmlFor="currentPassword">{translate('currentPassword')}</Label>
                             <div className="relative">
                               <Input
                                 id="currentPassword"
@@ -524,7 +523,7 @@ export function UserProfile({ onBack }: UserProfileProps) {
                           </div>
                           
                           <div>
-                            <Label htmlFor="newPassword">Nueva contraseña</Label>
+                            <Label htmlFor="newPassword">{translate('newPasswordLabel')}</Label>
                             <div className="relative">
                               <Input
                                 id="newPassword"
@@ -553,10 +552,10 @@ export function UserProfile({ onBack }: UserProfileProps) {
                                     return 'bg-green-500';
                                   };
                                   const getStrengthText = (score: number) => {
-                                    if (score < 2) return 'Débil';
-                                    if (score < 3) return 'Regular';
-                                    if (score < 4) return 'Buena';
-                                    return 'Excelente';
+                                    if (score < 2) return translate('strengthWeak');
+                                    if (score < 3) return translate('strengthRegular');
+                                    if (score < 4) return translate('strengthGood');
+                                    return translate('strengthExcellent');
                                   };
                                   return (
                                     <div className="space-y-2">
@@ -577,7 +576,7 @@ export function UserProfile({ onBack }: UserProfileProps) {
                                       </div>
                                       {!strength.isValid && (
                                         <div className="text-xs text-gray-600">
-                                          <p className="font-medium mb-1">Para mejorar la seguridad:</p>
+                                          <p className="font-medium mb-1">{translate('toImproveSecurity')}</p>
                                           <ul className="list-disc list-inside space-y-1">
                                             {strength.feedback.map((tip, index) => (
                                               <li key={index}>{tip}</li>
@@ -593,7 +592,7 @@ export function UserProfile({ onBack }: UserProfileProps) {
                           </div>
                           
                           <div>
-                            <Label htmlFor="confirmPassword">Confirmar nueva contraseña</Label>
+                            <Label htmlFor="confirmPassword">{translate('confirmNewPassword')}</Label>
                             <div className="relative">
                               <Input
                                 id="confirmPassword"
@@ -616,7 +615,7 @@ export function UserProfile({ onBack }: UserProfileProps) {
                         
                         <DialogFooter>
                           <Button variant="outline" onClick={() => setShowPasswordDialog(false)}>
-                            Cancelar
+                            {translate('cancel')}
                           </Button>
                           <Button 
                             onClick={handlePasswordChange}
@@ -626,10 +625,10 @@ export function UserProfile({ onBack }: UserProfileProps) {
                             {passwordLoading ? (
                               <>
                                 <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent mr-2" />
-                                Guardando...
+                                {translate('saving')}
                               </>
                             ) : (
-                              "Cambiar Contraseña"
+                              translate('changePassword')
                             )}
                           </Button>
                         </DialogFooter>
@@ -640,14 +639,14 @@ export function UserProfile({ onBack }: UserProfileProps) {
 
                 <Card>
                   <CardHeader>
-                    <CardTitle>Preferencias de Aplicación</CardTitle>
+                    <CardTitle>{translate('appPreferences')}</CardTitle>
                     <CardDescription>
-                      Personaliza la experiencia de la aplicación
+                      {translate('customizeAppExperience')}
                     </CardDescription>
                   </CardHeader>
                   <CardContent className="space-y-4">
                     <div>
-                      <Label htmlFor="language">Idioma</Label>
+                      <Label htmlFor="language">{translate('language')}</Label>
                       <div className="flex items-center gap-4 mt-2">
                         <Button
                           variant={appSettings.language === 'es' ? 'default' : 'outline'}
@@ -655,7 +654,7 @@ export function UserProfile({ onBack }: UserProfileProps) {
                           className="flex items-center gap-2"
                         >
                           <Globe className="h-4 w-4" />
-                          Español
+                          {translate('spanish')}
                         </Button>
                         <Button
                           variant={appSettings.language === 'en' ? 'default' : 'outline'}
@@ -663,15 +662,15 @@ export function UserProfile({ onBack }: UserProfileProps) {
                           className="flex items-center gap-2"
                         >
                           <Globe className="h-4 w-4" />
-                          English
+                          {translate('english')}
                         </Button>
                       </div>
                     </div>
                     
                     <div className="flex items-center justify-between">
                       <div>
-                        <Label htmlFor="notifications">Notificaciones de aplicación</Label>
-                        <p className="text-sm text-gray-500">Recibe notificaciones del sistema</p>
+                        <Label htmlFor="notifications">{translate('appNotifications')}</Label>
+                        <p className="text-sm text-gray-500">{translate('receiveSystemNotifications')}</p>
                       </div>
                       <Switch
                         id="notifications"
@@ -685,7 +684,7 @@ export function UserProfile({ onBack }: UserProfileProps) {
                     <div className="pt-4">
                       <Button onClick={handleAppSettingsSave} className="bg-indigo-600 hover:bg-indigo-700">
                         <Save className="h-4 w-4 mr-2" />
-                        Guardar Configuración
+                        {translate('saveSettings')}
                       </Button>
                     </div>
                   </CardContent>
@@ -696,17 +695,17 @@ export function UserProfile({ onBack }: UserProfileProps) {
               <TabsContent value="notifications" className="space-y-6">
                 <Card>
                   <CardHeader>
-                    <CardTitle>Centro de Notificaciones</CardTitle>
+                    <CardTitle>{translate('notificationCenter')}</CardTitle>
                     <CardDescription>
-                      Historial de notificaciones y actividad de la cuenta
+                      {translate('notificationHistory')}
                     </CardDescription>
                   </CardHeader>
                   <CardContent>
                     <div className="text-center py-8">
                       <Bell className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-                      <h3 className="font-medium text-gray-900 mb-2">No hay notificaciones</h3>
+                      <h3 className="font-medium text-gray-900 mb-2">{translate('noNotifications')}</h3>
                       <p className="text-gray-500 text-sm">
-                        Las notificaciones y alertas aparecerán aquí
+                        {translate('notificationsWillAppearHere')}
                       </p>
                     </div>
                   </CardContent>

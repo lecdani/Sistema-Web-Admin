@@ -24,7 +24,11 @@ import {
   Upload
 } from 'lucide-react';
 import { getFromLocalStorage, setToLocalStorage } from '@/shared/services/database';
+import { useLanguage } from '@/shared/hooks/useLanguage';
 import { Store, User, Product, Planogram, Distribution, Order, OrderItem, Invoice, POD } from '@/shared/types';
+import { planogramsApi } from '@/shared/services/planograms-api';
+import { distributionsApi } from '@/shared/services/distributions-api';
+import { productsApi } from '@/shared/services/products-api';
 import { toast } from 'sonner';
 import { InvoicePreview } from './InvoicePreview';
 import { handleUploadPODImage } from '../services/orderDetailHelpers';
@@ -53,6 +57,7 @@ interface GridCell {
 const GRID_SIZE = 10;
 
 export function CreateOrderDialog({ onClose, onOrderCreated, editingOrder }: CreateOrderDialogProps) {
+  const { translate } = useLanguage();
   const [stores, setStores] = useState<Store[]>([]);
   const [sellers, setSellers] = useState<User[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
@@ -86,38 +91,41 @@ export function CreateOrderDialog({ onClose, onOrderCreated, editingOrder }: Cre
     }
   }, [editingOrder, grid.length, isOrderDataLoaded]);
 
-  const loadData = () => {
+  const loadData = async () => {
     try {
       const storesData = getFromLocalStorage('app-stores') || [];
       const usersData = getFromLocalStorage('app-users') || [];
-      const planogramsData = getFromLocalStorage('app-planograms') || [];
-      const distributionsData = getFromLocalStorage('app-distributions') || [];
-      const productsData = getFromLocalStorage('app-products') || [];
+      let planogramsData: Planogram[] = [];
+      let productsData: Product[] = [];
+      try {
+        planogramsData = await planogramsApi.fetchAll();
+        productsData = await productsApi.fetchAll();
+      } catch {
+        planogramsData = getFromLocalStorage('app-planograms') || [];
+        productsData = getFromLocalStorage('app-products') || [];
+      }
 
-      // Filtrar solo tiendas activas
       const activeStores = storesData.filter((s: Store) => s.isActive);
       setStores(activeStores);
-
-      // Filtrar solo vendedores activos
       const activeSellers = usersData.filter(
         (u: User) => u.role === 'user' && u.isActive
       );
       setSellers(activeSellers);
 
-      // Obtener planograma activo
       const activePlan = planogramsData.find((p: Planogram) => p.isActive);
-      
       if (!activePlan) {
-        toast.error('No hay ningún planograma activo');
+        toast.error(translate('noActivePlanogram'));
         return;
       }
-
       setActivePlanogram(activePlan);
 
-      // Obtener distribuciones del planograma activo
-      const planDistributions = distributionsData.filter(
-        (d: Distribution) => d.planogramId === activePlan.id
-      );
+      let planDistributions: Distribution[] = [];
+      try {
+        planDistributions = await distributionsApi.getByPlanogram(activePlan.id);
+      } catch {
+        const allDist = getFromLocalStorage('app-distributions') || [];
+        planDistributions = allDist.filter((d: Distribution) => d.planogramId === activePlan.id);
+      }
 
       // Crear lista de productos con cantidades iniciales
       const productsWithQty: ProductQuantity[] = planDistributions.map(
@@ -127,7 +135,7 @@ export function CreateOrderDialog({ onClose, onOrderCreated, editingOrder }: Cre
             productId: dist.productId,
             product: product || {
               id: dist.productId,
-              name: 'Producto no encontrado',
+              name: translate('productNotFound'),
               currentPrice: 0,
               sku: '',
               category: '',
@@ -160,7 +168,7 @@ export function CreateOrderDialog({ onClose, onOrderCreated, editingOrder }: Cre
       setGrid(initialGrid);
     } catch (error) {
       console.error('Error cargando datos:', error);
-      toast.error('Error al cargar los datos');
+      toast.error(translate('errorLoadData'));
     }
   };
 
@@ -242,7 +250,7 @@ export function CreateOrderDialog({ onClose, onOrderCreated, editingOrder }: Cre
 
   const handleReview = () => {
     if (!canProceedToReview()) {
-      toast.error('Completa todos los campos y selecciona al menos un producto');
+      toast.error(translate('completeFieldsAndProducts'));
       return;
     }
     setCurrentStep('review');
@@ -250,7 +258,7 @@ export function CreateOrderDialog({ onClose, onOrderCreated, editingOrder }: Cre
 
   const handleConfirmOrder = async () => {
     if (!activePlanogram) {
-      toast.error('No hay planograma activo');
+      toast.error(translate('noActivePlanogramShort'));
       return;
     }
 
@@ -266,7 +274,7 @@ export function CreateOrderDialog({ onClose, onOrderCreated, editingOrder }: Cre
       }
     } catch (error) {
       console.error('Error procesando pedido:', error);
-      toast.error('Error al procesar el pedido');
+      toast.error(translate('errorProcessOrder'));
       setIsLoading(false);
     }
   };
@@ -365,7 +373,7 @@ export function CreateOrderDialog({ onClose, onOrderCreated, editingOrder }: Cre
     
     setCurrentStep('confirm');
     setIsLoading(false);
-    toast.success('Pedido y factura creados correctamente');
+    toast.success(translate('orderAndInvoiceCreated'));
   };
 
   const handleUpdateOrder = async () => {
@@ -450,19 +458,19 @@ export function CreateOrderDialog({ onClose, onOrderCreated, editingOrder }: Cre
     setCreatedInvoiceId(invoices[invoiceIndex]?.id || '');
     
     setIsLoading(false);
-    toast.success('Pedido y factura actualizados correctamente');
+    toast.success(translate('orderAndInvoiceUpdated'));
     onOrderCreated();
     onClose();
   };
 
   const handleUploadPOD = () => {
-    toast.info('Funcionalidad de subir POD próximamente');
+    toast.info(translate('podFeatureComing'));
     onOrderCreated();
     onClose();
   };
 
   const handleViewInvoice = () => {
-    toast.info('Navegando a facturas...');
+    toast.info(translate('navigatingToInvoices'));
     onOrderCreated();
     onClose();
   };
@@ -486,10 +494,10 @@ export function CreateOrderDialog({ onClose, onOrderCreated, editingOrder }: Cre
             
             <div>
               <h2 className="text-2xl font-bold text-gray-900 mb-2">
-                ¡Pedido Creado Exitosamente!
+                {translate('orderCreatedSuccess')}
               </h2>
               <p className="text-gray-600">
-                El pedido y la factura se han generado correctamente
+                {translate('orderAndInvoiceGenerated')}
               </p>
             </div>
 
@@ -499,14 +507,14 @@ export function CreateOrderDialog({ onClose, onOrderCreated, editingOrder }: Cre
               <Card 
                 className="cursor-pointer hover:shadow-lg transition-shadow border-2 border-blue-200 hover:border-blue-400"
                 onClick={() => {
-                  toast.info('Vista del pedido próximamente');
+                  toast.info(translate('orderViewComing'));
                 }}
               >
                 <CardContent className="p-6 text-center">
                   <ShoppingCart className="h-10 w-10 text-blue-600 mx-auto mb-3" />
-                  <p className="text-sm text-gray-600 mb-2">Estado del Pedido</p>
+                  <p className="text-sm text-gray-600 mb-2">{translate('orderStatus')}</p>
                   <Badge className="bg-yellow-100 text-yellow-800 border-yellow-200">
-                    Pendiente
+                    {translate('pendingStatus')}
                   </Badge>
                 </CardContent>
               </Card>
@@ -518,9 +526,9 @@ export function CreateOrderDialog({ onClose, onOrderCreated, editingOrder }: Cre
               >
                 <CardContent className="p-6 text-center">
                   <FileText className="h-10 w-10 text-green-600 mx-auto mb-3" />
-                  <p className="text-sm text-gray-600 mb-2">Factura</p>
+                  <p className="text-sm text-gray-600 mb-2">{translate('invoiceLabel')}</p>
                   <Badge className="bg-blue-100 text-blue-800 border-blue-200">
-                    Ver Factura
+                    {translate('viewInvoice')}
                   </Badge>
                 </CardContent>
               </Card>
@@ -534,7 +542,7 @@ export function CreateOrderDialog({ onClose, onOrderCreated, editingOrder }: Cre
                   <ImageIcon className="h-10 w-10 text-purple-600 mx-auto mb-3" />
                   <p className="text-sm text-gray-600 mb-2">POD</p>
                   <Badge className="bg-purple-100 text-purple-800 border-purple-200">
-                    Subir POD
+                    {translate('uploadPod')}
                   </Badge>
                 </CardContent>
               </Card>
@@ -543,8 +551,7 @@ export function CreateOrderDialog({ onClose, onOrderCreated, editingOrder }: Cre
             <Alert>
               <AlertCircle className="h-4 w-4" />
               <AlertDescription>
-                El pedido permanecerá en estado <strong>Pendiente</strong> hasta que se suba el POD (Comprobante de Entrega).
-                Solo cuando tenga tanto factura como POD podrá marcarse como <strong>Completado</strong>.
+                {translate('orderPendingUntilPod')}
               </AlertDescription>
             </Alert>
           </div>
@@ -554,9 +561,9 @@ export function CreateOrderDialog({ onClose, onOrderCreated, editingOrder }: Cre
         <Dialog open={showInvoiceModal} onOpenChange={setShowInvoiceModal}>
           <DialogContent className="!w-[70vw] !max-w-[1200px] max-h-[90vh] overflow-y-auto">
             <DialogHeader>
-              <DialogTitle>Factura {createdInvoice?.invoiceNumber}</DialogTitle>
-              <DialogDescription>
-                Previsualización de la factura generada automáticamente
+<DialogTitle>{translate('invoiceLabel')} {createdInvoice?.invoiceNumber}</DialogTitle>
+            <DialogDescription>
+                {translate('invoicePreviewDesc')}
               </DialogDescription>
             </DialogHeader>
             {createdInvoice && createdOrder && (
@@ -569,9 +576,9 @@ export function CreateOrderDialog({ onClose, onOrderCreated, editingOrder }: Cre
         <Dialog open={showPODModal} onOpenChange={setShowPODModal}>
           <DialogContent className="!w-[600px] max-h-[90vh] overflow-y-auto">
             <DialogHeader>
-              <DialogTitle>Subir Comprobante de Entrega (POD)</DialogTitle>
+              <DialogTitle>{translate('uploadPodTitleFull')}</DialogTitle>
               <DialogDescription>
-                Carga la imagen del POD para completar el pedido
+                {translate('uploadPodDesc')}
               </DialogDescription>
             </DialogHeader>
             
@@ -579,7 +586,7 @@ export function CreateOrderDialog({ onClose, onOrderCreated, editingOrder }: Cre
               <Alert className="bg-blue-50 border-blue-200">
                 <AlertCircle className="h-4 w-4 text-blue-600" />
                 <AlertDescription className="text-blue-900">
-                  Una vez que subas el POD, el pedido podrá ser marcado como <strong>Completado</strong>.
+                  {translate('onceUploadPodCompleted')}
                 </AlertDescription>
               </Alert>
 
@@ -592,7 +599,7 @@ export function CreateOrderDialog({ onClose, onOrderCreated, editingOrder }: Cre
                         createdOrderId,
                         () => {
                           setShowPODModal(false);
-                          toast.success('POD subido correctamente');
+                          toast.success(translate('podUploadedSuccess'));
                           onOrderCreated();
                           onClose();
                         }
@@ -603,13 +610,13 @@ export function CreateOrderDialog({ onClose, onOrderCreated, editingOrder }: Cre
                   size="lg"
                 >
                   <Upload className="h-5 w-5" />
-                  Seleccionar Imagen del POD
+                  {translate('selectPODImage')}
                 </Button>
               </div>
 
               <div className="text-center text-sm text-gray-500">
-                <p>Formatos soportados: JPG, PNG</p>
-                <p>Tamaño máximo: 5MB</p>
+                <p>{translate('supportedFormats')}</p>
+                <p>{translate('maxSize')}</p>
               </div>
             </div>
           </DialogContent>
@@ -628,10 +635,10 @@ export function CreateOrderDialog({ onClose, onOrderCreated, editingOrder }: Cre
         {/* Header fijo */}
         <div className="p-6 pb-4 border-b bg-white flex-shrink-0">
           <h2 className="text-2xl font-bold text-gray-900 mb-2">
-            Revisar Pedido
+            {translate('reviewOrder')}
           </h2>
           <p className="text-gray-600">
-            Verifica la información antes de confirmar
+            {translate('verifyBeforeConfirm')}
           </p>
         </div>
 
@@ -643,7 +650,7 @@ export function CreateOrderDialog({ onClose, onOrderCreated, editingOrder }: Cre
               <CardHeader>
                 <CardTitle className="text-sm flex items-center gap-2">
                   <StoreIcon className="h-4 w-4" />
-                  Tienda
+                  {translate('storeLabel')}
                 </CardTitle>
               </CardHeader>
               <CardContent>
@@ -656,7 +663,7 @@ export function CreateOrderDialog({ onClose, onOrderCreated, editingOrder }: Cre
               <CardHeader>
                 <CardTitle className="text-sm flex items-center gap-2">
                   <UserIcon className="h-4 w-4" />
-                  Vendedor
+                  {translate('sellerLabel')}
                 </CardTitle>
               </CardHeader>
               <CardContent>
@@ -671,9 +678,9 @@ export function CreateOrderDialog({ onClose, onOrderCreated, editingOrder }: Cre
           {/* Productos seleccionados */}
           <Card>
             <CardHeader>
-              <CardTitle>Productos del Pedido</CardTitle>
+              <CardTitle>{translate('orderProducts')}</CardTitle>
               <CardDescription>
-                {selectedItems.length} producto(s) seleccionado(s)
+                {translate('productsSelectedCount').replace('{n}', String(selectedItems.length))}
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -702,7 +709,7 @@ export function CreateOrderDialog({ onClose, onOrderCreated, editingOrder }: Cre
                         {cell.quantity} × €{cell.product!.currentPrice.toFixed(2)}
                       </p>
                       <p className="text-sm text-gray-600 whitespace-nowrap">
-                        Subtotal: €{(cell.quantity * cell.product!.currentPrice).toFixed(2)}
+                        {translate('subtotal')}: €{(cell.quantity * cell.product!.currentPrice).toFixed(2)}
                       </p>
                     </div>
                   </div>
@@ -712,15 +719,15 @@ export function CreateOrderDialog({ onClose, onOrderCreated, editingOrder }: Cre
               {/* Totales */}
               <div className="mt-6 pt-6 border-t space-y-2">
                 <div className="flex justify-between text-gray-600">
-                  <span>Subtotal:</span>
+                  <span>{translate('subtotal')}:</span>
                   <span>€{calculateSubtotal().toFixed(2)}</span>
                 </div>
                 <div className="flex justify-between text-gray-600">
-                  <span>IVA (21%):</span>
+                  <span>{translate('iva21')}:</span>
                   <span>€{(calculateSubtotal() * 0.21).toFixed(2)}</span>
                 </div>
                 <div className="flex justify-between text-lg font-bold text-gray-900 pt-2 border-t">
-                  <span>Total:</span>
+                  <span>{translate('totalCol')}:</span>
                   <span>€{(calculateTotal() * 1.21).toFixed(2)}</span>
                 </div>
               </div>
@@ -731,7 +738,7 @@ export function CreateOrderDialog({ onClose, onOrderCreated, editingOrder }: Cre
           {notes && (
             <Card>
               <CardHeader>
-                <CardTitle className="text-sm">Notas del Pedido</CardTitle>
+                <CardTitle className="text-sm">{translate('orderNotes')}</CardTitle>
               </CardHeader>
               <CardContent>
                 <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 max-h-32 overflow-y-auto">
@@ -745,9 +752,7 @@ export function CreateOrderDialog({ onClose, onOrderCreated, editingOrder }: Cre
           <Alert>
             <AlertCircle className="h-4 w-4" />
             <AlertDescription>
-              Al confirmar, se creará el pedido en estado <strong>Pendiente</strong> y se generará 
-              automáticamente una <strong>Factura</strong>. El pedido permanecerá pendiente hasta 
-              que se suba el POD (Comprobante de Entrega).
+              {translate('confirmCreatesOrder')}
             </AlertDescription>
           </Alert>
         </div>
@@ -755,14 +760,14 @@ export function CreateOrderDialog({ onClose, onOrderCreated, editingOrder }: Cre
         {/* Botones fijos en el footer */}
         <div className="flex gap-3 justify-end p-6 pt-4 border-t bg-white flex-shrink-0">
           <Button variant="outline" onClick={() => setCurrentStep('select')}>
-            Volver
+            {translate('back')}
           </Button>
           <Button
             onClick={handleConfirmOrder}
             disabled={isLoading}
             className="bg-indigo-600 hover:bg-indigo-700"
           >
-            {isLoading ? 'Creando...' : 'Confirmar Pedido'}
+            {isLoading ? translate('creating') : translate('confirmOrder')}
           </Button>
         </div>
       </div>
@@ -777,10 +782,10 @@ export function CreateOrderDialog({ onClose, onOrderCreated, editingOrder }: Cre
         <div className="flex items-center justify-between mb-4">
           <div>
             <h2 className="text-2xl font-bold text-gray-900">
-              Nuevo Pedido desde Planograma
+              {translate('newOrderFromPlanogram')}
             </h2>
             <p className="text-gray-600 text-sm mt-1">
-              Selecciona las cantidades directamente en cada producto
+              {translate('selectQuantitiesPerProduct')}
             </p>
           </div>
           <Button variant="ghost" size="sm" onClick={onClose}>
@@ -791,10 +796,12 @@ export function CreateOrderDialog({ onClose, onOrderCreated, editingOrder }: Cre
         {/* Información del pedido en una fila */}
         <div className="grid grid-cols-3 gap-4">
           <div className="space-y-2">
-            <Label>Tienda *</Label>
+            <Label>{translate('storeLabel')} *</Label>
             <Select value={selectedStoreId} onValueChange={setSelectedStoreId}>
               <SelectTrigger>
-                <SelectValue placeholder="Selecciona una tienda" />
+                <SelectValue placeholder={translate('selectStore')}>
+                  {stores.find((s) => s.id === selectedStoreId)?.name}
+                </SelectValue>
               </SelectTrigger>
               <SelectContent>
                 {stores.map((store) => (
@@ -810,10 +817,12 @@ export function CreateOrderDialog({ onClose, onOrderCreated, editingOrder }: Cre
           </div>
 
           <div className="space-y-2">
-            <Label>Vendedor *</Label>
+            <Label>{translate('sellerLabel')} *</Label>
             <Select value={selectedSellerId} onValueChange={setSelectedSellerId}>
               <SelectTrigger>
-                <SelectValue placeholder="Selecciona un vendedor" />
+                <SelectValue placeholder={translate('selectSeller')}>
+                  {(() => { const s = sellers.find((x) => x.id === selectedSellerId); return s ? `${s.firstName} ${s.lastName}` : null; })()}
+                </SelectValue>
               </SelectTrigger>
               <SelectContent>
                 {sellers.map((seller) => (
@@ -830,7 +839,7 @@ export function CreateOrderDialog({ onClose, onOrderCreated, editingOrder }: Cre
 
           {activePlanogram && (
             <div className="space-y-2">
-              <Label>Planograma</Label>
+              <Label>{translate('planogram')}</Label>
               <div className="flex items-center gap-2 h-10 px-3 bg-blue-50 rounded-lg border border-blue-200">
                 <Package className="h-4 w-4 text-blue-600" />
                 <span className="font-medium text-gray-900 text-sm">{activePlanogram.name}</span>
@@ -847,21 +856,21 @@ export function CreateOrderDialog({ onClose, onOrderCreated, editingOrder }: Cre
       <div className="flex-1 overflow-auto p-8 bg-gradient-to-br from-gray-50 to-slate-50">
         <div className="flex items-center justify-between mb-4 px-4">
           <div className="flex items-center gap-3">
-            <span className="text-sm font-semibold text-gray-900">Selección de Productos</span>
-            <span className="text-sm text-gray-500">Haz clic en las celdas para agregar cantidades</span>
+            <span className="text-sm font-semibold text-gray-900">{translate('productSelection')}</span>
+            <span className="text-sm text-gray-500">{translate('clickCellsToAddQuantities')}</span>
           </div>
           <div className="flex items-center gap-3 text-sm">
             <div className="flex items-center gap-1.5">
               <div className="w-4 h-4 bg-green-200 border border-green-600 rounded"></div>
-              <span>Con cantidad</span>
+              <span>{translate('withQuantity')}</span>
             </div>
             <div className="flex items-center gap-1.5">
               <div className="w-4 h-4 bg-blue-100 border border-blue-600 rounded"></div>
-              <span>Disponible</span>
+              <span>{translate('available')}</span>
             </div>
             <div className="flex items-center gap-1.5">
               <div className="w-4 h-4 bg-white border border-gray-400 border-dashed rounded"></div>
-              <span>Vacío</span>
+              <span>{translate('empty')}</span>
             </div>
           </div>
         </div>
@@ -957,9 +966,9 @@ export function CreateOrderDialog({ onClose, onOrderCreated, editingOrder }: Cre
           <div className="flex items-center justify-between gap-6">
             {/* Notas */}
             <div className="flex-1 max-w-md">
-              <Label className="mb-2 block">Notas (opcional)</Label>
+              <Label className="mb-2 block">{translate('notesOptional')}</Label>
               <Textarea
-                placeholder="Agrega notas sobre el pedido..."
+                placeholder={translate('addOrderNotes')}
                 value={notes}
                 onChange={(e) => setNotes(e.target.value)}
                 rows={2}
@@ -971,15 +980,17 @@ export function CreateOrderDialog({ onClose, onOrderCreated, editingOrder }: Cre
             <div className="flex items-center gap-6">
               <div className="text-right">
                 <p className="text-sm text-gray-600 mb-1">
-                  {getSelectedItems().length} producto(s) • {getSelectedItems().reduce((sum, cell) => sum + cell.quantity, 0)} unidades
+                  {translate('productsAndUnits')
+                    .replace('{n}', String(getSelectedItems().length))
+                    .replace('{u}', String(getSelectedItems().reduce((sum, cell) => sum + cell.quantity, 0)))}
                 </p>
                 <div className="space-y-1">
                   <div className="flex items-center gap-4 text-sm">
-                    <span className="text-gray-600">Subtotal:</span>
+                    <span className="text-gray-600">{translate('subtotal')}:</span>
                     <span className="font-medium">€{calculateSubtotal().toFixed(2)}</span>
                   </div>
                   <div className="flex items-center gap-4 text-sm">
-                    <span className="text-gray-600">IVA (21%):</span>
+                    <span className="text-gray-600">{translate('iva21')}:</span>
                     <span className="font-medium">€{(calculateSubtotal() * 0.21).toFixed(2)}</span>
                   </div>
                   <div className="flex items-center gap-4 pt-2 border-t">
@@ -999,7 +1010,7 @@ export function CreateOrderDialog({ onClose, onOrderCreated, editingOrder }: Cre
                 size="lg"
               >
                 <span className="flex items-center gap-2">
-                  Revisar Pedido
+                  {translate('reviewOrderButton')}
                   <ArrowRight className="h-5 w-5" />
                 </span>
               </Button>
@@ -1012,8 +1023,8 @@ export function CreateOrderDialog({ onClose, onOrderCreated, editingOrder }: Cre
               <AlertCircle className="h-4 w-4 text-yellow-600" />
               <AlertDescription className="text-yellow-800">
                 {!selectedStoreId || !selectedSellerId 
-                  ? 'Por favor, selecciona la tienda y el vendedor para continuar' 
-                  : 'Agrega al menos un producto con cantidad para crear el pedido'}
+                  ? translate('selectStoreAndSeller') 
+                  : translate('addAtLeastOneProduct')}
               </AlertDescription>
             </Alert>
           )}

@@ -8,7 +8,9 @@ function toProduct(raw: any, currentPrice?: number): Product {
     id: String(raw.id ?? raw.Id ?? ''),
     sku: String(raw.sku ?? raw.Sku ?? ''),
     name: String(raw.name ?? raw.Name ?? ''),
-    category: String(raw.category ?? raw.Category ?? ''),
+    category: String(raw.category ?? raw.Category ?? raw.categoryName ?? raw.CategoryName ?? ''),
+    brandId: raw.brandId ?? raw.BrandId ?? undefined,
+    categoryId: raw.categoryId ?? raw.CategoryId ?? undefined,
     description: raw.description ?? raw.Description ?? undefined,
     currentPrice: currentPrice ?? Number(raw.currentPrice ?? raw.CurrentPrice ?? 0),
     isActive: typeof raw.isActive === 'boolean' ? raw.isActive : (raw.IsActive ?? true),
@@ -22,6 +24,8 @@ export interface ProductPayload {
   category: string;
   sku: string;
   isActive: boolean;
+  brandId?: string;
+  categoryId?: string;
 }
 
 /** Lista todos los productos */
@@ -52,12 +56,14 @@ export async function fetchProductsByCategory(category: string): Promise<Product
 
 /** Crea un producto */
 export async function createProduct(data: ProductPayload): Promise<Product> {
-  const payload = {
+  const payload: any = {
     name: (data.name ?? '').trim(),
     category: (data.category ?? '').trim(),
     sku: (data.sku ?? '').trim(),
     isActive: data.isActive ?? true
   };
+  if (data.brandId) payload.brandId = data.brandId;
+  if (data.categoryId) payload.categoryId = data.categoryId;
   const res = await apiClient.post<any>(E.CREATE, payload);
   if (res && (res.id || res.name)) return toProduct(res);
   const list = await fetchProducts();
@@ -69,8 +75,10 @@ export async function createProduct(data: ProductPayload): Promise<Product> {
 /** Actualiza un producto */
 export async function updateProduct(id: string, data: Partial<ProductPayload>): Promise<Product> {
   const endpoint = E.UPDATE.replace('{id}', encodeURIComponent(id));
-  const payload: any = { name: data.name?.trim(), category: data.category?.trim(), sku: data.sku?.trim(), isActive: data.isActive };
-  const res = await apiClient.put<any>(endpoint, { id, ...payload });
+  const payload: any = { id, name: data.name?.trim(), category: data.category?.trim(), sku: data.sku?.trim(), isActive: data.isActive };
+  if (data.brandId != null) payload.brandId = data.brandId;
+  if (data.categoryId != null) payload.categoryId = data.categoryId;
+  const res = await apiClient.put<any>(endpoint, payload);
   if (typeof res === 'string' || res === null || res === undefined) {
     const fetched = await fetchProductById(id);
     if (fetched) return fetched;

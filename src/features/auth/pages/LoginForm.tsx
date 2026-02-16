@@ -9,6 +9,7 @@ import { Card, CardContent } from '@/shared/components/base/Card';
 import { Eye, EyeOff, ArrowRight, Mail, Lock, AlertCircle } from 'lucide-react';
 import { useAuthLogin } from '../hooks/useAuthLogin';
 import { LoginCredentials } from '@/shared/types/api';
+import { useLanguage } from '@/shared/hooks/useLanguage';
 
 interface LoginFormProps {
   onForgotPassword: () => void;
@@ -16,6 +17,7 @@ interface LoginFormProps {
 
 export function LoginForm({ onForgotPassword }: LoginFormProps) {
   const searchParams = useSearchParams();
+  const { translate } = useLanguage();
   const { login, loading, error, clearError } = useAuthLogin();
   const [formData, setFormData] = useState<LoginCredentials>({ email: '', password: '' });
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -32,15 +34,15 @@ export function LoginForm({ onForgotPassword }: LoginFormProps) {
     const newErrors: Record<string, string> = {};
 
     if (!formData.email.trim()) {
-      newErrors.email = 'El correo electrónico es requerido';
+      newErrors.email = translate('emailRequired');
     } else if (!/\S+@\S+\.\S+/.test(formData.email)) {
-      newErrors.email = 'Ingresa un correo electrónico válido';
+      newErrors.email = translate('emailInvalid');
     }
 
     if (!formData.password) {
-      newErrors.password = 'La contraseña es requerida';
+      newErrors.password = translate('passwordRequired');
     } else if (formData.password.length < 3) {
-      newErrors.password = 'La contraseña debe tener al menos 3 caracteres';
+      newErrors.password = translate('passwordMinLength');
     }
 
     setErrors(newErrors);
@@ -59,7 +61,7 @@ export function LoginForm({ onForgotPassword }: LoginFormProps) {
     if (!validateForm()) return;
     const result = await login(formData);
     if (!result.success) {
-      setErrors({ submit: result.error || 'Error al iniciar sesión' });
+      setErrors({ submit: result.error || translate('loginError') });
     }
   };
 
@@ -80,7 +82,7 @@ export function LoginForm({ onForgotPassword }: LoginFormProps) {
           {/* Campo Email */}
           <div className="space-y-2">
             <Label htmlFor="email" className="text-gray-700 font-medium">
-              Correo electrónico
+              {translate('email')}
             </Label>
             <div className="relative">
               <Mail className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
@@ -108,7 +110,7 @@ export function LoginForm({ onForgotPassword }: LoginFormProps) {
           {/* Campo Contraseña */}
           <div className="space-y-2">
             <Label htmlFor="password" className="text-gray-700 font-medium">
-              Contraseña
+              {translate('password')}
             </Label>
             <div className="relative">
               <Lock className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
@@ -118,7 +120,7 @@ export function LoginForm({ onForgotPassword }: LoginFormProps) {
                 type={showPassword ? 'text' : 'password'}
                 value={formData.password}
                 onChange={handleInputChange}
-                placeholder="Ingresa tu contraseña"
+                placeholder={translate('passwordPlaceholder')}
                 disabled={loading}
                 className={`pl-10 pr-12 h-12 border-gray-200 focus:border-primary focus:ring-primary/20 ${
                   errors.password ? 'border-destructive focus:border-destructive' : ''
@@ -157,7 +159,7 @@ export function LoginForm({ onForgotPassword }: LoginFormProps) {
               onClick={onForgotPassword}
               disabled={loading}
             >
-              ¿Olvidaste tu contraseña?
+              {translate('forgotPasswordQuestion')}
             </Button>
           </div>
 
@@ -170,11 +172,11 @@ export function LoginForm({ onForgotPassword }: LoginFormProps) {
             {loading ? (
               <div className="flex items-center justify-center gap-2">
                 <div className="animate-spin rounded-full h-4 w-4 border-2 border-primary-foreground border-t-transparent"></div>
-                <span>Iniciando sesión...</span>
+                <span>{translate('signingIn')}</span>
               </div>
             ) : (
               <div className="flex items-center justify-center gap-2">
-                <span>Iniciar Sesión</span>
+                <span>{translate('login')}</span>
                 <ArrowRight className="h-4 w-4" />
               </div>
             )}

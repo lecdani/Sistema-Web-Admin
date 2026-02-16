@@ -27,12 +27,13 @@ import { citiesApi } from '@/shared/services/cities-api';
 import { usersApi } from '@/shared/services/users-api';
 import { storesApi } from '@/shared/services/stores-api';
 import { productsApi } from '@/shared/services/products-api';
+import { planogramsApi } from '@/shared/services/planograms-api';
 import { useRouter } from 'next/navigation';
 
 interface DashboardModule {
   id: string;
-  title: string;
-  description: string;
+  titleKey: string;
+  descKey: string;
   icon: React.ComponentType<any>;
   color: string;
   bgColor: string;
@@ -62,7 +63,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
   isVisible = true
 }) => {
   const router = useRouter();
-  const { translate } = useLanguage();
+  const { translate, language } = useLanguage();
   const { user } = useAuth();
   const [stats, setStats] = useState<DashboardStats>({
     totalUsers: 0,
@@ -132,9 +133,17 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
       const sessions = getFromLocalStorage('app-sessions') || [];
       const totalSessions = sessions.length;
-      const planograms = getFromLocalStorage('app-planograms') || [];
-      const totalPlanograms = planograms.length;
-      const activePlanogram = planograms.filter((p: any) => p.isActive === true).length;
+      let totalPlanograms = 0;
+      let activePlanogram = 0;
+      try {
+        const planogramsList = await planogramsApi.fetchAll();
+        totalPlanograms = planogramsList.length;
+        activePlanogram = planogramsList.filter((p: any) => p.isActive === true).length;
+      } catch {
+        const planograms = getFromLocalStorage('app-planograms') || [];
+        totalPlanograms = planograms.length;
+        activePlanogram = planograms.filter((p: any) => p.isActive === true).length;
+      }
 
       setStats({
         totalUsers,
@@ -170,133 +179,21 @@ export const Dashboard: React.FC<DashboardProps> = ({
   };
 
   const quickStats = [
-    {
-      title: 'Ciudades',
-      value: stats.totalCities.toString(),
-      change: 0,
-      icon: MapPin,
-      color: 'text-indigo-600',
-      bgColor: 'bg-indigo-50'
-    },
-    {
-      title: 'Tiendas Activas',
-      value: stats.activeStores.toString(),
-      change: 0,
-      icon: StoreIcon,
-      color: 'text-blue-600',
-      bgColor: 'bg-blue-50'
-    },
-    {
-      title: 'Productos Activos',
-      value: stats.activeProducts.toString(),
-      change: 0,
-      icon: Package,
-      color: 'text-green-600',
-      bgColor: 'bg-green-50'
-    },
-    {
-      title: 'Planograma Activo',
-      value: stats.activePlanogram.toString(),
-      change: 0,
-      icon: Layout,
-      color: 'text-purple-600',
-      bgColor: 'bg-purple-50'
-    },
-    {
-      title: 'Usuarios Activos',
-      value: stats.activeUsers.toString(),
-      change: 0,
-      icon: Users,
-      color: 'text-orange-600',
-      bgColor: 'bg-orange-50'
-    }
+    { titleKey: 'statCities', value: stats.totalCities.toString(), change: 0, icon: MapPin, color: 'text-indigo-600', bgColor: 'bg-indigo-50' },
+    { titleKey: 'statActiveStores', value: stats.activeStores.toString(), change: 0, icon: StoreIcon, color: 'text-blue-600', bgColor: 'bg-blue-50' },
+    { titleKey: 'statActiveProducts', value: stats.activeProducts.toString(), change: 0, icon: Package, color: 'text-green-600', bgColor: 'bg-green-50' },
+    { titleKey: 'statActivePlanogram', value: stats.activePlanogram.toString(), change: 0, icon: Layout, color: 'text-purple-600', bgColor: 'bg-purple-50' },
+    { titleKey: 'statActiveUsers', value: stats.activeUsers.toString(), change: 0, icon: Users, color: 'text-orange-600', bgColor: 'bg-orange-50' }
   ];
 
   const modules: DashboardModule[] = [
-    {
-      id: 'cities',
-      title: 'Gestión de Ciudades',
-      description: 'Administra las ciudades del sistema',
-      icon: MapPin,
-      color: 'text-indigo-600',
-      bgColor: 'bg-indigo-50 hover:bg-indigo-100',
-      onClick: () => {
-        if (onNavigateToCities) onNavigateToCities();
-        else router.push('/cities');
-      }
-    },
-    {
-      id: 'stores',
-      title: 'Gestión de Tiendas',
-      description: 'Administra tus tiendas y sucursales',
-      icon: StoreIcon,
-      color: 'text-blue-600',
-      bgColor: 'bg-blue-50 hover:bg-blue-100',
-      onClick: () => {
-        if (onNavigateToStores) onNavigateToStores();
-        else router.push('/stores');
-      }
-    },
-    {
-      id: 'users',
-      title: 'Gestión de Usuarios',
-      description: 'Administra usuarios y permisos',
-      icon: Users,
-      color: 'text-green-600',
-      bgColor: 'bg-green-50 hover:bg-green-100',
-      onClick: () => {
-        if (onNavigateToUsers) onNavigateToUsers();
-        else router.push('/users');
-      }
-    },
-    {
-      id: 'products',
-      title: 'Gestión de Productos',
-      description: 'Administra el catálogo de productos',
-      icon: Package,
-      color: 'text-emerald-600',
-      bgColor: 'bg-emerald-50 hover:bg-emerald-100',
-      onClick: () => {
-        if (onNavigateToProducts) onNavigateToProducts();
-        else router.push('/products');
-      }
-    },
-    {
-      id: 'planograms',
-      title: 'Planogramas',
-      description: 'Planifica la disposición de productos',
-      icon: Layout,
-      color: 'text-cyan-600',
-      bgColor: 'bg-cyan-50 hover:bg-cyan-100',
-      onClick: () => {
-        if (onNavigateToPlanograms) onNavigateToPlanograms();
-        else router.push('/planograms');
-      }
-    },
-    {
-      id: 'sales-flow',
-      title: 'Gestión de Pedidos',
-      description: 'Gestiona Pedidos, Facturas y PODs en un solo lugar',
-      icon: Workflow,
-      color: 'text-purple-600',
-      bgColor: 'bg-purple-50 hover:bg-purple-100',
-      onClick: () => {
-        if (onNavigateToUnifiedFlow) onNavigateToUnifiedFlow();
-        else router.push('/unified-flow');
-      }
-    },
-    {
-      id: 'reports',
-      title: 'Reportes de Ventas',
-      description: 'Análisis detallado del desempeño comercial',
-      icon: BarChart3,
-      color: 'text-red-600',
-      bgColor: 'bg-red-50 hover:bg-red-100',
-      onClick: () => {
-        if (onNavigateToReports) onNavigateToReports();
-        else router.push('/reports');
-      }
-    }
+    { id: 'cities', titleKey: 'cityManagement', descKey: 'moduleCitiesDesc', icon: MapPin, color: 'text-indigo-600', bgColor: 'bg-indigo-50 hover:bg-indigo-100', onClick: () => { if (onNavigateToCities) onNavigateToCities(); else router.push('/cities'); } },
+    { id: 'stores', titleKey: 'storeManagement', descKey: 'moduleStoresDesc', icon: StoreIcon, color: 'text-blue-600', bgColor: 'bg-blue-50 hover:bg-blue-100', onClick: () => { if (onNavigateToStores) onNavigateToStores(); else router.push('/stores'); } },
+    { id: 'users', titleKey: 'userManagement', descKey: 'moduleUsersDesc', icon: Users, color: 'text-green-600', bgColor: 'bg-green-50 hover:bg-green-100', onClick: () => { if (onNavigateToUsers) onNavigateToUsers(); else router.push('/users'); } },
+    { id: 'products', titleKey: 'productManagement', descKey: 'moduleProductsDesc', icon: Package, color: 'text-emerald-600', bgColor: 'bg-emerald-50 hover:bg-emerald-100', onClick: () => { if (onNavigateToProducts) onNavigateToProducts(); else router.push('/products'); } },
+    { id: 'planograms', titleKey: 'planogramManagement', descKey: 'modulePlanogramsDesc', icon: Layout, color: 'text-cyan-600', bgColor: 'bg-cyan-50 hover:bg-cyan-100', onClick: () => { if (onNavigateToPlanograms) onNavigateToPlanograms(); else router.push('/planograms'); } },
+    { id: 'sales-flow', titleKey: 'orderManagement', descKey: 'moduleOrdersDesc', icon: Workflow, color: 'text-purple-600', bgColor: 'bg-purple-50 hover:bg-purple-100', onClick: () => { if (onNavigateToUnifiedFlow) onNavigateToUnifiedFlow(); else router.push('/unified-flow'); } },
+    { id: 'reports', titleKey: 'navReports', descKey: 'moduleReportsDesc', icon: BarChart3, color: 'text-red-600', bgColor: 'bg-red-50 hover:bg-red-100', onClick: () => { if (onNavigateToReports) onNavigateToReports(); else router.push('/reports'); } }
   ];
 
   if (isLoading) {
@@ -313,25 +210,25 @@ export const Dashboard: React.FC<DashboardProps> = ({
       <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
         <div>
           <h1 className="text-3xl font-bold text-gray-900">
-            ¡Bienvenido, {user?.firstName}! 
+            {translate('welcomeUser').replace('{name}', user?.firstName || '')}
           </h1>
           <p className="text-gray-600 mt-2">
-            Panel de control administrativo - {new Date().toLocaleDateString('es-ES', { 
-              weekday: 'long', 
-              year: 'numeric', 
-              month: 'long', 
-              day: 'numeric' 
+            {translate('dashboardSubtitle')} - {new Date().toLocaleDateString(language === 'es' ? 'es-ES' : 'en-US', {
+              weekday: 'long',
+              year: 'numeric',
+              month: 'long',
+              day: 'numeric'
             })}
           </p>
         </div>
         <div className="flex items-center gap-3">
           <Badge className="bg-green-100 text-green-800 flex items-center gap-1">
             <CheckCircle className="h-3 w-3" />
-            Sistema Operativo
+            {translate('systemOperational')}
           </Badge>
           <Button variant="outline" size="sm">
             <Calendar className="h-4 w-4 mr-2" />
-            Ver Agenda
+            {translate('viewCalendar')}
           </Button>
         </div>
       </div>
@@ -347,7 +244,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
               <div className="p-4">
                 <div className="flex items-center justify-between">
                   <div className="flex-1">
-                    <p className="text-xs font-medium text-gray-500">{stat.title}</p>
+                    <p className="text-xs font-medium text-gray-500">{translate(stat.titleKey)}</p>
                     <p className="text-2xl font-bold text-gray-900 mt-1">{stat.value}</p>
                     {stat.change !== 0 && (
                       <div className="flex items-center mt-1.5">
@@ -359,7 +256,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                         <span className={`text-xs font-medium ml-1 ${
                           isPositive ? 'text-green-600' : 'text-red-600'
                         }`}>
-                          {Math.abs(stat.change)}% vs mes anterior
+                          {Math.abs(stat.change)}% {translate('vsLastMonth')}
                         </span>
                       </div>
                     )}
@@ -378,10 +275,10 @@ export const Dashboard: React.FC<DashboardProps> = ({
       <div>
         <div className="flex items-center justify-between mb-6">
           <h2 className="text-2xl font-semibold text-gray-900">
-            Módulos de Gestión
+            {translate('managementModules')}
           </h2>
           <p className="text-sm text-gray-500">
-            Accede a las herramientas administrativas
+            {translate('managementModulesDesc')}
           </p>
         </div>
 
@@ -405,10 +302,10 @@ export const Dashboard: React.FC<DashboardProps> = ({
                     {/* Content */}
                     <div className="flex-1 min-w-0">
                       <h3 className="font-medium text-gray-900 group-hover:text-blue-600 transition-colors leading-snug">
-                        {module.title}
+                        {translate(module.titleKey)}
                       </h3>
                       <p className="text-xs text-gray-500 mt-0.5 leading-relaxed">
-                        {module.description}
+                        {translate(module.descKey)}
                       </p>
                     </div>
                   </div>
@@ -425,45 +322,44 @@ export const Dashboard: React.FC<DashboardProps> = ({
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <TrendingUp className="h-5 w-5 text-blue-600" />
-              Estado del Sistema
+              {translate('systemStatus')}
             </CardTitle>
             <CardDescription>
-              Información del sistema
+              {translate('systemStatusDesc')}
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-2.5">
             <div className="flex items-center justify-between">
-              <span className="text-sm text-gray-600">Estado General</span>
-              <Badge className="bg-green-100 text-green-800">Operativo</Badge>
+              <span className="text-sm text-gray-600">{translate('generalStatus')}</span>
+              <Badge className="bg-green-100 text-green-800">{translate('operational')}</Badge>
             </div>
             <div className="flex items-center justify-between">
-              <span className="text-sm text-gray-600">Tiendas Registradas</span>
+              <span className="text-sm text-gray-600">{translate('registeredStores')}</span>
               <span className="text-sm font-semibold text-gray-900">{stats.totalStores}</span>
             </div>
             <div className="flex items-center justify-between">
-              <span className="text-sm text-gray-600">Productos Registrados</span>
+              <span className="text-sm text-gray-600">{translate('registeredProducts')}</span>
               <span className="text-sm font-semibold text-gray-900">{stats.totalProducts}</span>
             </div>
             <div className="flex items-center justify-between">
-              <span className="text-sm text-gray-600">Planogramas Totales</span>
+              <span className="text-sm text-gray-600">{translate('totalPlanograms')}</span>
               <span className="text-sm font-semibold text-gray-900">{stats.totalPlanograms}</span>
             </div>
             <div className="flex items-center justify-between">
-              <span className="text-sm text-gray-600">Usuarios Registrados</span>
+              <span className="text-sm text-gray-600">{translate('registeredUsers')}</span>
               <span className="text-sm font-semibold text-gray-900">{stats.totalUsers}</span>
             </div>
             <div className="flex items-center justify-between">
-              <span className="text-sm text-gray-600">Última Sincronización</span>
+              <span className="text-sm text-gray-600">{translate('lastSync')}</span>
               <div className="flex items-center gap-1.5">
                 <Clock className="h-3 w-3 text-gray-400" />
-                <span className="text-sm font-semibold text-gray-900">En tiempo real</span>
+                <span className="text-sm font-semibold text-gray-900">{translate('realTime')}</span>
               </div>
             </div>
-            
             <div className="pt-2.5 border-t border-gray-100">
               <Button className="w-full" size="sm" variant="outline">
                 <BarChart3 className="h-4 w-4 mr-2" />
-                Ver Métricas Detalladas
+                {translate('viewDetailedMetrics')}
               </Button>
             </div>
           </CardContent>

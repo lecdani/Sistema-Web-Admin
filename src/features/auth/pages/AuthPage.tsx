@@ -53,10 +53,10 @@ export const AuthPage: React.FC = () => {
           <div className="space-y-8">
             <div className="space-y-6">
               <h1 className="text-4xl lg:text-5xl xl:text-6xl font-bold text-white leading-tight">
-                Tu Empresa
+                {translate('companyName')}
               </h1>
               <p className="text-xl lg:text-2xl text-indigo-100 leading-relaxed">
-                Sistema empresarial integral para la gestión moderna
+                {translate('companyTaglineShort')}
               </p>
             </div>
 
@@ -76,7 +76,7 @@ export const AuthPage: React.FC = () => {
 
           {/* Footer */}
           <div className="text-center text-indigo-200 text-sm">
-            © 2024 Tu Empresa. Todos los derechos reservados.
+            {translate('copyright')}
           </div>
         </div>
 
@@ -104,10 +104,10 @@ export const AuthPage: React.FC = () => {
               <>
                 <div className="text-center mb-8">
                   <h2 className="text-2xl lg:text-3xl font-bold text-gray-900 mb-2">
-                    {translate('welcome') || 'Bienvenido'}
+                    {translate('welcome')}
                   </h2>
                   <p className="text-gray-600">
-                    Ingresa a tu cuenta empresarial para continuar
+                    {translate('authSubtitle')}
                   </p>
                 </div>
 
@@ -123,15 +123,15 @@ export const AuthPage: React.FC = () => {
           <div className="text-center mt-8 space-y-2">
             <div className="flex justify-center space-x-4 text-sm text-gray-500">
               <a href="#" className="hover:text-gray-700 transition-colors">
-                Términos de Servicio
+                {translate('termsOfService')}
               </a>
               <span>•</span>
               <a href="#" className="hover:text-gray-700 transition-colors">
-                Política de Privacidad
+                {translate('privacyPolicy')}
               </a>
               <span>•</span>
               <a href="#" className="hover:text-gray-700 transition-colors">
-                Soporte
+                {translate('support')}
               </a>
             </div>
           </div>

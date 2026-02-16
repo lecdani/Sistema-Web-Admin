@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { City, Store } from '@/shared/types';
 import { toast } from '@/shared/components/base/Toast';
+import { useLanguage } from '@/shared/hooks/useLanguage';
 import { citiesApi } from '@/shared/services/cities-api';
 import { storesApi } from '@/shared/services/stores-api';
 
@@ -59,6 +60,7 @@ interface CityManagementProps {
 }
 
 export function CityManagement({ onBack }: CityManagementProps) {
+  const { translate } = useLanguage();
   const [cities, setCities] = useState<City[]>([]);
   const [filteredCities, setFilteredCities] = useState<City[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -111,7 +113,7 @@ export function CityManagement({ onBack }: CityManagementProps) {
       setStoreCounts(counts);
     } catch (error) {
       console.error('Error cargando ciudades:', error);
-      toast.error('Error al cargar las ciudades');
+      toast.error(translate('errorLoadCities'));
       setCities([]);
       setStoreCounts({});
     } finally {
@@ -159,9 +161,9 @@ export function CityManagement({ onBack }: CityManagementProps) {
 
   const validateCityForm = (): boolean => {
     const err: Partial<Record<keyof CityFormData, string>> = {};
-    if (!cityFormData.name.trim()) err.name = 'El nombre de la ciudad es obligatorio';
-    if (!cityFormData.state.trim()) err.state = 'El estado o provincia es obligatorio';
-    if (!cityFormData.country.trim()) err.country = 'El país es obligatorio';
+    if (!cityFormData.name.trim()) err.name = translate('cityNameRequired');
+    if (!cityFormData.state.trim()) err.state = translate('stateRequired');
+    if (!cityFormData.country.trim()) err.country = translate('countryRequired');
 
     const nameNorm = cityFormData.name.trim().toLowerCase();
     const stateNorm = cityFormData.state.trim().toLowerCase();
@@ -173,7 +175,7 @@ export function CityManagement({ onBack }: CityManagementProps) {
         c.country.trim().toLowerCase() === countryNorm &&
         (!editingCity || c.id !== editingCity.id)
     );
-    if (duplicate) err.name = 'Ya existe una ciudad con este nombre, estado y país';
+    if (duplicate) err.name = translate('duplicateCity');
 
     setCityFormErrors(err);
     return Object.keys(err).length === 0;
@@ -192,17 +194,17 @@ export function CityManagement({ onBack }: CityManagementProps) {
 
       if (editingCity) {
         await citiesApi.update(editingCity.id, payload);
-        toast.success('Ciudad actualizada correctamente');
+        toast.success(translate('citySaved'));
       } else {
         await citiesApi.create(payload);
-        toast.success('Ciudad creada correctamente');
+        toast.success(translate('cityCreated'));
       }
 
       setShowCityDialog(false);
       setCityFormErrors({});
       await loadCities();
     } catch (error: any) {
-      const msg = error?.data?.message ?? error?.message ?? 'Error al guardar la ciudad';
+      const msg = error?.data?.message ?? error?.message ?? translate('errorSaveCity');
       toast.error(msg);
     } finally {
       setCityFormLoading(false);
@@ -238,14 +240,14 @@ export function CityManagement({ onBack }: CityManagementProps) {
             <MapPin className="h-5 w-5 text-green-600" />
           </div>
           <div>
-            <h1 className="text-2xl font-bold text-gray-900">Gestión de Ciudades</h1>
-            <p className="text-gray-500">Administra las ciudades del sistema</p>
+            <h1 className="text-2xl font-bold text-gray-900">{translate('citiesTitle')}</h1>
+            <p className="text-gray-500">{translate('citiesSubtitle')}</p>
           </div>
         </div>
 
         <Button onClick={handleCreateCity} className="bg-indigo-600 hover:bg-indigo-700">
           <Plus className="h-4 w-4 mr-2" />
-          Nueva Ciudad
+          {translate('createCity')}
         </Button>
       </div>
 
@@ -257,7 +259,7 @@ export function CityManagement({ onBack }: CityManagementProps) {
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
                 <Input
-                  placeholder="Buscar ciudades por nombre, estado o país..."
+                  placeholder={translate('searchCitiesPlaceholder')}
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
                   className="pl-10"
@@ -289,7 +291,7 @@ export function CityManagement({ onBack }: CityManagementProps) {
               <div className="flex items-center gap-4 text-sm text-gray-600">
                 <div className="flex items-center gap-1">
                   <Building2 className="h-4 w-4" />
-                  <span>{getStoreCount(city.id)} tiendas</span>
+                  <span>{getStoreCount(city.id)} {translate('storesCount')}</span>
                 </div>
               </div>
 
@@ -302,7 +304,7 @@ export function CityManagement({ onBack }: CityManagementProps) {
                   className="flex-1"
                 >
                   <Eye className="h-4 w-4 mr-1" />
-                  Ver
+                  {translate('view')}
                 </Button>
                 <Button
                   variant="outline"
@@ -311,7 +313,7 @@ export function CityManagement({ onBack }: CityManagementProps) {
                   className="flex-1"
                 >
                   <Edit className="h-4 w-4 mr-1" />
-                  Editar
+                  {translate('edit')}
                 </Button>
               </div>
             </CardContent>
@@ -325,18 +327,15 @@ export function CityManagement({ onBack }: CityManagementProps) {
           <CardContent className="p-12 text-center">
             <MapPin className="h-16 w-16 text-gray-300 mx-auto mb-4" />
             <h3 className="text-lg font-medium text-gray-900 mb-2">
-              {searchTerm ? 'No se encontraron ciudades' : 'No hay ciudades registradas'}
+              {searchTerm ? translate('noCitiesSearch') : translate('noCities')}
             </h3>
             <p className="text-gray-500 mb-6">
-              {searchTerm
-                ? 'Intenta con otros términos de búsqueda'
-                : 'Comienza creando tu primera ciudad'
-              }
+              {searchTerm ? translate('tryOtherSearch') : translate('createFirstCity')}
             </p>
             {!searchTerm && (
               <Button onClick={handleCreateCity} className="bg-indigo-600 hover:bg-indigo-700">
                 <Plus className="h-4 w-4 mr-2" />
-                Crear primera ciudad
+                {translate('createFirstCityBtn')}
               </Button>
             )}
           </CardContent>
@@ -352,10 +351,10 @@ export function CityManagement({ onBack }: CityManagementProps) {
             onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
             disabled={currentPage === 1}
           >
-            Anterior
+            {translate('previous')}
           </Button>
           <span className="mx-2 text-gray-500">
-            Página {currentPage} de {totalPages}
+            {translate('page')} {currentPage} {translate('pageOf')} {totalPages}
           </span>
           <Button
             variant="outline"
@@ -363,7 +362,7 @@ export function CityManagement({ onBack }: CityManagementProps) {
             onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
             disabled={currentPage === totalPages}
           >
-            Siguiente
+            {translate('next')}
           </Button>
         </div>
       )}
@@ -373,19 +372,16 @@ export function CityManagement({ onBack }: CityManagementProps) {
         <DialogContent className="sm:max-w-xl">
           <DialogHeader>
             <DialogTitle>
-              {editingCity ? 'Editar Ciudad' : 'Nueva Ciudad'}
+              {editingCity ? translate('editCity') : translate('newCity')}
             </DialogTitle>
             <DialogDescription>
-              {editingCity
-                ? 'Modifica los datos de la ciudad'
-                : 'Completa la información para crear una nueva ciudad'
-              }
+              {editingCity ? translate('editCityDesc') : translate('newCityDesc')}
             </DialogDescription>
           </DialogHeader>
 
           <div className="space-y-5 px-6 py-4">
             <div>
-              <Label htmlFor="cityName">Nombre de la Ciudad *</Label>
+              <Label htmlFor="cityName">{translate('cityNameLabel')}</Label>
               <Input
                 id="cityName"
                 value={cityFormData.name}
@@ -402,7 +398,7 @@ export function CityManagement({ onBack }: CityManagementProps) {
             </div>
 
             <div>
-              <Label htmlFor="cityState">Estado/Provincia *</Label>
+              <Label htmlFor="cityState">{translate('stateLabel')}</Label>
               <Input
                 id="cityState"
                 value={cityFormData.state}
@@ -419,7 +415,7 @@ export function CityManagement({ onBack }: CityManagementProps) {
             </div>
 
             <div className="relative">
-              <Label htmlFor="cityCountry">País *</Label>
+              <Label htmlFor="cityCountry">{translate('countryLabel')}</Label>
               <Select
                 value={cityFormData.country}
                 onValueChange={(value) => {
@@ -428,7 +424,7 @@ export function CityManagement({ onBack }: CityManagementProps) {
                 }}
               >
                 <SelectTrigger id="cityCountry" className={`w-full ${cityFormErrors.country ? 'border-red-500' : ''}`}>
-                  <SelectValue placeholder="Selecciona un país" />
+                  <SelectValue placeholder={translate('selectCountry')} />
                 </SelectTrigger>
                 <SelectContent className="max-h-64">
                   {COUNTRIES.map((country) => (
@@ -447,7 +443,7 @@ export function CityManagement({ onBack }: CityManagementProps) {
 
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowCityDialog(false)}>
-              Cancelar
+              {translate('cancel')}
             </Button>
             <Button
               onClick={handleSaveCity}
@@ -457,10 +453,10 @@ export function CityManagement({ onBack }: CityManagementProps) {
               {cityFormLoading ? (
                 <>
                   <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent mr-2" />
-                  Guardando...
+                  {translate('saving')}
                 </>
               ) : (
-                editingCity ? 'Actualizar' : 'Crear'
+                editingCity ? translate('update') : translate('create')
               )}
             </Button>
           </DialogFooter>
@@ -473,7 +469,7 @@ export function CityManagement({ onBack }: CityManagementProps) {
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <MapPin className="h-5 w-5 text-indigo-600" />
-              Información de la Ciudad
+              {translate('cityInfo')}
             </DialogTitle>
           </DialogHeader>
 
@@ -481,20 +477,20 @@ export function CityManagement({ onBack }: CityManagementProps) {
             <div className="space-y-6 px-6 py-4">
               <div className="grid grid-cols-2 gap-6">
                 <div>
-                  <Label className="text-sm text-gray-500">Nombre</Label>
+                  <Label className="text-sm text-gray-500">{translate('name')}</Label>
                   <p className="font-medium">{selectedCity.name}</p>
                 </div>
                 <div>
-                  <Label className="text-sm text-gray-500">Estado</Label>
-                  <p className="font-medium">{selectedCity.state || 'No especificado'}</p>
+                  <Label className="text-sm text-gray-500">{translate('state')}</Label>
+                  <p className="font-medium">{selectedCity.state || translate('notSpecified')}</p>
                 </div>
                 <div>
-                  <Label className="text-sm text-gray-500">País</Label>
+                  <Label className="text-sm text-gray-500">{translate('country')}</Label>
                   <p className="font-medium">{selectedCity.country}</p>
                 </div>
                 <div>
-                  <Label className="text-sm text-gray-500">Tiendas</Label>
-                  <p className="font-medium">{getStoreCount(selectedCity.id)} tiendas</p>
+                  <Label className="text-sm text-gray-500">{translate('stores')}</Label>
+                  <p className="font-medium">{getStoreCount(selectedCity.id)} {translate('storesCount')}</p>
                 </div>
               </div>
             </div>
@@ -502,7 +498,7 @@ export function CityManagement({ onBack }: CityManagementProps) {
 
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowInfoDialog(false)}>
-              Cerrar
+              {translate('close')}
             </Button>
             {selectedCity && (
               <Button onClick={() => {
@@ -510,7 +506,7 @@ export function CityManagement({ onBack }: CityManagementProps) {
                 handleEditCity(selectedCity);
               }} className="bg-indigo-600 hover:bg-indigo-700">
                 <Edit className="h-4 w-4 mr-2" />
-                Editar
+                {translate('edit')}
               </Button>
             )}
           </DialogFooter>

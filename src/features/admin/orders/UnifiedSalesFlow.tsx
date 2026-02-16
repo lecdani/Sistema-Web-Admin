@@ -24,6 +24,7 @@ import { getInvoiceStats } from './services/invoice.service';
 import { checkIntegrity, autoFixIntegrityIssues, getUnvalidatedPODs } from './services/pod.service';
 import { toast } from 'sonner';
 import { useAuth } from '@/features/auth/hooks/useAuth';
+import { useLanguage } from '@/shared/hooks/useLanguage';
 
 interface UnifiedSalesFlowProps {
   onBack: () => void;
@@ -31,6 +32,7 @@ interface UnifiedSalesFlowProps {
 
 export function UnifiedSalesFlow({ onBack }: UnifiedSalesFlowProps) {
   const { user } = useAuth();
+  const { translate } = useLanguage();
   const [orders, setOrders] = useState<Order[]>([]);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [pods, setPods] = useState<POD[]>([]);
@@ -59,7 +61,7 @@ export function UnifiedSalesFlow({ onBack }: UnifiedSalesFlowProps) {
       setIntegrityIssues(issues);
     } catch (error) {
       console.error('Error verificando integridad:', error);
-      toast.error('Error al verificar la integridad de los datos');
+      toast.error(translate('errorVerifyIntegrity'));
     } finally {
       setIsCheckingIntegrity(false);
     }
@@ -70,12 +72,12 @@ export function UnifiedSalesFlow({ onBack }: UnifiedSalesFlowProps) {
 
     try {
       const result = autoFixIntegrityIssues(user.id);
-      toast.success(`Se solucionaron ${result.fixed} problemas. ${result.errors} errores.`);
+      toast.success(translate('fixedProblemsErrors').replace('{fixed}', String(result.fixed)).replace('{errors}', String(result.errors)));
       loadData();
       checkDataIntegrity();
     } catch (error) {
       console.error('Error al reparar problemas:', error);
-      toast.error('Error al intentar reparar problemas');
+      toast.error(translate('errorRepairProblems'));
     }
   };
 

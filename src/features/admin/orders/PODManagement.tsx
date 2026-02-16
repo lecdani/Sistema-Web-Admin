@@ -30,6 +30,7 @@ import {
   Trash2
 } from 'lucide-react';
 import { getFromLocalStorage, setToLocalStorage } from '@/shared/services/database';
+import { useLanguage } from '@/shared/hooks/useLanguage';
 import { POD, Store, User, Order, Invoice, PODFilters, IntegrityIssue } from '@/shared/types';
 import { toast } from 'sonner';
 
@@ -38,6 +39,7 @@ interface PODManagementProps {
 }
 
 export function PODManagement({ onBack }: PODManagementProps) {
+  const { translate } = useLanguage();
   const [pods, setPods] = useState<POD[]>([]);
   const [filteredPods, setFilteredPods] = useState<POD[]>([]);
   const [stores, setStores] = useState<Store[]>([]);
@@ -66,7 +68,7 @@ export function PODManagement({ onBack }: PODManagementProps) {
 
   useEffect(() => {
     checkIntegrity();
-  }, [pods, orders, invoices]);
+  }, [pods, orders, invoices, translate]);
 
   const loadData = () => {
     try {
@@ -86,11 +88,11 @@ export function PODManagement({ onBack }: PODManagementProps) {
 
         return {
           ...pod,
-          storeName: store?.name || 'Tienda no encontrada',
-          sellerName: `${seller?.firstName || ''} ${seller?.lastName || ''}`.trim() || 'Vendedor no encontrado',
-          uploadedByName: `${uploader?.firstName || ''} ${uploader?.lastName || ''}`.trim() || 'Usuario no encontrado',
-          orderNumber: order?.po || 'Sin PO', // Corregido: usar po del pedido
-          invoiceNumber: invoice?.invoiceNumber || 'Sin factura'
+          storeName: store?.name || translate('storeNotFound'),
+          sellerName: `${seller?.firstName || ''} ${seller?.lastName || ''}`.trim() || translate('sellerNotFound'),
+          uploadedByName: `${uploader?.firstName || ''} ${uploader?.lastName || ''}`.trim() || translate('userNotFound'),
+          orderNumber: order?.po || translate('noPo'),
+          invoiceNumber: invoice?.invoiceNumber || translate('noInvoice')
         };
       });
 
@@ -101,7 +103,7 @@ export function PODManagement({ onBack }: PODManagementProps) {
       setInvoices(invoicesData);
     } catch (error) {
       console.error('Error cargando datos:', error);
-      toast.error('Error al cargar los datos');
+      toast.error(translate('errorLoadData'));
     }
   };
 
@@ -160,7 +162,7 @@ export function PODManagement({ onBack }: PODManagementProps) {
             id: `order-${order.id}`,
             type: 'order_without_invoice',
             orderId: order.id,
-            description: `Pedido ${order.orderNumber} entregado sin POD`,
+            description: translate('orderWithoutPod').replace('{po}', order.po || order.id),
             severity: 'high',
             createdAt: new Date()
           });
@@ -177,7 +179,7 @@ export function PODManagement({ onBack }: PODManagementProps) {
             id: `invoice-${invoice.id}`,
             type: 'invoice_without_pod',
             invoiceId: invoice.id,
-            description: `Factura ${invoice.invoiceNumber} pagada sin POD`,
+            description: translate('invoiceWithoutPod').replace('{invoice}', invoice.invoiceNumber),
             severity: 'medium',
             createdAt: new Date()
           });
@@ -194,7 +196,7 @@ export function PODManagement({ onBack }: PODManagementProps) {
             id: `pod-${pod.id}`,
             type: 'orphan_pod',
             podId: pod.id,
-            description: `POD ${pod.id} referencia un pedido inexistente`,
+            description: translate('orphanPodOrder').replace('{id}', pod.id),
             severity: 'low',
             createdAt: new Date()
           });
@@ -208,7 +210,7 @@ export function PODManagement({ onBack }: PODManagementProps) {
             id: `pod-invoice-${pod.id}`,
             type: 'orphan_pod',
             podId: pod.id,
-            description: `POD ${pod.id} referencia una factura inexistente`,
+            description: translate('orphanPodInvoice').replace('{id}', pod.id),
             severity: 'low',
             createdAt: new Date()
           });
@@ -222,20 +224,20 @@ export function PODManagement({ onBack }: PODManagementProps) {
   const getValidationBadge = (isValidated: boolean) => {
     return isValidated ? (
       <Badge className="bg-green-100 text-green-800">
-        Validado
+        {translate('validated')}
       </Badge>
     ) : (
       <Badge className="bg-yellow-100 text-yellow-800">
-        Pendiente
+        {translate('pendingStatus')}
       </Badge>
     );
   };
 
   const getSeverityBadge = (severity: string) => {
     const severityConfig = {
-      low: { label: 'Baja', color: 'bg-blue-100 text-blue-800' },
-      medium: { label: 'Media', color: 'bg-yellow-100 text-yellow-800' },
-      high: { label: 'Alta', color: 'bg-red-100 text-red-800' }
+      low: { label: translate('severityLow'), color: 'bg-blue-100 text-blue-800' },
+      medium: { label: translate('severityMedium'), color: 'bg-yellow-100 text-yellow-800' },
+      high: { label: translate('severityHigh'), color: 'bg-red-100 text-red-800' }
     };
 
     const config = severityConfig[severity as keyof typeof severityConfig] || severityConfig.low;
@@ -263,10 +265,10 @@ export function PODManagement({ onBack }: PODManagementProps) {
       setPods(updatedPods);
       setToLocalStorage('app-pods', updatedPods);
       
-      toast.success('POD validado correctamente');
+      toast.success(translate('podValidatedSuccess'));
     } catch (error) {
       console.error('Error validando POD:', error);
-      toast.error('Error al validar el POD');
+      toast.error(translate('errorValidatePod'));
     }
   };
 
@@ -277,16 +279,15 @@ export function PODManagement({ onBack }: PODManagementProps) {
       setPods(updatedPods);
       setToLocalStorage('app-pods', updatedPods);
       
-      toast.success('POD eliminado correctamente');
+      toast.success(translate('podDeletedSuccess'));
       
-      // Cerrar el dialog si estamos viendo el detalle del POD eliminado
       if (selectedPod?.id === podId) {
         setShowPodDetail(false);
         setSelectedPod(null);
       }
     } catch (error) {
       console.error('Error eliminando POD:', error);
-      toast.error('Error al eliminar el POD');
+      toast.error(translate('errorDeletePod'));
     }
   };
 
@@ -301,10 +302,10 @@ export function PODManagement({ onBack }: PODManagementProps) {
       linkElement.setAttribute('download', exportFileDefaultName);
       linkElement.click();
       
-      toast.success('POD exportado correctamente');
+      toast.success(translate('podExportedSuccess'));
     } catch (error) {
       console.error('Error exportando POD:', error);
-      toast.error('Error al exportar el POD');
+      toast.error(translate('errorExportPod'));
     }
   };
 
@@ -329,8 +330,8 @@ export function PODManagement({ onBack }: PODManagementProps) {
             <FileImage className="h-5 w-5 text-green-600" />
           </div>
           <div>
-            <h1 className="text-2xl font-bold text-gray-900">Gestión de POD</h1>
-            <p className="text-gray-500">Administra todos los comprobantes de entrega</p>
+            <h1 className="text-2xl font-bold text-gray-900">{translate('podsTitle')}</h1>
+            <p className="text-gray-500">{translate('podsSubtitle')}</p>
           </div>
         </div>
         
@@ -342,11 +343,11 @@ export function PODManagement({ onBack }: PODManagementProps) {
             className={integrityIssues.length > 0 ? 'border-red-200 text-red-600' : ''}
           >
             <AlertCircle className="h-3.5 w-3.5 mr-1" />
-            <span className="whitespace-nowrap">Integridad ({integrityIssues.length})</span>
+            <span className="whitespace-nowrap">{translate('integrity')} ({integrityIssues.length})</span>
           </Button>
           <Button size="sm" className="bg-indigo-600 hover:bg-indigo-700">
             <Upload className="h-3.5 w-3.5 mr-1" />
-            <span className="whitespace-nowrap">Subir POD</span>
+            <span className="whitespace-nowrap">{translate('uploadPod')}</span>
           </Button>
         </div>
       </div>
@@ -357,7 +358,7 @@ export function PODManagement({ onBack }: PODManagementProps) {
           <div className="p-4">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-xs font-medium text-gray-500">Total PODs</p>
+                <p className="text-xs font-medium text-gray-500">{translate('totalPods')}</p>
                 <p className="text-2xl font-bold text-gray-900 mt-1">{pods.length}</p>
               </div>
               <div className="p-2.5 bg-indigo-100 rounded-lg flex items-center justify-center">
@@ -371,7 +372,7 @@ export function PODManagement({ onBack }: PODManagementProps) {
           <div className="p-4">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-xs font-medium text-gray-500">Pendientes</p>
+                <p className="text-xs font-medium text-gray-500">{translate('pendingLabel')}</p>
                 <p className="text-2xl font-bold text-yellow-600 mt-1">
                   {pods.filter(p => !p.isValidated).length}
                 </p>
@@ -387,7 +388,7 @@ export function PODManagement({ onBack }: PODManagementProps) {
           <div className="p-4">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-xs font-medium text-gray-500">Validados</p>
+                <p className="text-xs font-medium text-gray-500">{translate('validatedLabel')}</p>
                 <p className="text-2xl font-bold text-green-600 mt-1">
                   {pods.filter(p => p.isValidated).length}
                 </p>
@@ -403,7 +404,7 @@ export function PODManagement({ onBack }: PODManagementProps) {
           <div className="p-4">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-xs font-medium text-gray-500">Problemas</p>
+                <p className="text-xs font-medium text-gray-500">{translate('problems')}</p>
                 <p className="text-2xl font-bold text-red-600 mt-1">
                   {integrityIssues.length}
                 </p>
@@ -424,7 +425,7 @@ export function PODManagement({ onBack }: PODManagementProps) {
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
                 <Input
-                  placeholder="Buscar por pedido, factura, tienda o fechas (2024-01-01 2024-01-31)..."
+                  placeholder={translate('searchPodsPlaceholder')}
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
                   className="pl-10"
@@ -436,10 +437,12 @@ export function PODManagement({ onBack }: PODManagementProps) {
               <Select value={filters.sellerId} onValueChange={(value) => setFilters(prev => ({ ...prev, sellerId: value }))}>
                 <SelectTrigger className="w-48">
                   <UserIcon className="h-4 w-4 mr-2" />
-                  <SelectValue placeholder="Filtrar por vendedor" />
+                  <SelectValue placeholder={translate('filterBySeller')}>
+                    {filters.sellerId === 'all' ? translate('allSellers') : (() => { const u = users.filter(x => x.role === 'user').find((x) => x.id === filters.sellerId); return u ? `${u.firstName} ${u.lastName}` : null; })()}
+                  </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">Todos los vendedores</SelectItem>
+                  <SelectItem value="all">{translate('allSellers')}</SelectItem>
                   {users.filter(u => u.role === 'user').map((user) => (
                     <SelectItem key={user.id} value={user.id}>
                       {user.firstName} {user.lastName}
@@ -451,10 +454,12 @@ export function PODManagement({ onBack }: PODManagementProps) {
               <Select value={filters.storeId} onValueChange={(value) => setFilters(prev => ({ ...prev, storeId: value }))}>
                 <SelectTrigger className="w-48">
                   <StoreIcon className="h-4 w-4 mr-2" />
-                  <SelectValue placeholder="Filtrar por tienda" />
+                  <SelectValue placeholder={translate('filterByStore')}>
+                    {filters.storeId === 'all' ? translate('allStores') : stores.find((s) => s.id === filters.storeId)?.name}
+                  </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">Todas las tiendas</SelectItem>
+                  <SelectItem value="all">{translate('allStores')}</SelectItem>
                   {stores.map((store) => (
                     <SelectItem key={store.id} value={store.id}>
                       {store.name}
@@ -472,12 +477,16 @@ export function PODManagement({ onBack }: PODManagementProps) {
               >
                 <SelectTrigger className="w-48">
                   <Filter className="h-4 w-4 mr-2" />
-                  <SelectValue placeholder="Filtrar por estado" />
+                  <SelectValue placeholder={translate('filterByStatus')}>
+                    {filters.isValidated === undefined && translate('allStatuses')}
+                    {filters.isValidated === true && translate('validatedFilter')}
+                    {filters.isValidated === false && translate('pendingFilter')}
+                  </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">Todos los estados</SelectItem>
-                  <SelectItem value="true">Validados</SelectItem>
-                  <SelectItem value="false">Pendientes</SelectItem>
+                  <SelectItem value="all">{translate('allStatuses')}</SelectItem>
+                  <SelectItem value="true">{translate('validatedFilter')}</SelectItem>
+                  <SelectItem value="false">{translate('pendingFilter')}</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -488,9 +497,9 @@ export function PODManagement({ onBack }: PODManagementProps) {
       {/* PODs Table */}
       <Card>
         <CardHeader>
-          <CardTitle>Comprobantes de Entrega ({filteredPods.length})</CardTitle>
+          <CardTitle>{translate('deliveryReceiptsList')} ({filteredPods.length})</CardTitle>
           <CardDescription>
-            Lista de todos los PODs registrados en el sistema
+            {translate('listOfPods')}
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -498,14 +507,14 @@ export function PODManagement({ onBack }: PODManagementProps) {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Imagen</TableHead>
-                  <TableHead>Pedido/Factura</TableHead>
-                  <TableHead>Fecha Subida</TableHead>
-                  <TableHead>Subido Por</TableHead>
-                  <TableHead>Vendedor</TableHead>
-                  <TableHead>Tienda</TableHead>
-                  <TableHead>Estado</TableHead>
-                  <TableHead>Acciones</TableHead>
+                  <TableHead>{translate('imageCol')}</TableHead>
+                  <TableHead>{translate('orderInvoiceCol')}</TableHead>
+                  <TableHead>{translate('uploadDateCol')}</TableHead>
+                  <TableHead>{translate('uploadedByCol')}</TableHead>
+                  <TableHead>{translate('sellerLabel')}</TableHead>
+                  <TableHead>{translate('storeLabel')}</TableHead>
+                  <TableHead>{translate('statusLabel')}</TableHead>
+                  <TableHead>{translate('actions')}</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -518,13 +527,13 @@ export function PODManagement({ onBack }: PODManagementProps) {
                     </TableCell>
                     <TableCell>
                       <div className="space-y-1">
-                        {pod.orderNumber && pod.orderNumber !== 'Sin pedido' && (
+                        {pod.orderNumber && pod.orderNumber !== translate('noOrder') && (
                           <div className="flex items-center gap-1 text-sm">
                             <ShoppingCart className="h-3 w-3 text-gray-400" />
                             {pod.orderNumber}
                           </div>
                         )}
-                        {pod.invoiceNumber && pod.invoiceNumber !== 'Sin factura' && (
+                        {pod.invoiceNumber && pod.invoiceNumber !== translate('noInvoice') && (
                           <div className="flex items-center gap-1 text-sm">
                             <FileText className="h-3 w-3 text-gray-400" />
                             {pod.invoiceNumber}
@@ -557,7 +566,7 @@ export function PODManagement({ onBack }: PODManagementProps) {
                           variant="outline"
                           size="sm"
                           onClick={() => handleViewDetail(pod)}
-                          title="Ver detalle"
+                          title={translate('viewDetail')}
                         >
                           <Eye className="h-4 w-4" />
                         </Button>
@@ -565,7 +574,7 @@ export function PODManagement({ onBack }: PODManagementProps) {
                           variant="outline"
                           size="sm"
                           onClick={() => exportSinglePod(pod)}
-                          title="Exportar POD"
+                          title={translate('exportPodTitle')}
                         >
                           <Download className="h-4 w-4" />
                         </Button>
@@ -574,7 +583,7 @@ export function PODManagement({ onBack }: PODManagementProps) {
                             variant="outline"
                             size="sm"
                             onClick={() => handleValidatePod(pod.id)}
-                            title="Validar POD"
+                            title={translate('validatePodTitle')}
                             className="text-green-600 hover:text-green-700"
                           >
                             <CheckCircle className="h-4 w-4" />
@@ -584,7 +593,7 @@ export function PODManagement({ onBack }: PODManagementProps) {
                           variant="outline"
                           size="sm"
                           onClick={() => handleDeletePod(pod.id)}
-                          title="Eliminar POD"
+                          title={translate('deletePodTitle')}
                           className="text-red-600 hover:text-red-700"
                         >
                           <Trash2 className="h-4 w-4" />
@@ -600,14 +609,14 @@ export function PODManagement({ onBack }: PODManagementProps) {
               <div className="text-center py-12">
                 <FileImage className="h-16 w-16 text-gray-300 mx-auto mb-4" />
                 <h3 className="text-lg font-medium text-gray-900 mb-2">
-                  No se encontraron PODs
+                  {translate('noPodsSearch')}
                 </h3>
                 <p className="text-gray-500">
                   {searchTerm || Object.entries(filters).some(([key, value]) => 
                     key === 'isValidated' ? value !== undefined : (value !== '' && value !== 'all')
                   ) 
-                    ? 'Intenta ajustar los filtros de búsqueda'
-                    : 'No hay PODs registrados en el sistema'
+                    ? translate('tryOtherSearchPods')
+                    : translate('noPodsInSystem')
                   }
                 </p>
               </div>
@@ -620,9 +629,9 @@ export function PODManagement({ onBack }: PODManagementProps) {
       <Dialog open={showPodDetail} onOpenChange={setShowPodDetail}>
         <DialogContent className="!w-[75vw] !max-w-[1300px] max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Detalle del POD</DialogTitle>
+            <DialogTitle>{translate('podDetailTitle')}</DialogTitle>
             <DialogDescription>
-              Información detallada del comprobante de entrega
+              {translate('podDetailDesc')}
             </DialogDescription>
           </DialogHeader>
           
@@ -632,40 +641,40 @@ export function PODManagement({ onBack }: PODManagementProps) {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <Card>
                   <CardHeader>
-                    <CardTitle className="text-lg">Información General</CardTitle>
+                    <CardTitle className="text-lg">{translate('generalInfo')}</CardTitle>
                   </CardHeader>
                   <CardContent className="space-y-3">
                     <div className="flex justify-between">
-                      <span className="text-gray-600">Estado:</span>
+                      <span className="text-gray-600">{translate('statusLabel')}:</span>
                       {getValidationBadge(selectedPod.isValidated)}
                     </div>
                     <div className="flex justify-between">
-                      <span className="text-gray-600">Pedido:</span>
+                      <span className="text-gray-600">{translate('orderLabel')}:</span>
                       <span>{selectedPod.orderNumber}</span>
                     </div>
                     <div className="flex justify-between">
-                      <span className="text-gray-600">Factura:</span>
+                      <span className="text-gray-600">{translate('invoiceLabel')}:</span>
                       <span>{selectedPod.invoiceNumber}</span>
                     </div>
                     <div className="flex justify-between">
-                      <span className="text-gray-600">Vendedor:</span>
+                      <span className="text-gray-600">{translate('sellerLabel')}:</span>
                       <span>{selectedPod.sellerName}</span>
                     </div>
                     <div className="flex justify-between">
-                      <span className="text-gray-600">Tienda:</span>
+                      <span className="text-gray-600">{translate('storeLabel')}:</span>
                       <span>{selectedPod.storeName}</span>
                     </div>
                     <div className="flex justify-between">
-                      <span className="text-gray-600">Subido Por:</span>
+                      <span className="text-gray-600">{translate('uploadedByLabel')}:</span>
                       <span>{selectedPod.uploadedByName}</span>
                     </div>
                     <div className="flex justify-between">
-                      <span className="text-gray-600">Fecha Subida:</span>
+                      <span className="text-gray-600">{translate('uploadDateLabel')}:</span>
                       <span>{new Date(selectedPod.uploadedAt).toLocaleString('es-ES')}</span>
                     </div>
                     {selectedPod.validatedAt && (
                       <div className="flex justify-between">
-                        <span className="text-gray-600">Fecha Validación:</span>
+                        <span className="text-gray-600">{translate('validationDate')}:</span>
                         <span>{new Date(selectedPod.validatedAt).toLocaleString('es-ES')}</span>
                       </div>
                     )}
@@ -674,16 +683,16 @@ export function PODManagement({ onBack }: PODManagementProps) {
 
                 <Card>
                   <CardHeader>
-                    <CardTitle className="text-lg">Imagen del POD</CardTitle>
+                    <CardTitle className="text-lg">{translate('podImageTitle')}</CardTitle>
                   </CardHeader>
                   <CardContent>
                     <div className="flex items-center justify-center h-48 bg-gray-100 rounded-lg border-2 border-dashed border-gray-300">
                       <div className="text-center">
                         <ImageIcon className="h-12 w-12 text-gray-400 mx-auto mb-2" />
-                        <p className="text-sm text-gray-500">Vista previa no disponible</p>
+                        <p className="text-sm text-gray-500">{translate('previewNotAvailable')}</p>
                         <Button variant="outline" size="sm" className="mt-2">
                           <ExternalLink className="h-4 w-4 mr-2" />
-                          Ver Imagen
+                          {translate('viewImage')}
                         </Button>
                       </div>
                     </div>
@@ -695,7 +704,7 @@ export function PODManagement({ onBack }: PODManagementProps) {
               {selectedPod.notes && (
                 <Card>
                   <CardHeader>
-                    <CardTitle className="text-lg">Notas</CardTitle>
+                    <CardTitle className="text-lg">{translate('notes')}</CardTitle>
                   </CardHeader>
                   <CardContent>
                     <p className="text-gray-700">{selectedPod.notes}</p>
@@ -710,7 +719,7 @@ export function PODManagement({ onBack }: PODManagementProps) {
                   onClick={() => exportSinglePod(selectedPod)}
                 >
                   <Download className="h-4 w-4 mr-2" />
-                  Exportar POD
+                  {translate('exportPod')}
                 </Button>
                 {!selectedPod.isValidated && (
                   <Button
@@ -721,7 +730,7 @@ export function PODManagement({ onBack }: PODManagementProps) {
                     className="bg-green-600 hover:bg-green-700"
                   >
                     <CheckCircle className="h-4 w-4 mr-2" />
-                    Validar POD
+                    {translate('validatePod')}
                   </Button>
                 )}
                 <Button
@@ -730,7 +739,7 @@ export function PODManagement({ onBack }: PODManagementProps) {
                   className="text-red-600 hover:text-red-700"
                 >
                   <Trash2 className="h-4 w-4 mr-2" />
-                  Eliminar POD
+                  {translate('deletePod')}
                 </Button>
               </div>
             </div>
@@ -742,9 +751,9 @@ export function PODManagement({ onBack }: PODManagementProps) {
       <Dialog open={showIntegrityIssues} onOpenChange={setShowIntegrityIssues}>
         <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Problemas de Integridad</DialogTitle>
+            <DialogTitle>{translate('integrityIssuesTitle')}</DialogTitle>
             <DialogDescription>
-              Inconsistencias detectadas en el sistema entre pedidos, facturas y PODs
+              {translate('integrityIssuesDesc')}
             </DialogDescription>
           </DialogHeader>
           
@@ -753,10 +762,10 @@ export function PODManagement({ onBack }: PODManagementProps) {
               <div className="text-center py-8">
                 <CheckCircle className="h-16 w-16 text-green-500 mx-auto mb-4" />
                 <h3 className="text-lg font-medium text-gray-900 mb-2">
-                  ¡Sistema Íntegro!
+                  {translate('systemIntegrityOk')}
                 </h3>
                 <p className="text-gray-500">
-                  No se encontraron problemas de integridad en el sistema
+                  {translate('noIntegrityIssues')}
                 </p>
               </div>
             ) : (
@@ -772,11 +781,11 @@ export function PODManagement({ onBack }: PODManagementProps) {
                             {getSeverityBadge(issue.severity)}
                           </div>
                           <p className="text-sm text-gray-500">
-                            Detectado el {new Date(issue.createdAt).toLocaleString('es-ES')}
+                            {translate('detectedOn')} {new Date(issue.createdAt).toLocaleString('es-ES')}
                           </p>
                         </div>
                         <Button variant="outline" size="sm">
-                          Revisar
+                          {translate('review')}
                         </Button>
                       </div>
                     </CardContent>

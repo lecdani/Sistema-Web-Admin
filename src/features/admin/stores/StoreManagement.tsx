@@ -43,6 +43,7 @@ import { Label } from '@/shared/components/base/Label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/shared/components/base/Select';
 import { Textarea } from '@/shared/components/base/Textarea';
 import { Store, City } from '@/shared/types';
+import { useLanguage } from '@/shared/hooks/useLanguage';
 import { storesApi } from '@/shared/services/stores-api';
 import { citiesApi } from '@/shared/services/cities-api';
 import { toast } from '@/shared/components/base/Toast';
@@ -58,6 +59,7 @@ interface StoreFormData {
 }
 
 export const StoreManagement: React.FC<StoreManagementProps> = ({ onBack }) => {
+  const { translate } = useLanguage();
   const [stores, setStores] = useState<Store[]>([]);
   const [cities, setCities] = useState<City[]>([]);
   const [filteredStores, setFilteredStores] = useState<Store[]>([]);
@@ -95,7 +97,7 @@ export const StoreManagement: React.FC<StoreManagementProps> = ({ onBack }) => {
       setStores(data);
     } catch (error) {
       console.error('Error cargando tiendas:', error);
-      toast.error('Error al cargar las tiendas');
+      toast.error(translate('errorLoadStores'));
       setStores([]);
     } finally {
       setIsLoading(false);
@@ -108,7 +110,7 @@ export const StoreManagement: React.FC<StoreManagementProps> = ({ onBack }) => {
       setCities(data);
     } catch (error) {
       console.error('Error cargando ciudades:', error);
-      toast.error('Error al cargar ciudades');
+      toast.error(translate('errorLoadCitiesShort'));
     }
   };
 
@@ -153,9 +155,9 @@ export const StoreManagement: React.FC<StoreManagementProps> = ({ onBack }) => {
 
   const validateStoreForm = (): boolean => {
     const err: Partial<Record<keyof StoreFormData, string>> = {};
-    if (!formData.name.trim()) err.name = 'El nombre de la tienda es obligatorio';
-    if (!formData.address.trim()) err.address = 'La dirección es obligatoria';
-    if (!formData.cityId.trim()) err.cityId = 'Debe seleccionar una ciudad';
+    if (!formData.name.trim()) err.name = translate('nameRequired');
+    if (!formData.address.trim()) err.address = translate('addressRequired');
+    if (!formData.cityId.trim()) err.cityId = translate('cityRequired');
 
     const nameNorm = formData.name.trim().toLowerCase();
     const duplicate = stores.find(
@@ -164,7 +166,7 @@ export const StoreManagement: React.FC<StoreManagementProps> = ({ onBack }) => {
         s.cityId === formData.cityId &&
         (!editingStore || s.id !== editingStore.id)
     );
-    if (duplicate) err.name = 'Ya existe una tienda con ese nombre en esta ciudad';
+    if (duplicate) err.name = translate('duplicateStore');
 
     setFormErrors(err);
     return Object.keys(err).length === 0;
@@ -175,7 +177,7 @@ export const StoreManagement: React.FC<StoreManagementProps> = ({ onBack }) => {
 
     const cityExists = cities.find(c => c.id === formData.cityId);
     if (!cityExists) {
-      setFormErrors(prev => ({ ...prev, cityId: 'La ciudad seleccionada no es válida' }));
+      setFormErrors(prev => ({ ...prev, cityId: translate('invalidCity') }));
       return;
     }
 
@@ -188,10 +190,10 @@ export const StoreManagement: React.FC<StoreManagementProps> = ({ onBack }) => {
 
       if (editingStore) {
         await storesApi.update(editingStore.id, storeData);
-        toast.success('Tienda actualizada correctamente');
+        toast.success(translate('storeSaved'));
       } else {
         await storesApi.create(storeData);
-        toast.success('Tienda creada correctamente');
+        toast.success(translate('storeCreated'));
       }
 
       loadStores();
@@ -199,7 +201,7 @@ export const StoreManagement: React.FC<StoreManagementProps> = ({ onBack }) => {
       setShowAddDialog(false);
     } catch (error) {
       console.error('Error guardando tienda:', error);
-      toast.error('Error al guardar la tienda');
+      toast.error(translate('errorSaveStore'));
     }
   };
 
@@ -220,10 +222,10 @@ export const StoreManagement: React.FC<StoreManagementProps> = ({ onBack }) => {
       await storesApi.deactivate(store.id);
 
       await loadStores();
-      toast.success(`Tienda ${!store.isActive ? 'activada' : 'desactivada'} correctamente`);
+      toast.success(!store.isActive ? translate('storeActivatedSuccess') : translate('storeDeactivatedSuccess'));
     } catch (error) {
       console.error('Error cambiando estado de la tienda:', error);
-      toast.error('Error al cambiar el estado de la tienda');
+      toast.error(translate('errorToggleStore'));
     }
   };
 
@@ -238,7 +240,7 @@ export const StoreManagement: React.FC<StoreManagementProps> = ({ onBack }) => {
 
   const getCityName = (cityId: string) => {
     const city = cities.find(c => c.id === cityId);
-    return city ? city.name : 'Sin ciudad';
+    return city ? city.name : translate('notSpecified');
   };
 
   const getUniqueCities = () => {
@@ -265,8 +267,8 @@ export const StoreManagement: React.FC<StoreManagementProps> = ({ onBack }) => {
             <StoreIcon className="h-5 w-5 text-blue-600" />
           </div>
           <div>
-            <h1 className="text-2xl font-bold text-gray-900">Gestión de Tiendas</h1>
-            <p className="text-gray-500">Administra todas las tiendas del sistema</p>
+            <h1 className="text-2xl font-bold text-gray-900">{translate('storesTitle')}</h1>
+            <p className="text-gray-500">{translate('storesSubtitleAll')}</p>
           </div>
         </div>
 
@@ -280,19 +282,16 @@ export const StoreManagement: React.FC<StoreManagementProps> = ({ onBack }) => {
               }}
             >
               <Plus className="h-4 w-4 mr-2" />
-              Agregar Tienda
+              {translate('addStore')}
             </Button>
           </DialogTrigger>
           <DialogContent className="sm:max-w-xl">
             <DialogHeader>
               <DialogTitle>
-                {editingStore ? 'Editar Tienda' : 'Agregar Nueva Tienda'}
+                {editingStore ? translate('editStoreTitle') : translate('addNewStore')}
               </DialogTitle>
               <DialogDescription>
-                {editingStore
-                  ? 'Modifica la información de la tienda.'
-                  : 'Completa la información para crear una nueva tienda.'
-                }
+                {editingStore ? translate('editStoreDesc') : translate('newStoreDesc')}
               </DialogDescription>
             </DialogHeader>
 
@@ -302,9 +301,9 @@ export const StoreManagement: React.FC<StoreManagementProps> = ({ onBack }) => {
                   <div className="flex items-center gap-2">
                     <MapPin className="h-4 w-4 text-yellow-600" />
                     <div>
-                      <h4 className="text-sm font-medium text-yellow-800">No hay ciudades disponibles</h4>
+                      <h4 className="text-sm font-medium text-yellow-800">{translate('noCitiesAvailable')}</h4>
                       <p className="text-xs text-yellow-700 mt-0.5">
-                        Necesitas crear al menos una ciudad antes de poder agregar tiendas.
+                        {translate('needCityFirst')}
                       </p>
                     </div>
                   </div>
@@ -312,7 +311,7 @@ export const StoreManagement: React.FC<StoreManagementProps> = ({ onBack }) => {
               )}
 
               <div className="space-y-2">
-                <Label htmlFor="name">Nombre de la Tienda *</Label>
+                <Label htmlFor="name">{translate('storeNameLabel')}</Label>
                 <Input
                   id="name"
                   value={formData.name}
@@ -320,14 +319,14 @@ export const StoreManagement: React.FC<StoreManagementProps> = ({ onBack }) => {
                     setFormData(prev => ({ ...prev, name: e.target.value }));
                     if (formErrors.name) setFormErrors(prev => ({ ...prev, name: undefined }));
                   }}
-                  placeholder="Ej: Tienda Centro"
+                  placeholder={translate('storeNamePlaceholder')}
                   className={`h-10 ${formErrors.name ? 'border-red-500' : ''}`}
                 />
                 {formErrors.name && <p className="text-sm text-red-600">{formErrors.name}</p>}
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="address">Dirección *</Label>
+                <Label htmlFor="address">{translate('addressLabel')}</Label>
                 <Textarea
                   id="address"
                   value={formData.address}
@@ -335,7 +334,7 @@ export const StoreManagement: React.FC<StoreManagementProps> = ({ onBack }) => {
                     setFormData(prev => ({ ...prev, address: e.target.value }));
                     if (formErrors.address) setFormErrors(prev => ({ ...prev, address: undefined }));
                   }}
-                  placeholder="Ej: Av. Principal 123"
+                  placeholder={translate('addressPlaceholder')}
                   rows={3}
                   className={`resize-none min-h-[80px] ${formErrors.address ? 'border-red-500' : ''}`}
                 />
@@ -343,7 +342,7 @@ export const StoreManagement: React.FC<StoreManagementProps> = ({ onBack }) => {
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="cityId">Ciudad *</Label>
+                <Label htmlFor="cityId">{translate('city')} *</Label>
                 <Select
                   value={formData.cityId}
                   onValueChange={(value) => {
@@ -352,7 +351,9 @@ export const StoreManagement: React.FC<StoreManagementProps> = ({ onBack }) => {
                   }}
                 >
                   <SelectTrigger className={`h-10 ${formErrors.cityId ? 'border-red-500' : ''}`}>
-                    <SelectValue placeholder="Seleccionar ciudad" />
+                    <SelectValue placeholder={translate('selectCity')}>
+                      {(() => { const c = getUniqueCities().find((x) => x.id === formData.cityId); return c ? `${c.name}${c.country ? ` - ${c.country}` : ''}` : null; })()}
+                    </SelectValue>
                   </SelectTrigger>
                   <SelectContent>
                     {getUniqueCities().length > 0 ? (
@@ -363,7 +364,7 @@ export const StoreManagement: React.FC<StoreManagementProps> = ({ onBack }) => {
                       ))
                     ) : (
                       <SelectItem value="" disabled>
-                        No hay ciudades disponibles
+                        {translate('noCitiesAvailable')}
                       </SelectItem>
                     )}
                   </SelectContent>
@@ -377,12 +378,12 @@ export const StoreManagement: React.FC<StoreManagementProps> = ({ onBack }) => {
               <DialogClose asChild>
                 <Button variant="outline">
                   <X className="h-4 w-4 mr-2" />
-                  Cancelar
+                  {translate('cancel')}
                 </Button>
               </DialogClose>
               <Button onClick={handleSaveStore} className="bg-indigo-600 hover:bg-indigo-700">
                 <Save className="h-4 w-4 mr-2" />
-                {editingStore ? 'Actualizar' : 'Crear'}
+                {editingStore ? translate('update') : translate('create')}
               </Button>
             </DialogFooter>
           </DialogContent>
@@ -395,7 +396,7 @@ export const StoreManagement: React.FC<StoreManagementProps> = ({ onBack }) => {
           <div className="p-4">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-xs font-medium text-gray-500">Total Tiendas</p>
+                <p className="text-xs font-medium text-gray-500">{translate('totalStores')}</p>
                 <p className="text-2xl font-bold text-gray-900 mt-1">{stores.length}</p>
               </div>
               <div className="p-2.5 rounded-lg bg-blue-50">
@@ -409,7 +410,7 @@ export const StoreManagement: React.FC<StoreManagementProps> = ({ onBack }) => {
           <div className="p-4">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-xs font-medium text-gray-500">Tiendas Activas</p>
+                <p className="text-xs font-medium text-gray-500">{translate('statActiveStores')}</p>
                 <p className="text-2xl font-bold text-gray-900 mt-1">
                   {stores.filter(s => s.isActive).length}
                 </p>
@@ -425,7 +426,7 @@ export const StoreManagement: React.FC<StoreManagementProps> = ({ onBack }) => {
           <div className="p-4">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-xs font-medium text-gray-500">Ciudades</p>
+                <p className="text-xs font-medium text-gray-500">{translate('statCities')}</p>
                 <p className="text-2xl font-bold text-gray-900 mt-1">
                   {getUniqueCities().length}
                 </p>
@@ -446,7 +447,7 @@ export const StoreManagement: React.FC<StoreManagementProps> = ({ onBack }) => {
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
                 <Input
-                  placeholder="Buscar tiendas..."
+                  placeholder={translate('searchStoresPlaceholder')}
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
                   className="pl-10"
@@ -458,22 +459,28 @@ export const StoreManagement: React.FC<StoreManagementProps> = ({ onBack }) => {
               <Select value={statusFilter} onValueChange={setStatusFilter}>
                 <SelectTrigger className="w-48">
                   <Filter className="h-4 w-4 mr-2" />
-                  <SelectValue placeholder="Filtrar por estado" />
+                  <SelectValue placeholder={translate('filterByStatus')}>
+                    {statusFilter === 'all' && translate('allStatuses')}
+                    {statusFilter === 'active' && translate('activeStores')}
+                    {statusFilter === 'inactive' && translate('inactiveStores')}
+                  </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">Todos los estados</SelectItem>
-                  <SelectItem value="active">Activas</SelectItem>
-                  <SelectItem value="inactive">Inactivas</SelectItem>
+                  <SelectItem value="all">{translate('allStatuses')}</SelectItem>
+                  <SelectItem value="active">{translate('activeStores')}</SelectItem>
+                  <SelectItem value="inactive">{translate('inactiveStores')}</SelectItem>
                 </SelectContent>
               </Select>
 
               <Select value={cityFilter} onValueChange={setCityFilter}>
                 <SelectTrigger className="w-48">
                   <MapPin className="h-4 w-4 mr-2" />
-                  <SelectValue placeholder="Filtrar por ciudad" />
+                  <SelectValue placeholder={translate('filterByCity')}>
+                    {cityFilter === 'all' ? translate('allCities') : getUniqueCities().find((c) => c.id === cityFilter)?.name}
+                  </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">Todas las ciudades</SelectItem>
+                  <SelectItem value="all">{translate('allCities')}</SelectItem>
                   {getUniqueCities().map((city) => (
                     <SelectItem key={city.id} value={city.id}>{city.name}</SelectItem>
                   ))}
@@ -487,9 +494,9 @@ export const StoreManagement: React.FC<StoreManagementProps> = ({ onBack }) => {
       {/* Stores Table */}
       <Card>
         <CardHeader>
-          <CardTitle>Lista de Tiendas</CardTitle>
+          <CardTitle>{translate('storesList')}</CardTitle>
           <CardDescription>
-            Gestiona todas las tiendas del sistema
+            {translate('storesSubtitleAll')}
           </CardDescription>
         </CardHeader>
         <CardContent className="p-0">
@@ -498,16 +505,16 @@ export const StoreManagement: React.FC<StoreManagementProps> = ({ onBack }) => {
               <thead className="bg-gray-50 border-b border-gray-200">
                 <tr>
                   <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Tienda
+                    {translate('storeHeader')}
                   </th>
                   <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Ubicación
+                    {translate('location')}
                   </th>
                   <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Estado
+                    {translate('status')}
                   </th>
                   <th className="px-6 py-4 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Acciones
+                    {translate('actions')}
                   </th>
                 </tr>
               </thead>
@@ -534,7 +541,7 @@ export const StoreManagement: React.FC<StoreManagementProps> = ({ onBack }) => {
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <Badge className={getStatusBadgeColor(store.isActive)}>
-                        {store.isActive ? 'Activa' : 'Inactiva'}
+                        {store.isActive ? translate('activeBadge') : translate('inactiveBadge')}
                       </Badge>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
@@ -568,26 +575,26 @@ export const StoreManagement: React.FC<StoreManagementProps> = ({ onBack }) => {
                           <AlertDialogContent>
                             <AlertDialogHeader>
                               <AlertDialogTitle>
-                                {store.isActive ? 'Desactivar' : 'Activar'} Tienda
+                                {store.isActive ? translate('deactivateStoreTitle') : translate('activateStoreTitle')}
                               </AlertDialogTitle>
                               <AlertDialogDescription>
                                 <span className="block mb-2">
-                                  ¿Estás seguro que deseas {store.isActive ? 'desactivar' : 'activar'} la tienda <strong>{store.name}</strong>?
+                                  {translate('confirmActivateDeactivate').replace('{action}', store.isActive ? translate('deactivate') : translate('activate')).replace('{name}', store.name)}
                                 </span>
                                 {store.isActive && (
                                   <span className="block text-red-600">
-                                    La tienda no estará disponible para operaciones.
+                                    {translate('storeInactiveWarning')}
                                   </span>
                                 )}
                               </AlertDialogDescription>
                             </AlertDialogHeader>
                             <AlertDialogFooter>
-                              <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                              <AlertDialogCancel>{translate('cancel')}</AlertDialogCancel>
                               <AlertDialogAction
                                 onClick={() => handleToggleStatus(store)}
                                 className={store.isActive ? 'bg-red-600 hover:bg-red-700' : 'bg-green-600 hover:bg-green-700'}
                               >
-                                {store.isActive ? 'Desactivar' : 'Activar'}
+                                {store.isActive ? translate('deactivate') : translate('activate')}
                               </AlertDialogAction>
                             </AlertDialogFooter>
                           </AlertDialogContent>
@@ -604,12 +611,12 @@ export const StoreManagement: React.FC<StoreManagementProps> = ({ onBack }) => {
             <div className="text-center py-12">
               <StoreIcon className="h-12 w-12 text-gray-400 mx-auto mb-4" />
               <h3 className="text-lg font-medium text-gray-900 mb-2">
-                No se encontraron tiendas
+                {translate('noStoresSearch')}
               </h3>
               <p className="text-gray-600">
                 {searchTerm || statusFilter !== 'all' || cityFilter !== 'all'
-                  ? 'Intenta ajustar los filtros de búsqueda.'
-                  : 'Comienza agregando tiendas al sistema.'
+                  ? translate('tryOtherSearchStores')
+                  : translate('addStoresHint')
                 }
               </p>
             </div>
@@ -627,10 +634,10 @@ export const StoreManagement: React.FC<StoreManagementProps> = ({ onBack }) => {
               onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
               disabled={currentPage === 1}
             >
-              Anterior
+              {translate('previous')}
             </Button>
             <span className="text-sm text-gray-600">
-              Página {currentPage} de {Math.ceil(filteredStores.length / itemsPerPage)}
+              {translate('page')} {currentPage} {translate('pageOf')} {Math.ceil(filteredStores.length / itemsPerPage)}
             </span>
             <Button
               variant="outline"
@@ -638,7 +645,7 @@ export const StoreManagement: React.FC<StoreManagementProps> = ({ onBack }) => {
               onClick={() => setCurrentPage(prev => Math.min(prev + 1, Math.ceil(filteredStores.length / itemsPerPage)))}
               disabled={currentPage === Math.ceil(filteredStores.length / itemsPerPage)}
             >
-              Siguiente
+              {translate('next')}
             </Button>
           </div>
         )
@@ -650,10 +657,10 @@ export const StoreManagement: React.FC<StoreManagementProps> = ({ onBack }) => {
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <StoreIcon className="h-5 w-5 text-indigo-600" />
-              Detalles de la Tienda
+              {translate('storeDetails')}
             </DialogTitle>
             <DialogDescription>
-              Información completa de la tienda seleccionada
+              {translate('storeInfoDescription')}
             </DialogDescription>
           </DialogHeader>
 
@@ -668,13 +675,13 @@ export const StoreManagement: React.FC<StoreManagementProps> = ({ onBack }) => {
                   </div>
                 </div>
                 <Badge className={getStatusBadgeColor(selectedStore.isActive)}>
-                  {selectedStore.isActive ? 'Activa' : 'Inactiva'}
+                  {selectedStore.isActive ? translate('activeBadge') : translate('inactiveBadge')}
                 </Badge>
               </div>
 
               <div className="bg-gray-50 rounded-lg p-4 border border-gray-100">
                 <Label className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2 block">
-                  Dirección
+                  {translate('address')}
                 </Label>
                 <p className="text-sm text-gray-700 whitespace-pre-wrap">{selectedStore.address}</p>
               </div>
@@ -683,7 +690,7 @@ export const StoreManagement: React.FC<StoreManagementProps> = ({ onBack }) => {
 
           <DialogFooter>
             <DialogClose asChild>
-              <Button variant="outline">Cerrar</Button>
+              <Button variant="outline">{translate('close')}</Button>
             </DialogClose>
             {selectedStore && (
               <Button
@@ -694,7 +701,7 @@ export const StoreManagement: React.FC<StoreManagementProps> = ({ onBack }) => {
                 className="bg-indigo-600 hover:bg-indigo-700"
               >
                 <Edit3 className="h-4 w-4 mr-2" />
-                Editar
+                {translate('edit')}
               </Button>
             )}
           </DialogFooter>

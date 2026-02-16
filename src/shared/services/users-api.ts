@@ -126,10 +126,59 @@ export async function deactivateUser(id: string): Promise<void> {
     await apiClient.put(endpoint, { id });
 }
 
+/** Obtiene el perfil del usuario autenticado (GET /users/profile) */
+export async function getProfile(): Promise<User | null> {
+    try {
+        const res = await apiClient.get<any>(E.GET_PROFILE);
+        return res ? toUser(res) : null;
+    } catch {
+        return null;
+    }
+}
+
+/** Actualiza el perfil del usuario autenticado (PUT /users/profile) */
+export async function updateProfile(data: Partial<User> & { address?: string }): Promise<User> {
+    const payload: any = {
+        name: data.firstName?.trim(),
+        lastName: data.lastName?.trim(),
+        email: data.email?.trim(),
+        phone: data.phone?.trim(),
+        avatar: data.avatar
+    };
+    if ((data as any).address != null) payload.address = (data as any).address;
+    const res = await apiClient.put<any>(E.UPDATE_PROFILE, payload);
+    if (res) return toUser(res);
+    const fetched = await getProfile();
+    if (fetched) return fetched;
+    return {
+        id: '',
+        email: data.email ?? '',
+        firstName: data.firstName ?? '',
+        lastName: data.lastName ?? '',
+        role: 'user',
+        isActive: true,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        ...data
+    } as User;
+}
+
+/** Cambia la contraseña del usuario autenticado (POST /auth/change-password) */
+export async function changePassword(currentPassword: string, newPassword: string): Promise<void> {
+    const endpoint = API_CONFIG.ENDPOINTS.AUTH.CHANGE_PASSWORD;
+    await apiClient.post(endpoint, {
+        currentPassword,
+        newPassword
+    });
+}
+
 export const usersApi = {
     fetchAll: fetchUsers,
     getById: fetchUserById,
     create: createUser,
     update: updateUser,
-    deactivate: deactivateUser
+    deactivate: deactivateUser,
+    getProfile,
+    updateProfile,
+    changePassword
 };

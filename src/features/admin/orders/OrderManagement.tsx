@@ -34,7 +34,9 @@ import {
   Edit
 } from 'lucide-react';
 import { getFromLocalStorage, setToLocalStorage } from '@/shared/services/database';
+import { useLanguage } from '@/shared/hooks/useLanguage';
 import { Order, OrderItem, Store as StoreType, User, Product, Planogram, OrderFilters, Invoice, POD } from '@/shared/types';
+import { planogramsApi } from '@/shared/services/planograms-api';
 import { toast } from 'sonner';
 import { OrderDetailView } from './OrderDetailView';
 import { OrderPlanogramView } from './components/OrderPlanogramView';
@@ -45,6 +47,7 @@ interface OrderManagementProps {
 }
 
 export function OrderManagement({ onBack }: OrderManagementProps) {
+  const { translate } = useLanguage();
   const [orders, setOrders] = useState<Order[]>([]);
   const [filteredOrders, setFilteredOrders] = useState<Order[]>([]);
   const [stores, setStores] = useState<StoreType[]>([]);
@@ -75,31 +78,35 @@ export function OrderManagement({ onBack }: OrderManagementProps) {
     applyFilters();
   }, [orders, searchTerm, filters]);
 
-  const loadData = () => {
+  const loadData = async () => {
     try {
       const ordersData = getFromLocalStorage('app-orders') || [];
       const storesData = getFromLocalStorage('app-stores') || [];
       const usersData = getFromLocalStorage('app-users') || [];
       const productsData = getFromLocalStorage('app-products') || [];
-      const planogramsData = getFromLocalStorage('app-planograms') || [];
+      let planogramsData: Planogram[] = [];
+      try {
+        planogramsData = await planogramsApi.fetchAll();
+      } catch {
+        planogramsData = getFromLocalStorage('app-planograms') || [];
+      }
 
-      // Enriquecer pedidos con información adicional
       const enrichedOrders = ordersData.map((order: Order) => {
         const store = storesData.find((s: StoreType) => s.id === order.storeId);
-        const seller = usersData.find((u: User) => u.id === order.salespersonId); // Corregido: salespersonId
+        const seller = usersData.find((u: User) => u.id === order.salespersonId);
         const planogram = planogramsData.find((p: Planogram) => p.id === order.planogramId);
 
         return {
           ...order,
-          storeName: store?.name || 'Tienda no encontrada',
-          sellerName: `${seller?.firstName || ''} ${seller?.lastName || ''}`.trim() || 'Vendedor no encontrado',
-          planogramName: planogram?.name || 'Sin planograma',
+          storeName: store?.name || translate('storeNotFound'),
+          sellerName: `${seller?.firstName || ''} ${seller?.lastName || ''}`.trim() || translate('sellerNotFound'),
+          planogramName: planogram?.name || translate('noPlanogram'),
           items: order.items?.map((item: OrderItem) => {
             const product = productsData.find((p: Product) => p.id === item.productId);
             return {
               ...item,
-              productName: product?.name || 'Producto no encontrado',
-              productBrand: product?.category || 'Sin categoría'
+              productName: product?.name || translate('productNotFound'),
+              productBrand: product?.category || translate('noCategory')
             };
           }) || []
         };
@@ -112,7 +119,7 @@ export function OrderManagement({ onBack }: OrderManagementProps) {
       setPlanograms(planogramsData);
     } catch (error) {
       console.error('Error cargando datos:', error);
-      toast.error('Error al cargar los datos');
+      toast.error(translate('errorLoadData'));
     }
   };
 
@@ -162,14 +169,14 @@ export function OrderManagement({ onBack }: OrderManagementProps) {
         return (
           <Badge className="bg-green-100 text-green-800 border-green-200">
             <CheckCircle className="h-3 w-3 mr-1" />
-            Completado
+            {translate('completedStatus')}
           </Badge>
         );
       case 'pending':
         return (
           <Badge className="bg-yellow-100 text-yellow-800 border-yellow-200">
             <Clock className="h-3 w-3 mr-1" />
-            Pendiente
+            {translate('pendingStatus')}
           </Badge>
         );
       default:
@@ -198,13 +205,13 @@ export function OrderManagement({ onBack }: OrderManagementProps) {
       setSelectedOrder(order);
       setShowPlanogramDialog(true);
     } else {
-      toast.error('Este pedido no tiene un planograma asociado');
+      toast.error(translate('orderNoPlanogram'));
     }
   };
 
   const handleEditOrder = (order: Order) => {
     if (order.status === 'completed') {
-      toast.error('No se puede editar un pedido completado');
+      toast.error(translate('cannotEditCompletedOrder'));
       return;
     }
     setEditingOrder(order);
@@ -222,10 +229,10 @@ export function OrderManagement({ onBack }: OrderManagementProps) {
       linkElement.setAttribute('download', exportFileDefaultName);
       linkElement.click();
       
-      toast.success('Pedidos exportados correctamente');
+      toast.success(translate('ordersExportedSuccess'));
     } catch (error) {
       console.error('Error exportando pedidos:', error);
-      toast.error('Error al exportar los pedidos');
+      toast.error(translate('errorExportOrders'));
     }
   };
 
@@ -252,19 +259,19 @@ export function OrderManagement({ onBack }: OrderManagementProps) {
             <ShoppingCart className="h-5 w-5 text-blue-600" />
           </div>
           <div>
-            <h1 className="text-2xl font-bold text-gray-900">Gestión de Pedidos</h1>
-            <p className="text-gray-500">Administra todos los pedidos del sistema</p>
+            <h1 className="text-2xl font-bold text-gray-900">{translate('ordersTitle')}</h1>
+            <p className="text-gray-500">{translate('ordersSubtitle')}</p>
           </div>
         </div>
         
         <div className="flex items-center gap-2">
           <Button variant="outline" onClick={exportOrders}>
             <Download className="h-4 w-4 mr-2" />
-            Exportar
+            {translate('export')}
           </Button>
           <Button className="bg-indigo-600 hover:bg-indigo-700" onClick={() => setShowCreateOrderDialog(true)}>
             <Plus className="h-4 w-4 mr-2" />
-            Nuevo Pedido
+            {translate('newOrder')}
           </Button>
         </div>
       </div>
@@ -275,7 +282,7 @@ export function OrderManagement({ onBack }: OrderManagementProps) {
           <div className="p-4">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-xs font-medium text-gray-500">Total Pedidos</p>
+                <p className="text-xs font-medium text-gray-500">{translate('totalOrders')}</p>
                 <p className="text-2xl font-bold text-gray-900 mt-1">{orders.length}</p>
               </div>
               <div className="p-2.5 bg-indigo-100 rounded-lg flex items-center justify-center">
@@ -289,7 +296,7 @@ export function OrderManagement({ onBack }: OrderManagementProps) {
           <div className="p-4">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-xs font-medium text-gray-500">Pendientes</p>
+                <p className="text-xs font-medium text-gray-500">{translate('pending')}</p>
                 <p className="text-2xl font-bold text-yellow-600 mt-1">
                   {orders.filter(o => o.status === 'pending').length}
                 </p>
@@ -305,7 +312,7 @@ export function OrderManagement({ onBack }: OrderManagementProps) {
           <div className="p-4">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-xs font-medium text-gray-500">Completados</p>
+                <p className="text-xs font-medium text-gray-500">{translate('completed')}</p>
                 <p className="text-2xl font-bold text-green-600 mt-1">
                   {orders.filter(o => o.status === 'completed').length}
                 </p>
@@ -321,7 +328,7 @@ export function OrderManagement({ onBack }: OrderManagementProps) {
           <div className="p-4">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-xs font-medium text-gray-500">Valor Total</p>
+                <p className="text-xs font-medium text-gray-500">{translate('totalValue')}</p>
                 <p className="text-2xl font-bold text-gray-900 mt-1">
                   €{orders.reduce((sum, o) => sum + o.total, 0).toFixed(2)}
                 </p>
@@ -342,7 +349,7 @@ export function OrderManagement({ onBack }: OrderManagementProps) {
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
                 <Input
-                  placeholder="Buscar por PO Number, tienda o vendedor..."
+                  placeholder={translate('searchOrdersPlaceholder')}
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
                   className="pl-10"
@@ -354,10 +361,12 @@ export function OrderManagement({ onBack }: OrderManagementProps) {
               <Select value={filters.sellerId} onValueChange={(value) => setFilters(prev => ({ ...prev, sellerId: value }))}>
                 <SelectTrigger className="w-48">
                   <UserIcon className="h-4 w-4 mr-2" />
-                  <SelectValue placeholder="Filtrar por vendedor" />
+                  <SelectValue placeholder={translate('filterBySeller')}>
+                    {filters.sellerId === 'all' ? translate('allSellers') : (() => { const u = users.find((x) => x.id === filters.sellerId); return u ? `${u.firstName} ${u.lastName}` : null; })()}
+                  </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">Todos los vendedores</SelectItem>
+                  <SelectItem value="all">{translate('allSellers')}</SelectItem>
                   {users.map((user) => (
                     <SelectItem key={user.id} value={user.id}>
                       {user.firstName} {user.lastName}
@@ -369,10 +378,12 @@ export function OrderManagement({ onBack }: OrderManagementProps) {
               <Select value={filters.storeId} onValueChange={(value) => setFilters(prev => ({ ...prev, storeId: value }))}>
                 <SelectTrigger className="w-48">
                   <StoreIcon className="h-4 w-4 mr-2" />
-                  <SelectValue placeholder="Filtrar por tienda" />
+                  <SelectValue placeholder={translate('filterByStore')}>
+                    {filters.storeId === 'all' ? translate('allStores') : stores.find((s) => s.id === filters.storeId)?.name}
+                  </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">Todas las tiendas</SelectItem>
+                  <SelectItem value="all">{translate('allStores')}</SelectItem>
                   {stores.map((store) => (
                     <SelectItem key={store.id} value={store.id}>
                       {store.name}
@@ -384,12 +395,16 @@ export function OrderManagement({ onBack }: OrderManagementProps) {
               <Select value={filters.status} onValueChange={(value) => setFilters(prev => ({ ...prev, status: value }))}>
                 <SelectTrigger className="w-48">
                   <Filter className="h-4 w-4 mr-2" />
-                  <SelectValue placeholder="Filtrar por estado" />
+                  <SelectValue placeholder={translate('filterByStatus')}>
+                    {filters.status === 'all' && translate('allStatuses')}
+                    {filters.status === 'pending' && translate('pendingStatus')}
+                    {filters.status === 'completed' && translate('completedStatus')}
+                  </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">Todos los estados</SelectItem>
-                  <SelectItem value="pending">Pendiente</SelectItem>
-                  <SelectItem value="completed">Completado</SelectItem>
+                  <SelectItem value="all">{translate('allStatuses')}</SelectItem>
+                  <SelectItem value="pending">{translate('pendingStatus')}</SelectItem>
+                  <SelectItem value="completed">{translate('completedStatus')}</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -400,9 +415,9 @@ export function OrderManagement({ onBack }: OrderManagementProps) {
       {/* Orders Table */}
       <Card>
         <CardHeader>
-          <CardTitle>Pedidos ({filteredOrders.length})</CardTitle>
+          <CardTitle>{translate('ordersTitle').replace('Gestión de Pedidos', 'Pedidos').replace('Order Management', 'Orders')} ({filteredOrders.length})</CardTitle>
           <CardDescription>
-            Lista de todos los pedidos registrados en el sistema
+            {translate('ordersListDesc')}
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -410,13 +425,13 @@ export function OrderManagement({ onBack }: OrderManagementProps) {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>PO Number</TableHead>
-                  <TableHead>Fecha</TableHead>
-                  <TableHead>Vendedor</TableHead>
-                  <TableHead>Tienda</TableHead>
-                  <TableHead>Estado</TableHead>
-                  <TableHead>Total</TableHead>
-                  <TableHead>Acciones</TableHead>
+                  <TableHead>{translate('poNumber')}</TableHead>
+                  <TableHead>{translate('date')}</TableHead>
+                  <TableHead>{translate('seller')}</TableHead>
+                  <TableHead>{translate('storeHeader')}</TableHead>
+                  <TableHead>{translate('status')}</TableHead>
+                  <TableHead>{translate('ordersTotalColumn')}</TableHead>
+                  <TableHead>{translate('actions')}</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -452,7 +467,7 @@ export function OrderManagement({ onBack }: OrderManagementProps) {
                           variant="outline"
                           size="sm"
                           onClick={() => handleViewDetail(order)}
-                          title="Ver detalles del pedido"
+                          title={translate('viewOrderDetails')}
                         >
                           <Eye className="h-4 w-4" />
                         </Button>
@@ -462,7 +477,7 @@ export function OrderManagement({ onBack }: OrderManagementProps) {
                             size="sm"
                             onClick={() => handleViewPlanogram(order)}
                             className="text-blue-600 hover:text-blue-700"
-                            title="Ver planograma del pedido"
+                            title={translate('viewOrderPlanogram')}
                           >
                             <Layout className="h-4 w-4" />
                           </Button>
@@ -473,7 +488,7 @@ export function OrderManagement({ onBack }: OrderManagementProps) {
                             size="sm"
                             onClick={() => handleEditOrder(order)}
                             className="text-amber-600 hover:text-amber-700"
-                            title="Editar pedido"
+                            title={translate('editOrder')}
                           >
                             <Edit className="h-4 w-4" />
                           </Button>
@@ -489,12 +504,12 @@ export function OrderManagement({ onBack }: OrderManagementProps) {
               <div className="text-center py-12">
                 <ShoppingCart className="h-16 w-16 text-gray-300 mx-auto mb-4" />
                 <h3 className="text-lg font-medium text-gray-900 mb-2">
-                  No se encontraron pedidos
+                  {translate('noOrdersSearch')}
                 </h3>
                 <p className="text-gray-500">
                   {searchTerm || Object.values(filters).some(v => v !== '' && v !== 'all') 
-                    ? 'Intenta ajustar los filtros de búsqueda'
-                    : 'No hay pedidos registrados en el sistema'
+                    ? translate('tryOtherSearchOrders')
+                    : translate('noOrdersInSystem')
                   }
                 </p>
               </div>

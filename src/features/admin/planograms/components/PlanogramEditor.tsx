@@ -18,12 +18,16 @@ import { Badge } from '@/shared/components/base/Badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/shared/components/base/Select';
 import { ScrollArea } from '@/shared/components/base/ScrollArea';
 import { Product, Planogram, Distribution } from '@/shared/types';
-import { getFromLocalStorage, setToLocalStorage } from '@/shared/services/database';
+import { useLanguage } from '@/shared/hooks/useLanguage';
 import { toast } from '@/shared/components/base/Toast';
+import { planogramsApi } from '@/shared/services/planograms-api';
+import { distributionsApi } from '@/shared/services/distributions-api';
 
 interface PlanogramEditorProps {
   products: Product[];
   planogram?: Planogram;
+  /** Distribuciones actuales del planograma (para edición, desde API) */
+  existingDistributions?: Distribution[];
   onSave: () => void;
   onCancel: () => void;
 }
@@ -44,16 +48,17 @@ const GRID_SIZE = 10;
 export const PlanogramEditor: React.FC<PlanogramEditorProps> = ({
   products,
   planogram,
+  existingDistributions = [],
   onSave,
   onCancel
 }) => {
+  const { translate } = useLanguage();
   const [formData, setFormData] = useState<PlanogramFormData>({
     name: planogram?.name || '',
     description: planogram?.description || ''
   });
 
   const [grid, setGrid] = useState<GridCell[][]>(() => {
-    // Inicializar grilla vacía
     const initialGrid: GridCell[][] = [];
     for (let x = 0; x < GRID_SIZE; x++) {
       initialGrid[x] = [];
@@ -61,20 +66,13 @@ export const PlanogramEditor: React.FC<PlanogramEditorProps> = ({
         initialGrid[x][y] = { x, y, product: null };
       }
     }
-
-    // Si estamos editando, cargar distribución existente
-    if (planogram) {
-      const distributions = getFromLocalStorage('app-distributions') || [];
-      const planogramDistributions = distributions.filter((d: Distribution) => d.planogramId === planogram.id);
-      
-      planogramDistributions.forEach((dist: Distribution) => {
-        const product = products.find(p => p.id === dist.productId);
-        if (product && dist.xPosition < GRID_SIZE && dist.yPosition < GRID_SIZE) {
-          initialGrid[dist.xPosition][dist.yPosition].product = product;
-        }
-      });
-    }
-
+    const planogramDistributions = planogram ? existingDistributions.filter((d) => d.planogramId === planogram.id) : [];
+    planogramDistributions.forEach((dist: Distribution) => {
+      const product = products.find((p) => p.id === dist.productId);
+      if (product && dist.xPosition < GRID_SIZE && dist.yPosition < GRID_SIZE) {
+        initialGrid[dist.xPosition][dist.yPosition].product = product;
+      }
+    });
     return initialGrid;
   });
 
@@ -96,7 +94,7 @@ export const PlanogramEditor: React.FC<PlanogramEditorProps> = ({
   // Validar formulario
   const validateForm = (): boolean => {
     if (!formData.name.trim()) {
-      toast.error('El nombre del planograma es requerido');
+      toast.error(translate('planogramNameRequired'));
       return false;
     }
     return true;
@@ -129,13 +127,13 @@ export const PlanogramEditor: React.FC<PlanogramEditorProps> = ({
   const handleCellDrop = useCallback((x: number, y: number, product: Product) => {
     // Verificar si el producto ya está en la grilla
     if (isProductInGrid(product.id)) {
-      toast.error('Este producto ya está asignado en el planograma');
+      toast.error(translate('productAlreadyInPlanogram'));
       return;
     }
 
     // Verificar si la celda ya está ocupada
     if (grid[x][y].product) {
-      toast.error('Esta celda ya está ocupada');
+      toast.error(translate('cellAlreadyOccupied'));
       return;
     }
 
@@ -163,7 +161,7 @@ export const PlanogramEditor: React.FC<PlanogramEditorProps> = ({
     );
 
     setGrid(newGrid);
-    toast.success('Producto removido de la grilla');
+    toast.success(translate('productRemovedFromGrid'));
   };
 
   // Limpiar grilla
@@ -176,142 +174,101 @@ export const PlanogramEditor: React.FC<PlanogramEditorProps> = ({
       }
     }
     setGrid(emptyGrid);
-    toast.success('Grilla limpiada');
+    toast.success(translate('gridCleared'));
   };
 
-  // Verificar si un planograma puede ser editado directamente (mismo día)
-  const canEditDirectly = (planogram: Planogram): boolean => {
-    if (!planogram || !planogram.isActive) return false;
-    
-    const today = new Date();
-    const createdDate = new Date(planogram.createdAt);
-    
-    return (
-      today.getFullYear() === createdDate.getFullYear() &&
-      today.getMonth() === createdDate.getMonth() &&
-      today.getDate() === createdDate.getDate()
-    );
-  };
+  const canEditDirectly = (planogram: Planogram | undefined): boolean => !!planogram;
 
-  // Guardar planograma
+  // Guardar planograma (API)
   const handleSave = async () => {
     if (!validateForm()) return;
 
     try {
-      const now = new Date();
-      const planogramId = planogram?.id || generateId();
+      let planogramId: string;
 
-      // Crear nuevo planograma o actualizar existente
-      const planograms = getFromLocalStorage('app-planograms') || [];
-      
-      let newPlanogram: Planogram;
-      
       if (planogram) {
-        // Si el planograma es activo y fue creado hoy, editarlo directamente
-        if (canEditDirectly(planogram)) {
-          const existingIndex = planograms.findIndex((p: Planogram) => p.id === planogram.id);
-          
-          newPlanogram = {
-            ...planogram,
-            name: formData.name.trim(),
-            description: formData.description.trim(),
-            updatedAt: now
-          };
-          
-          if (existingIndex !== -1) {
-            planograms[existingIndex] = newPlanogram;
-          }
-        } else {
-          // Editando planograma existente - crear nueva versión
-          const maxVersion = Math.max(...planograms.filter((p: Planogram) => p.name === formData.name).map((p: Planogram) => p.version), 0);
-          
-          newPlanogram = {
-            id: generateId(), // Nuevo ID para nueva versión
-            name: formData.name.trim(),
-            description: formData.description.trim(),
-            version: maxVersion + 1,
-            isActive: false, // Las nuevas versiones empiezan inactivas
-            createdAt: now,
-            updatedAt: now
-          };
-          
-          planograms.push(newPlanogram);
-        }
-      } else {
-        // Creando nuevo planograma
-        newPlanogram = {
-          id: planogramId,
+        await planogramsApi.update(planogram.id, {
           name: formData.name.trim(),
-          description: formData.description.trim(),
-          version: 1,
-          isActive: false, // Empezar inactivo
-          createdAt: now,
-          updatedAt: now
-        };
-        
-        planograms.push(newPlanogram);
-      }
+          description: formData.description?.trim()
+        });
+        planogramId = planogram.id;
 
-      // Guardar planograma
-      setToLocalStorage('app-planograms', planograms);
-
-      // Crear distribuciones
-      const distributions = getFromLocalStorage('app-distributions') || [];
-      
-      // Remover distribuciones existentes del planograma que estamos editando
-      if (planogram) {
-        const filteredDistributions = distributions.filter((d: Distribution) => d.planogramId !== planogram.id);
-        setToLocalStorage('app-distributions', filteredDistributions);
-      }
-
-      // Agregar nuevas distribuciones
-      const newDistributions: Distribution[] = [];
-      grid.forEach((row, x) => {
-        row.forEach((cell, y) => {
-          if (cell.product) {
-            newDistributions.push({
-              id: generateId(),
-              planogramId: newPlanogram.id,
+        const currentDist = existingDistributions.filter((d) => d.planogramId === planogram.id);
+        for (const d of currentDist) {
+          const cell = grid[d.xPosition]?.[d.yPosition];
+          if (!cell?.product) {
+            const productElsewhere = grid.some((row, xi) =>
+              row.some((c, yi) => (xi !== d.xPosition || yi !== d.yPosition) && c.product?.id === d.productId)
+            );
+            if (!productElsewhere) await distributionsApi.toggleActive(d.id);
+          } else if (cell.product.id !== d.productId) {
+            await distributionsApi.update(d.id, {
+              planogramId: planogram.id,
               productId: cell.product.id,
-              xPosition: x,
-              yPosition: y,
-              createdAt: now
+              xPosition: d.xPosition,
+              yPosition: d.yPosition
             });
           }
+        }
+        for (let x = 0; x < GRID_SIZE; x++) {
+          for (let y = 0; y < GRID_SIZE; y++) {
+            const cell = grid[x][y];
+            if (!cell?.product) continue;
+            const existsAtCell = currentDist.some((d) => d.xPosition === x && d.yPosition === y);
+            if (existsAtCell) continue;
+            const movedSameProduct = currentDist.find(
+              (d) => d.productId === cell.product!.id && (d.xPosition !== x || d.yPosition !== y)
+            );
+            if (movedSameProduct) {
+              await distributionsApi.update(movedSameProduct.id, {
+                planogramId: movedSameProduct.planogramId || planogramId,
+                productId: movedSameProduct.productId,
+                xPosition: x,
+                yPosition: y
+              });
+            } else {
+              await distributionsApi.create({
+                planogramId,
+                productId: cell.product.id,
+                xPosition: x,
+                yPosition: y
+              });
+            }
+          }
+        }
+        toast.success(translate('planogramSaved'));
+      } else {
+        const created = await planogramsApi.create({
+          name: formData.name.trim(),
+          description: formData.description?.trim(),
+          isActive: true,
+          version: 1
         });
-      });
-
-      // Guardar distribuciones
-      const currentDistributions = getFromLocalStorage('app-distributions') || [];
-      const updatedDistributions = [...currentDistributions, ...newDistributions];
-      setToLocalStorage('app-distributions', updatedDistributions);
-
-      // Activar automáticamente si es el primer planograma, si no hay ninguno activo, 
-      // o si estamos editando directamente un planograma activo del mismo día
-      const shouldActivate = planograms.length === 1 || 
-                           !planograms.some((p: Planogram) => p.isActive) ||
-                           (planogram && canEditDirectly(planogram));
-
-      if (shouldActivate) {
-        const updatedPlanograms = planograms.map((p: Planogram) => 
-          p.id === newPlanogram.id 
-            ? { ...p, isActive: true, activatedAt: planogram && canEditDirectly(planogram) ? p.activatedAt : now }
-            : { ...p, isActive: false }
-        );
-        setToLocalStorage('app-planograms', updatedPlanograms);
+        planogramId = created.id;
+        for (let x = 0; x < GRID_SIZE; x++) {
+          for (let y = 0; y < GRID_SIZE; y++) {
+            const cell = grid[x][y];
+            if (cell?.product) {
+              await distributionsApi.create({
+                planogramId,
+                productId: cell.product.id,
+                xPosition: Number(x),
+                yPosition: Number(y)
+              });
+            }
+          }
+        }
+        const all = await planogramsApi.fetchAll();
+        for (const p of all) {
+          if (p.id !== created.id && p.isActive) await planogramsApi.toggleActive(p.id);
+        }
+        toast.success(translate('planogramCreated'));
       }
-
-      const successMessage = planogram && canEditDirectly(planogram) 
-        ? 'Planograma actualizado correctamente' 
-        : planogram 
-          ? 'Nueva versión del planograma creada' 
-          : 'Planograma creado correctamente';
-      
-      toast.success(successMessage);
       onSave();
-    } catch (error) {
-      console.error('Error guardando planograma:', error);
-      toast.error('Error al guardar el planograma');
+    } catch (err: any) {
+      console.error('Error guardando planograma:', err);
+      const msg = err?.data?.message ?? err?.message ?? translate('errorSavePlanogram');
+      toast.error(typeof msg === 'string' ? msg : translate('errorSavePlanogram'));
     }
   };
 
@@ -342,11 +299,11 @@ export const PlanogramEditor: React.FC<PlanogramEditorProps> = ({
           <div className="flex items-center gap-3">
             {planogram && (
               <Badge className="bg-blue-100 text-blue-800 text-xs px-2 py-0.5">
-                Editando v{planogram.version}
+                {translate('editingVersion')}{planogram.version}
               </Badge>
             )}
             {planogram && canEditDirectly(planogram) && (
-              <Badge className="bg-blue-100 text-blue-800 text-xs px-2 py-0.5">Mismo día</Badge>
+              <Badge className="bg-blue-100 text-blue-800 text-xs px-2 py-0.5">{translate('sameDay')}</Badge>
             )}
           </div>
         </div>
@@ -357,14 +314,14 @@ export const PlanogramEditor: React.FC<PlanogramEditorProps> = ({
             id="name"
             value={formData.name}
             onChange={(e) => setFormData(prev => ({ ...prev, name: e.target.value }))}
-            placeholder="Nombre del planograma *"
+            placeholder={translate('planogramNamePlaceholder')}
             className="h-9 flex-1"
           />
           <Input
             id="description"
             value={formData.description}
             onChange={(e) => setFormData(prev => ({ ...prev, description: e.target.value }))}
-            placeholder="Descripción"
+            placeholder={translate('descriptionPlaceholder')}
             className="h-9 flex-1"
           />
           
@@ -372,12 +329,12 @@ export const PlanogramEditor: React.FC<PlanogramEditorProps> = ({
           <div className="flex items-center gap-4 px-3 py-1.5 bg-white rounded-lg border border-indigo-200 shadow-sm">
             <div className="text-center">
               <div className="text-base font-bold text-blue-600">{getProductsInGrid().size}</div>
-              <div className="text-[10px] text-gray-600">Productos</div>
+              <div className="text-[10px] text-gray-600">{translate('productsLabel')}</div>
             </div>
             <div className="h-7 w-px bg-indigo-200"></div>
             <div className="text-center">
               <div className="text-base font-bold text-green-600">{((getProductsInGrid().size / (GRID_SIZE * GRID_SIZE)) * 100).toFixed(1)}%</div>
-              <div className="text-[10px] text-gray-600">Ocupación</div>
+              <div className="text-[10px] text-gray-600">{translate('occupancy')}</div>
             </div>
           </div>
         </div>
@@ -389,8 +346,8 @@ export const PlanogramEditor: React.FC<PlanogramEditorProps> = ({
         <div className="flex-1 overflow-auto bg-gradient-to-br from-gray-50 to-slate-50 rounded-xl p-6 shadow-inner">
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-3">
-              <span className="text-sm font-semibold text-gray-900">Editor de Grilla</span>
-              <span className="text-sm text-gray-500">Arrastra productos desde el panel derecho</span>
+              <span className="text-sm font-semibold text-gray-900">{translate('gridEditor')}</span>
+              <span className="text-sm text-gray-500">{translate('dragProductsHint')}</span>
             </div>
             <div className="flex items-center gap-3">
               <Button
@@ -400,16 +357,16 @@ export const PlanogramEditor: React.FC<PlanogramEditorProps> = ({
                 className="text-red-600 hover:text-red-700 h-9 px-4"
               >
                 <Trash2 className="h-4 w-4 mr-2" />
-                Limpiar
+                {translate('clearGridShort')}
               </Button>
               <div className="flex items-center gap-3 text-sm">
                 <div className="flex items-center gap-1.5">
                   <div className="w-4 h-4 bg-blue-200 border border-blue-600 rounded"></div>
-                  <span>Ocupada</span>
+                  <span>{translate('occupied')}</span>
                 </div>
                 <div className="flex items-center gap-1.5">
                   <div className="w-4 h-4 bg-white border border-gray-600 border-dashed rounded"></div>
-                  <span>Libre</span>
+                  <span>{translate('free')}</span>
                 </div>
               </div>
             </div>
@@ -451,7 +408,7 @@ export const PlanogramEditor: React.FC<PlanogramEditorProps> = ({
                         }`}
                         onDragOver={handleDragOver}
                         onDrop={(e) => handleDrop(e, x, y)}
-                        title={cell.product ? `${cell.product.name} (${cell.product.sku}) - Celda ${cellRef}` : `Celda ${cellRef} - Arrastra un producto aquí`}
+                        title={cell.product ? `${cell.product.name} (${cell.product.sku}) - Celda ${cellRef}` : translate('dragCellHere').replace('{ref}', cellRef)}
                       >
                         {cell.product ? (
                           <div className="text-center w-full h-full flex flex-col justify-center p-2 relative">
@@ -489,15 +446,15 @@ export const PlanogramEditor: React.FC<PlanogramEditorProps> = ({
             <CardHeader className="pb-2 flex-shrink-0 p-2">
               <CardTitle className="text-xs flex items-center gap-1.5">
                 <Package className="h-3.5 w-3.5" />
-                Productos ({filteredProducts.filter(p => !isProductInGrid(p.id)).length})
+                {translate('productsLabel')} ({filteredProducts.filter(p => !isProductInGrid(p.id)).length})
               </CardTitle>
               
               <Select value={categoryFilter} onValueChange={setCategoryFilter}>
                 <SelectTrigger className="w-full mt-1.5 h-7 text-[10px]">
-                  <SelectValue placeholder="Filtrar" />
+                  <SelectValue placeholder={translate('filterPlaceholder')} />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">Todas</SelectItem>
+                  <SelectItem value="all">{translate('allShort')}</SelectItem>
                   {getUniqueCategories().map((category) => (
                     <SelectItem key={category} value={category}>{category}</SelectItem>
                   ))}
@@ -531,7 +488,7 @@ export const PlanogramEditor: React.FC<PlanogramEditorProps> = ({
                             </Badge>
                             {isInGrid && (
                               <Badge className="bg-gray-500 text-white text-[9px] py-0 px-1">
-                                EN USO
+                                {translate('inUse')}
                               </Badge>
                             )}
                           </div>
@@ -551,24 +508,24 @@ export const PlanogramEditor: React.FC<PlanogramEditorProps> = ({
         <div className="flex items-center justify-between">
           <div className="text-[10px] text-gray-600">
             {planogram && canEditDirectly(planogram) 
-              ? '✏️ Los cambios se aplicarán directamente' 
+              ? `✏️ ${translate('changesApplyDirect')}` 
               : planogram 
-                ? '📋 Se creará una nueva versión' 
-                : '✨ Creando nuevo planograma'
+                ? `📋 ${translate('newVersionWillBeCreated')}` 
+                : `✨ ${translate('creatingNewPlanogram')}`
             }
           </div>
           <div className="flex items-center gap-2">
             <Button variant="outline" size="sm" onClick={onCancel} className="h-7 text-xs">
               <X className="h-3 w-3 mr-1" />
-              Cancelar
+              {translate('cancel')}
             </Button>
             <Button size="sm" onClick={handleSave} className="bg-blue-600 hover:bg-blue-700 h-7 text-xs">
               <Save className="h-3 w-3 mr-1" />
               {planogram && canEditDirectly(planogram) 
-                ? 'Actualizar' 
+                ? translate('update') 
                 : planogram 
-                  ? 'Nueva Versión' 
-                  : 'Guardar'
+                  ? translate('newVersion') 
+                  : translate('save')
               }
             </Button>
           </div>

@@ -40,6 +40,7 @@ import {
   Pie 
 } from 'recharts';
 import { getFromLocalStorage } from '@/shared/services/database';
+import { useLanguage } from '@/shared/hooks/useLanguage';
 import { Order, Invoice, Product, Store, City, User } from '@/shared/types';
 import { toast } from 'sonner';
 
@@ -80,6 +81,7 @@ interface FilterState {
 const COLORS = ['#4f46e5', '#7c3aed', '#06b6d4', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899'];
 
 export function ReportsManagement({ onBack }: ReportsManagementProps) {
+  const { translate } = useLanguage();
   const [salesData, setSalesData] = useState<SalesReport[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [stores, setStores] = useState<Store[]>([]);
@@ -159,10 +161,10 @@ export function ReportsManagement({ onBack }: ReportsManagementProps) {
       });
 
       setSalesData(salesReports);
-      toast.success('Datos de ventas cargados correctamente');
+      toast.success(translate('reportDataLoaded'));
     } catch (error) {
       console.error('Error cargando datos de reportes:', error);
-      toast.error('Error al cargar los datos de reportes');
+      toast.error(translate('errorLoadReports'));
     } finally {
       setIsLoading(false);
     }
@@ -363,7 +365,7 @@ export function ReportsManagement({ onBack }: ReportsManagementProps) {
     document.body.appendChild(element);
     element.click();
     document.body.removeChild(element);
-    toast.success('Reporte exportado a CSV');
+    toast.success(translate('reportExportedCSV'));
   };
 
   const exportToPDF = () => {
@@ -406,7 +408,7 @@ ${salesMetrics.topSellers.map((s, i) =>
     document.body.appendChild(element);
     element.click();
     document.body.removeChild(element);
-    toast.success('Reporte exportado (formato texto)');
+    toast.success(translate('reportExportedTXT'));
   };
 
   if (isLoading) {
@@ -432,14 +434,14 @@ ${salesMetrics.topSellers.map((s, i) =>
             <BarChart3 className="h-5 w-5 text-blue-600" />
           </div>
           <div>
-            <h1 className="text-2xl font-bold text-gray-900">Reportes de Ventas</h1>
-            <p className="text-gray-500">Análisis detallado del desempeño comercial</p>
+            <h1 className="text-2xl font-bold text-gray-900">{translate('reportsTitle')}</h1>
+            <p className="text-gray-500">{translate('reportsSubtitle')}</p>
           </div>
         </div>
         <div className="flex items-center gap-3">
           <Button onClick={loadReportData} variant="outline" size="sm">
             <RefreshCw className="h-4 w-4 mr-2" />
-            Actualizar
+            {translate('update')}
           </Button>
         </div>
       </div>
@@ -449,13 +451,13 @@ ${salesMetrics.topSellers.map((s, i) =>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Search className="h-5 w-5" />
-            Filtros de Búsqueda
+            {translate('searchFilters')}
           </CardTitle>
         </CardHeader>
         <CardContent>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-6 gap-4">
             <div>
-              <Label>Fecha Desde</Label>
+              <Label>{translate('dateFrom')}</Label>
               <Input
                 type="date"
                 value={filters.dateFrom}
@@ -463,7 +465,7 @@ ${salesMetrics.topSellers.map((s, i) =>
               />
             </div>
             <div>
-              <Label>Fecha Hasta</Label>
+              <Label>{translate('dateTo')}</Label>
               <Input
                 type="date"
                 value={filters.dateTo}
@@ -471,13 +473,15 @@ ${salesMetrics.topSellers.map((s, i) =>
               />
             </div>
             <div>
-              <Label>Producto</Label>
+              <Label>{translate('productLabel')}</Label>
               <Select value={filters.productId} onValueChange={(value) => handleFilterChange('productId', value)}>
                 <SelectTrigger>
-                  <SelectValue placeholder="Todos" />
+                  <SelectValue placeholder={translate('allShort')}>
+                    {filters.productId === 'all' ? translate('allProducts') : products.find(p => p.id === filters.productId)?.name}
+                  </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">Todos los productos</SelectItem>
+                  <SelectItem value="all">{translate('allProducts')}</SelectItem>
                   {products.map(product => (
                     <SelectItem key={product.id} value={product.id}>
                       {product.name}
@@ -487,13 +491,15 @@ ${salesMetrics.topSellers.map((s, i) =>
               </Select>
             </div>
             <div>
-              <Label>Tienda</Label>
+              <Label>{translate('storeHeader')}</Label>
               <Select value={filters.storeId} onValueChange={(value) => handleFilterChange('storeId', value)}>
                 <SelectTrigger>
-                  <SelectValue placeholder="Todas" />
+                  <SelectValue placeholder={translate('allShort')}>
+                    {filters.storeId === 'all' ? translate('allStoresReport') : stores.find(s => s.id === filters.storeId)?.name}
+                  </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">Todas las tiendas</SelectItem>
+                  <SelectItem value="all">{translate('allStoresReport')}</SelectItem>
                   {stores.map(store => (
                     <SelectItem key={store.id} value={store.id}>
                       {store.name}
@@ -503,13 +509,15 @@ ${salesMetrics.topSellers.map((s, i) =>
               </Select>
             </div>
             <div>
-              <Label>Ciudad</Label>
+              <Label>{translate('city')}</Label>
               <Select value={filters.cityId} onValueChange={(value) => handleFilterChange('cityId', value)}>
                 <SelectTrigger>
-                  <SelectValue placeholder="Todas" />
+                  <SelectValue placeholder={translate('allShort')}>
+                    {filters.cityId === 'all' ? translate('allCitiesReport') : cities.find(c => c.id === filters.cityId)?.name}
+                  </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">Todas las ciudades</SelectItem>
+                  <SelectItem value="all">{translate('allCitiesReport')}</SelectItem>
                   {cities.map(city => (
                     <SelectItem key={city.id} value={city.id}>
                       {city.name}
@@ -519,13 +527,15 @@ ${salesMetrics.topSellers.map((s, i) =>
               </Select>
             </div>
             <div>
-              <Label>Vendedor</Label>
+              <Label>{translate('seller')}</Label>
               <Select value={filters.sellerId} onValueChange={(value) => handleFilterChange('sellerId', value)}>
                 <SelectTrigger>
-                  <SelectValue placeholder="Todos" />
+                  <SelectValue placeholder={translate('allShort')}>
+                    {filters.sellerId === 'all' ? translate('allSellers') : (() => { const s = sellers.find(x => x.id === filters.sellerId); return s ? `${s.firstName} ${s.lastName}` : null; })()}
+                  </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">Todos los vendedores</SelectItem>
+                  <SelectItem value="all">{translate('allSellers')}</SelectItem>
                   {sellers.map(seller => (
                     <SelectItem key={seller.id} value={seller.id}>
                       {seller.firstName} {seller.lastName}
@@ -537,11 +547,11 @@ ${salesMetrics.topSellers.map((s, i) =>
           </div>
           <div className="flex justify-between items-center mt-4 pt-4 border-t">
             <Badge variant="outline" className="text-sm">
-              {filteredSalesData.length} registros encontrados
+              {filteredSalesData.length} {translate('recordsFound')}
             </Badge>
             <Button variant="outline" size="sm" onClick={clearFilters}>
               <X className="h-4 w-4 mr-2" />
-              Limpiar Filtros
+              {translate('clearFilters')}
             </Button>
           </div>
         </CardContent>
@@ -553,7 +563,7 @@ ${salesMetrics.topSellers.map((s, i) =>
           <div className="p-4">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-xs font-medium text-gray-500">Ventas Totales</p>
+                <p className="text-xs font-medium text-gray-500">{translate('totalSales')}</p>
                 <p className="text-2xl font-bold text-gray-900 mt-1">
                   €{salesMetrics.totalSales.toFixed(2)}
                 </p>
@@ -569,7 +579,7 @@ ${salesMetrics.topSellers.map((s, i) =>
           <div className="p-4">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-xs font-medium text-gray-500">Cantidad Vendida</p>
+                <p className="text-xs font-medium text-gray-500">{translate('quantitySold')}</p>
                 <p className="text-2xl font-bold text-gray-900 mt-1">
                   {salesMetrics.totalQuantity.toLocaleString()}
                 </p>
@@ -585,7 +595,7 @@ ${salesMetrics.topSellers.map((s, i) =>
           <div className="p-4">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-xs font-medium text-gray-500">Ticket Promedio</p>
+                <p className="text-xs font-medium text-gray-500">{translate('averageTicket')}</p>
                 <p className="text-2xl font-bold text-gray-900 mt-1">
                   €{salesMetrics.averageTicket.toFixed(2)}
                 </p>
@@ -601,7 +611,7 @@ ${salesMetrics.topSellers.map((s, i) =>
           <div className="p-4">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-xs font-medium text-gray-500">Transacciones</p>
+                <p className="text-xs font-medium text-gray-500">{translate('transactions')}</p>
                 <p className="text-2xl font-bold text-gray-900 mt-1">
                   {salesMetrics.totalTransactions.toLocaleString()}
                 </p>
@@ -618,20 +628,20 @@ ${salesMetrics.topSellers.map((s, i) =>
       <Tabs defaultValue="overview" className="space-y-6">
         <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
           <TabsList className="grid w-full lg:w-auto grid-cols-4">
-            <TabsTrigger value="overview">Resumen</TabsTrigger>
-            <TabsTrigger value="products">Productos</TabsTrigger>
-            <TabsTrigger value="stores">Tiendas</TabsTrigger>
-            <TabsTrigger value="sellers">Vendedores</TabsTrigger>
+            <TabsTrigger value="overview">{translate('overview')}</TabsTrigger>
+            <TabsTrigger value="products">{translate('tabProducts')}</TabsTrigger>
+            <TabsTrigger value="stores">{translate('stores')}</TabsTrigger>
+            <TabsTrigger value="sellers">{translate('sellers')}</TabsTrigger>
           </TabsList>
           
           <div className="flex items-center gap-2">
             <Button onClick={exportToPDF} variant="outline" size="sm">
               <FileText className="h-4 w-4 mr-2" />
-              Exportar TXT
+              {translate('exportTXT')}
             </Button>
             <Button onClick={exportToCSV} variant="outline" size="sm">
               <FileSpreadsheet className="h-4 w-4 mr-2" />
-              Exportar CSV
+              {translate('exportCSV')}
             </Button>
           </div>
         </div>
@@ -642,8 +652,8 @@ ${salesMetrics.topSellers.map((s, i) =>
             {/* Ventas por Mes */}
             <Card>
               <CardHeader>
-                <CardTitle>Tendencia de Ventas Mensual</CardTitle>
-                <CardDescription>Evolución de ventas en el período seleccionado</CardDescription>
+<CardTitle>{translate('salesTrendMonthly')}</CardTitle>
+              <CardDescription>{translate('salesEvolutionPeriod')}</CardDescription>
               </CardHeader>
               <CardContent>
                 <ResponsiveContainer width="100%" height={300}>
@@ -655,7 +665,7 @@ ${salesMetrics.topSellers.map((s, i) =>
                       formatter={(value: number) => `€${value.toFixed(2)}`}
                     />
                     <Legend />
-                    <Line type="monotone" dataKey="ventas" stroke="#4f46e5" strokeWidth={2} name="Ventas (€)" />
+                    <Line type="monotone" dataKey="ventas" stroke="#4f46e5" strokeWidth={2} name={translate('salesEuro')} />
                   </LineChart>
                 </ResponsiveContainer>
               </CardContent>
@@ -664,8 +674,8 @@ ${salesMetrics.topSellers.map((s, i) =>
             {/* Distribución por Ciudad */}
             <Card>
               <CardHeader>
-                <CardTitle>Ventas por Ciudad</CardTitle>
-                <CardDescription>Distribución geográfica de ventas</CardDescription>
+<CardTitle>{translate('salesByCity')}</CardTitle>
+              <CardDescription>{translate('salesByCityDesc')}</CardDescription>
               </CardHeader>
               <CardContent>
                 <ResponsiveContainer width="100%" height={300}>
@@ -693,9 +703,9 @@ ${salesMetrics.topSellers.map((s, i) =>
           {/* Tabla de Detalle */}
           <Card>
             <CardHeader>
-              <CardTitle>Detalle de Transacciones</CardTitle>
+              <CardTitle>{translate('transactionDetail')}</CardTitle>
               <CardDescription>
-                Últimas {Math.min(filteredSalesData.length, 50)} transacciones
+                {translate('lastNTransactions').replace('{n}', String(Math.min(filteredSalesData.length, 50)))}
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -703,14 +713,14 @@ ${salesMetrics.topSellers.map((s, i) =>
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead>Fecha</TableHead>
-                      <TableHead>Factura</TableHead>
-                      <TableHead>Producto</TableHead>
-                      <TableHead>Tienda</TableHead>
-                      <TableHead>Vendedor</TableHead>
-                      <TableHead className="text-right">Cant.</TableHead>
-                      <TableHead className="text-right">Precio</TableHead>
-                      <TableHead className="text-right">Total</TableHead>
+                      <TableHead>{translate('dateCol')}</TableHead>
+                      <TableHead>{translate('invoiceCol')}</TableHead>
+                      <TableHead>{translate('productLabel')}</TableHead>
+                      <TableHead>{translate('storeLabel')}</TableHead>
+                      <TableHead>{translate('sellerLabel')}</TableHead>
+                      <TableHead className="text-right">{translate('qtyShort')}</TableHead>
+                      <TableHead className="text-right">{translate('priceCol')}</TableHead>
+                      <TableHead className="text-right">{translate('totalCol')}</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -740,7 +750,7 @@ ${salesMetrics.topSellers.map((s, i) =>
                 </Table>
                 {filteredSalesData.length === 0 && (
                   <div className="text-center py-8 text-gray-500">
-                    No hay datos para mostrar con los filtros seleccionados
+                    {translate('noDataWithFilters')}
                   </div>
                 )}
               </div>
@@ -754,8 +764,8 @@ ${salesMetrics.topSellers.map((s, i) =>
             {/* Gráfico de Top Productos */}
             <Card>
               <CardHeader>
-                <CardTitle>Top 10 Productos por Ventas</CardTitle>
-                <CardDescription>Productos con mayores ingresos</CardDescription>
+                <CardTitle>{translate('top10ProductsBySales')}</CardTitle>
+                <CardDescription>{translate('productsWithHighestRevenue')}</CardDescription>
               </CardHeader>
               <CardContent>
                 <ResponsiveContainer width="100%" height={400}>
@@ -764,7 +774,7 @@ ${salesMetrics.topSellers.map((s, i) =>
                     <XAxis type="number" />
                     <YAxis dataKey="name" type="category" width={150} />
                     <Tooltip formatter={(value: number) => `€${value.toFixed(2)}`} />
-                    <Bar dataKey="ventas" fill="#4f46e5" name="Ventas (€)" />
+                    <Bar dataKey="ventas" fill="#4f46e5" name={translate('salesEuro')} />
                   </BarChart>
                 </ResponsiveContainer>
               </CardContent>
@@ -773,8 +783,8 @@ ${salesMetrics.topSellers.map((s, i) =>
             {/* Tabla de Top Productos */}
             <Card>
               <CardHeader>
-                <CardTitle>Ranking de Productos</CardTitle>
-                <CardDescription>Top 10 por ingresos generados</CardDescription>
+                <CardTitle>{translate('productRanking')}</CardTitle>
+                <CardDescription>{translate('top10ByRevenue')}</CardDescription>
               </CardHeader>
               <CardContent>
                 <div className="space-y-3">
@@ -791,7 +801,7 @@ ${salesMetrics.topSellers.map((s, i) =>
                       </div>
                       <div className="text-right">
                         <p className="font-bold text-gray-900">€{product.totalSales.toFixed(2)}</p>
-                        <p className="text-sm text-gray-500">{product.totalQuantity} unidades</p>
+                        <p className="text-sm text-gray-500">{product.totalQuantity} {translate('totalQuantityUnits')}</p>
                       </div>
                     </div>
                   ))}
@@ -807,8 +817,8 @@ ${salesMetrics.topSellers.map((s, i) =>
             {/* Gráfico de Top Tiendas */}
             <Card>
               <CardHeader>
-                <CardTitle>Top 10 Tiendas por Ventas</CardTitle>
-                <CardDescription>Tiendas con mejores resultados</CardDescription>
+                <CardTitle>{translate('top10StoresBySales')}</CardTitle>
+                <CardDescription>{translate('storesBestResults')}</CardDescription>
               </CardHeader>
               <CardContent>
                 <ResponsiveContainer width="100%" height={400}>
@@ -817,7 +827,7 @@ ${salesMetrics.topSellers.map((s, i) =>
                     <XAxis dataKey="name" angle={-45} textAnchor="end" height={100} />
                     <YAxis />
                     <Tooltip formatter={(value: number) => `€${value.toFixed(2)}`} />
-                    <Bar dataKey="ventas" fill="#10b981" name="Ventas (€)" />
+                    <Bar dataKey="ventas" fill="#10b981" name={translate('salesEuro')} />
                   </BarChart>
                 </ResponsiveContainer>
               </CardContent>
@@ -826,8 +836,8 @@ ${salesMetrics.topSellers.map((s, i) =>
             {/* Tabla de Top Tiendas */}
             <Card>
               <CardHeader>
-                <CardTitle>Ranking de Tiendas</CardTitle>
-                <CardDescription>Top 10 por desempeño en ventas</CardDescription>
+                <CardTitle>{translate('storeRanking')}</CardTitle>
+                <CardDescription>{translate('top10SalesPerformance')}</CardDescription>
               </CardHeader>
               <CardContent>
                 <div className="space-y-3">
@@ -847,7 +857,7 @@ ${salesMetrics.topSellers.map((s, i) =>
                       </div>
                       <div className="text-right">
                         <p className="font-bold text-gray-900">€{store.totalSales.toFixed(2)}</p>
-                        <p className="text-sm text-gray-500">{store.totalQuantity} unidades</p>
+                        <p className="text-sm text-gray-500">{store.totalQuantity} {translate('totalQuantityUnits')}</p>
                       </div>
                     </div>
                   ))}
@@ -863,8 +873,8 @@ ${salesMetrics.topSellers.map((s, i) =>
             {/* Gráfico de Top Vendedores */}
             <Card>
               <CardHeader>
-                <CardTitle>Top 10 Vendedores por Ventas</CardTitle>
-                <CardDescription>Rendimiento del equipo de ventas</CardDescription>
+                <CardTitle>{translate('top10SellersBySales')}</CardTitle>
+                <CardDescription>{translate('salesTeamPerformance')}</CardDescription>
               </CardHeader>
               <CardContent>
                 <ResponsiveContainer width="100%" height={400}>
@@ -873,7 +883,7 @@ ${salesMetrics.topSellers.map((s, i) =>
                     <XAxis type="number" />
                     <YAxis dataKey="name" type="category" width={120} />
                     <Tooltip formatter={(value: number) => `€${value.toFixed(2)}`} />
-                    <Bar dataKey="ventas" fill="#7c3aed" name="Ventas (€)" />
+                    <Bar dataKey="ventas" fill="#7c3aed" name={translate('salesEuro')} />
                   </BarChart>
                 </ResponsiveContainer>
               </CardContent>
@@ -882,8 +892,8 @@ ${salesMetrics.topSellers.map((s, i) =>
             {/* Tabla de Top Vendedores */}
             <Card>
               <CardHeader>
-                <CardTitle>Ranking de Vendedores</CardTitle>
-                <CardDescription>Top 10 por desempeño comercial</CardDescription>
+                <CardTitle>{translate('sellerRanking')}</CardTitle>
+                <CardDescription>{translate('top10CommercialPerformance')}</CardDescription>
               </CardHeader>
               <CardContent>
                 <div className="space-y-3">
@@ -897,7 +907,7 @@ ${salesMetrics.topSellers.map((s, i) =>
                       </div>
                       <div className="text-right">
                         <p className="font-bold text-gray-900">€{seller.totalSales.toFixed(2)}</p>
-                        <p className="text-sm text-gray-500">{seller.totalQuantity} unidades</p>
+                        <p className="text-sm text-gray-500">{seller.totalQuantity} {translate('totalQuantityUnits')}</p>
                       </div>
                     </div>
                   ))}

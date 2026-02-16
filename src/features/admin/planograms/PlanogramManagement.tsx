@@ -38,8 +38,12 @@ import {
   AlertDialogTrigger,
 } from '@/shared/components/base/AlertDialog';
 import { Planogram, Product, Distribution, PlanogramWithDistribution } from '@/shared/types';
-import { getFromLocalStorage, setToLocalStorage } from '@/shared/services/database';
+import { useLanguage } from '@/shared/hooks/useLanguage';
+import { getFromLocalStorage } from '@/shared/services/database';
 import { toast } from '@/shared/components/base/Toast';
+import { planogramsApi } from '@/shared/services/planograms-api';
+import { distributionsApi } from '@/shared/services/distributions-api';
+import { productsApi } from '@/shared/services/products-api';
 import { PlanogramEditor } from './components/PlanogramEditor';
 import { PlanogramViewer } from './components/PlanogramViewer';
 
@@ -48,6 +52,7 @@ interface PlanogramManagementProps {
 }
 
 export const PlanogramManagement: React.FC<PlanogramManagementProps> = ({ onBack }) => {
+  const { translate } = useLanguage();
   const [planograms, setPlanograms] = useState<Planogram[]>([]);
   const [filteredPlanograms, setFilteredPlanograms] = useState<Planogram[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
@@ -59,6 +64,7 @@ export const PlanogramManagement: React.FC<PlanogramManagementProps> = ({ onBack
   const [showEditDialog, setShowEditDialog] = useState(false);
   const [selectedPlanogram, setSelectedPlanogram] = useState<PlanogramWithDistribution | null>(null);
   const [editingPlanogram, setEditingPlanogram] = useState<Planogram | null>(null);
+  const [orders, setOrders] = useState<{ planogramId?: string }[]>([]);
 
   useEffect(() => {
     loadData();
@@ -72,16 +78,18 @@ export const PlanogramManagement: React.FC<PlanogramManagementProps> = ({ onBack
 
   const loadData = async () => {
     try {
-      const planogramData = getFromLocalStorage('app-planograms') || [];
-      const productData = getFromLocalStorage('app-products') || [];
-      const distributionData = getFromLocalStorage('app-distributions') || [];
-      
+      const [planogramData, productData] = await Promise.all([
+        planogramsApi.fetchAll(),
+        productsApi.fetchAll()
+      ]);
       setPlanograms(planogramData);
       setProducts(productData);
-      setDistributions(distributionData);
+      setOrders(getFromLocalStorage('app-orders') || []);
+      const distArrays = await Promise.all(planogramData.map((p) => distributionsApi.getByPlanogram(p.id)));
+      setDistributions(distArrays.flat());
     } catch (error) {
       console.error('Error cargando datos:', error);
-      toast.error('Error al cargar los datos');
+      toast.error(translate('errorLoadPlanogramData'));
     } finally {
       setIsLoading(false);
     }
@@ -105,32 +113,27 @@ export const PlanogramManagement: React.FC<PlanogramManagementProps> = ({ onBack
 
   const handleActivatePlanogram = async (planogram: Planogram) => {
     try {
-      // Desactivar todos los planogramas
-      const updatedPlanograms = planograms.map(p => ({
-        ...p,
-        isActive: false,
-        updatedAt: new Date()
-      }));
-
-      // Activar el planograma seleccionado
-      const planogramIndex = updatedPlanograms.findIndex(p => p.id === planogram.id);
-      if (planogramIndex !== -1) {
-        updatedPlanograms[planogramIndex] = {
-          ...updatedPlanograms[planogramIndex],
-          isActive: true,
-          activatedAt: new Date(),
-          updatedAt: new Date()
-        };
+      const activePlanogram = planograms.find((p) => p.isActive);
+      if (activePlanogram && activePlanogram.id !== planogram.id) {
+        await planogramsApi.setActive(activePlanogram.id, false);
       }
-
-      // Guardar cambios
-      setToLocalStorage('app-planograms', updatedPlanograms);
-      setPlanograms(updatedPlanograms);
-      
-      toast.success('Planograma activado correctamente');
+      await planogramsApi.setActive(planogram.id, true);
+      await loadData();
+      toast.success(translate('planogramActivatedSuccess'));
     } catch (error) {
       console.error('Error activando planograma:', error);
-      toast.error('Error al activar el planograma');
+      toast.error(translate('errorActivatePlanogram'));
+    }
+  };
+
+  const handleDeactivatePlanogram = async (planogram: Planogram) => {
+    try {
+      await planogramsApi.setActive(planogram.id, false);
+      await loadData();
+      toast.success(translate('planogramDeactivatedSuccess'));
+    } catch (error) {
+      console.error('Error desactivando planograma:', error);
+      toast.error(translate('errorDeactivatePlanogram'));
     }
   };
 
@@ -165,19 +168,13 @@ export const PlanogramManagement: React.FC<PlanogramManagementProps> = ({ onBack
     setEditingPlanogram(null);
   };
 
-  // Verificar si un planograma puede ser editado (activo y creado hoy)
+  /** Editable si no tiene venta asociada (app-orders con planogramId). Sin pedidos o sin coincidencia = editable. */
   const canEditPlanogram = (planogram: Planogram): boolean => {
-    if (!planogram.isActive) return false;
-    
-    const today = new Date();
-    const createdDate = new Date(planogram.createdAt);
-    
-    // Verificar si fue creado el mismo día
-    return (
-      today.getFullYear() === createdDate.getFullYear() &&
-      today.getMonth() === createdDate.getMonth() &&
-      today.getDate() === createdDate.getDate()
-    );
+    const list = Array.isArray(orders) ? orders : [];
+    if (list.length === 0) return true;
+    const pid = String(planogram?.id ?? '').trim();
+    const hasSale = list.some((o: any) => String(o?.planogramId ?? o?.planogram_id ?? '').trim() === pid);
+    return !hasSale;
   };
 
   const handleEditPlanogram = (planogram: Planogram) => {
@@ -217,8 +214,8 @@ export const PlanogramManagement: React.FC<PlanogramManagementProps> = ({ onBack
             <Layout className="h-5 w-5 text-purple-600" />
           </div>
           <div>
-            <h1 className="text-2xl font-bold text-gray-900">Gestión de Planogramas</h1>
-            <p className="text-gray-500">Administra la distribución de productos en tienda</p>
+            <h1 className="text-2xl font-bold text-gray-900">{translate('planogramsTitle')}</h1>
+            <p className="text-gray-500">{translate('planogramsSubtitleStore')}</p>
           </div>
         </div>
         
@@ -229,7 +226,7 @@ export const PlanogramManagement: React.FC<PlanogramManagementProps> = ({ onBack
               onClick={() => setShowCreateDialog(true)}
             >
               <Plus className="h-4 w-4 mr-2" />
-              Crear Planograma
+              {translate('createPlanogram')}
             </Button>
           </DialogTrigger>
           <DialogContent 
@@ -239,10 +236,10 @@ export const PlanogramManagement: React.FC<PlanogramManagementProps> = ({ onBack
             <DialogHeader className="px-8 py-5 border-b border-gray-200 flex-shrink-0 bg-white">
               <DialogTitle className="flex items-center gap-3 text-xl">
                 <Layout className="h-6 w-6 text-indigo-600" />
-                Crear Nuevo Planograma
+                {translate('createNewPlanogram')}
               </DialogTitle>
               <DialogDescription className="text-base mt-1">
-                Diseña la distribución de productos en una grilla de 10x10
+                {translate('designGridDesc')}
               </DialogDescription>
             </DialogHeader>
             
@@ -263,7 +260,7 @@ export const PlanogramManagement: React.FC<PlanogramManagementProps> = ({ onBack
           <div className="p-4">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-xs font-medium text-gray-500">Total Planogramas</p>
+                <p className="text-xs font-medium text-gray-500">{translate('totalPlanograms')}</p>
                 <p className="text-2xl font-bold text-gray-900 mt-1">{planograms.length}</p>
               </div>
               <div className="p-2.5 rounded-lg bg-blue-50">
@@ -277,7 +274,7 @@ export const PlanogramManagement: React.FC<PlanogramManagementProps> = ({ onBack
           <div className="p-4">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-xs font-medium text-gray-500">Planograma Activo</p>
+                <p className="text-xs font-medium text-gray-500">{translate('activePlanogramStat')}</p>
                 <p className="text-2xl font-bold text-gray-900 mt-1">
                   {getActivePlanogram() ? '1' : '0'}
                 </p>
@@ -293,7 +290,7 @@ export const PlanogramManagement: React.FC<PlanogramManagementProps> = ({ onBack
           <div className="p-4">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-xs font-medium text-gray-500">Productos Activos</p>
+                <p className="text-xs font-medium text-gray-500">{translate('activeProducts')}</p>
                 <p className="text-2xl font-bold text-gray-900 mt-1">
                   {products.filter(p => p.isActive).length}
                 </p>
@@ -309,7 +306,7 @@ export const PlanogramManagement: React.FC<PlanogramManagementProps> = ({ onBack
           <div className="p-4">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-xs font-medium text-gray-500">Versiones</p>
+                <p className="text-xs font-medium text-gray-500">{translate('versions')}</p>
                 <p className="text-2xl font-bold text-gray-900 mt-1">
                   {planograms.reduce((sum, p) => sum + p.version, 0)}
                 </p>
@@ -330,15 +327,15 @@ export const PlanogramManagement: React.FC<PlanogramManagementProps> = ({ onBack
               <CheckCircle className="h-5 w-5 text-green-600" />
               <div className="flex-1">
                 <p className="font-medium text-green-900">
-                  Planograma Activo: {getActivePlanogram()!.name}
+                  {translate('activePlanogramStat')}: {getActivePlanogram()!.name}
                 </p>
                 <div className="flex items-center gap-2 mt-1">
                   <p className="text-sm text-green-700">
-                    Activado el {new Date(getActivePlanogram()!.activatedAt || getActivePlanogram()!.updatedAt).toLocaleDateString('es-ES')}
+                    {translate('activatedOn')} {new Date(getActivePlanogram()!.activatedAt || getActivePlanogram()!.updatedAt).toLocaleDateString('es-ES')}
                   </p>
                   {canEditPlanogram(getActivePlanogram()!) && (
                     <Badge className="bg-blue-100 text-blue-800 text-xs">
-                      Editable hasta las 23:59 de hoy
+                      {translate('editableNoSales')}
                     </Badge>
                   )}
                 </div>
@@ -352,7 +349,7 @@ export const PlanogramManagement: React.FC<PlanogramManagementProps> = ({ onBack
                     onClick={() => handleEditPlanogram(getActivePlanogram()!)}
                   >
                     <Edit className="h-4 w-4 mr-2" />
-                    Editar
+                    {translate('edit')}
                   </Button>
                 )}
                 <Button
@@ -361,8 +358,33 @@ export const PlanogramManagement: React.FC<PlanogramManagementProps> = ({ onBack
                   onClick={() => handleViewPlanogram(getActivePlanogram()!)}
                 >
                   <Eye className="h-4 w-4 mr-2" />
-                  Ver Distribución
+                  {translate('viewDistribution')}
                 </Button>
+                <AlertDialog>
+                  <AlertDialogTrigger asChild>
+                    <Button size="sm" variant="outline" className="text-amber-700 hover:bg-amber-50">
+                      <Power className="h-4 w-4 mr-2" />
+                      Desactivar
+                    </Button>
+                  </AlertDialogTrigger>
+                  <AlertDialogContent>
+                    <AlertDialogHeader>
+                      <AlertDialogTitle>{translate('deactivatePlanogramTitle')}</AlertDialogTitle>
+                      <AlertDialogDescription>
+                        {translate('deactivatePlanogramConfirm').replace('{name}', getActivePlanogram()!.name)}
+                      </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                      <AlertDialogCancel>{translate('cancel')}</AlertDialogCancel>
+                      <AlertDialogAction
+                        onClick={() => handleDeactivatePlanogram(getActivePlanogram()!)}
+                        className="bg-amber-600 hover:bg-amber-700"
+                      >
+                        {translate('deactivate')}
+                      </AlertDialogAction>
+                    </AlertDialogFooter>
+                  </AlertDialogContent>
+                </AlertDialog>
               </div>
             </div>
           </CardContent>
@@ -377,7 +399,7 @@ export const PlanogramManagement: React.FC<PlanogramManagementProps> = ({ onBack
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
                 <Input
-                  placeholder="Buscar planogramas por nombre, ID o descripción..."
+                  placeholder={translate('searchPlanogramsPlaceholder')}
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
                   className="pl-10"
@@ -391,9 +413,9 @@ export const PlanogramManagement: React.FC<PlanogramManagementProps> = ({ onBack
       {/* Planograms Table */}
       <Card>
         <CardHeader>
-          <CardTitle>Lista de Planogramas</CardTitle>
+          <CardTitle>{translate('planogramsList')}</CardTitle>
           <CardDescription>
-            Gestiona todas las versiones de planogramas del sistema
+            {translate('managePlanogramsVersions')}
           </CardDescription>
         </CardHeader>
         <CardContent className="p-0">
@@ -402,22 +424,22 @@ export const PlanogramManagement: React.FC<PlanogramManagementProps> = ({ onBack
               <thead className="bg-gray-50 border-b border-gray-200">
                 <tr>
                   <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Planograma
+                    {translate('planogramHeader')}
                   </th>
                   <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Versión
+                    {translate('versionHeader')}
                   </th>
                   <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Estado
+                    {translate('status')}
                   </th>
                   <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Productos
+                    {translate('productsLabel')}
                   </th>
                   <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Fecha Creación
+                    {translate('creationDate')}
                   </th>
                   <th className="px-6 py-4 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Acciones
+                    {translate('actions')}
                   </th>
                 </tr>
               </thead>
@@ -440,7 +462,7 @@ export const PlanogramManagement: React.FC<PlanogramManagementProps> = ({ onBack
                             {planogram.name}
                           </div>
                           <div className="text-sm text-gray-500">
-                            {planogram.description || 'Sin descripción'}
+                            {planogram.description || translate('noDescription')}
                           </div>
                         </div>
                       </div>
@@ -453,17 +475,17 @@ export const PlanogramManagement: React.FC<PlanogramManagementProps> = ({ onBack
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div className="flex items-center gap-2">
                         <Badge className={getStatusBadgeColor(planogram.isActive)}>
-                          {planogram.isActive ? 'Activo' : 'Inactivo'}
+                          {planogram.isActive ? translate('active') : translate('inactive')}
                         </Badge>
                         {canEditPlanogram(planogram) && (
-                          <Badge className="bg-blue-100 text-blue-800 text-xs" title="Editable hoy">
-                            Editable
+                          <Badge className="bg-blue-100 text-blue-800 text-xs" title={translate('editableNoSales')}>
+                            {translate('editable')}
                           </Badge>
                         )}
                       </div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                      {getTotalDistributions(planogram.id)} productos
+                      {getTotalDistributions(planogram.id)} {translate('productsCount')}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                       <div className="flex items-center gap-1">
@@ -477,19 +499,19 @@ export const PlanogramManagement: React.FC<PlanogramManagementProps> = ({ onBack
                           size="sm"
                           variant="outline"
                           onClick={() => handleViewPlanogram(planogram)}
-                          title="Ver planograma"
+                          title={translate('viewPlanogram')}
                         >
                           <Eye className="h-4 w-4" />
                         </Button>
                         
-                        {/* Botón de editar - solo para planogramas activos creados hoy */}
+                        {/* Botón de editar - solo si no tiene ventas asociadas */}
                         {canEditPlanogram(planogram) && (
                           <Button
                             size="sm"
                             variant="outline"
                             onClick={() => handleEditPlanogram(planogram)}
                             className="text-blue-600 hover:text-blue-700"
-                            title="Editar planograma (solo disponible el día de creación)"
+                            title={translate('editPlanogramOnlyIfNoSales')}
                           >
                             <Edit className="h-4 w-4" />
                           </Button>
@@ -509,22 +531,18 @@ export const PlanogramManagement: React.FC<PlanogramManagementProps> = ({ onBack
                             </AlertDialogTrigger>
                             <AlertDialogContent>
                               <AlertDialogHeader>
-                                <AlertDialogTitle>Activar Planograma</AlertDialogTitle>
+                                <AlertDialogTitle>{translate('activatePlanogramTitle')}</AlertDialogTitle>
                                 <AlertDialogDescription>
-                                  ¿Estás seguro que deseas activar el planograma{' '}
-                                  <strong>{planogram.name}</strong>?
-                                  <br />
-                                  <br />
-                                  Esta acción desactivará automáticamente cualquier otro planograma activo.
+                                  {translate('activatePlanogramConfirm').replace('{name}', planogram.name)}
                                 </AlertDialogDescription>
                               </AlertDialogHeader>
                               <AlertDialogFooter>
-                                <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                                <AlertDialogCancel>{translate('cancel')}</AlertDialogCancel>
                                 <AlertDialogAction
                                   onClick={() => handleActivatePlanogram(planogram)}
                                   className="bg-green-600 hover:bg-green-700"
                                 >
-                                  Activar
+                                  {translate('activate')}
                                 </AlertDialogAction>
                               </AlertDialogFooter>
                             </AlertDialogContent>
@@ -542,12 +560,12 @@ export const PlanogramManagement: React.FC<PlanogramManagementProps> = ({ onBack
             <div className="text-center py-12">
               <Layout className="h-12 w-12 text-gray-400 mx-auto mb-4" />
               <h3 className="text-lg font-medium text-gray-900 mb-2">
-                No se encontraron planogramas
+                {translate('noPlanogramsSearch')}
               </h3>
               <p className="text-gray-600">
                 {searchTerm
-                  ? 'Intenta ajustar los términos de búsqueda.'
-                  : 'Comienza creando tu primer planograma.'
+                  ? translate('tryOtherSearchPlanograms')
+                  : translate('createFirstPlanogramHint')
                 }
               </p>
             </div>
@@ -561,10 +579,10 @@ export const PlanogramManagement: React.FC<PlanogramManagementProps> = ({ onBack
           <DialogHeader className="px-6 py-4 border-b flex-shrink-0">
             <DialogTitle className="flex items-center gap-2">
               <Layout className="h-5 w-5 text-indigo-600" />
-              Visualizar Planograma: {selectedPlanogram?.name}
+              {translate('viewPlanogram')}: {selectedPlanogram?.name}
             </DialogTitle>
             <DialogDescription>
-              Distribución de productos en grilla 10x10
+              {translate('distributionGrid')}
             </DialogDescription>
           </DialogHeader>
           
@@ -582,14 +600,14 @@ export const PlanogramManagement: React.FC<PlanogramManagementProps> = ({ onBack
           <DialogHeader className="px-6 py-4 border-b flex-shrink-0">
             <DialogTitle className="flex items-center gap-2">
               <Edit className="h-5 w-5 text-blue-600" />
-              Editar Planograma: {editingPlanogram?.name}
+              {translate('editPlanogram')}: {editingPlanogram?.name}
             </DialogTitle>
             <div className="space-y-2">
               <DialogDescription>
-                Modifica la distribución de productos en la grilla de 10x10
+                {translate('editPlanogramTitleDesc')}
               </DialogDescription>
               <Badge className="bg-blue-100 text-blue-800">
-                Edición disponible solo el día de creación
+                {translate('onlyEditableNoSales')}
               </Badge>
             </div>
           </DialogHeader>
@@ -599,6 +617,7 @@ export const PlanogramManagement: React.FC<PlanogramManagementProps> = ({ onBack
               <PlanogramEditor 
                 products={products.filter(p => p.isActive)}
                 planogram={editingPlanogram}
+                existingDistributions={distributions.filter((d) => d.planogramId === editingPlanogram.id)}
                 onSave={handlePlanogramUpdated}
                 onCancel={() => {
                   setShowEditDialog(false);

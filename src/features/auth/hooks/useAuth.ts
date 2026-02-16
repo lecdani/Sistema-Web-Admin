@@ -13,7 +13,7 @@ interface AuthState {
 }
 
 /** Convierte el usuario de la API (LoggedOrderItAppUser) al formato User de la app */
-function loggedUserToUser(logged: { email: string; name: string; lastName: string; token: string; role?: string; id?: string; isActive?: boolean }): User {
+function loggedUserToUser(logged: { email: string; name: string; lastName: string; token: string; role?: string; id?: string; isActive?: boolean; phone?: string; avatar?: string }): User {
   const roleRaw = (logged as any).role ?? (logged as any).Role ?? '';
   const roleNorm = String(roleRaw).toLowerCase().trim();
   const isAdmin = roleNorm === 'admin' || roleNorm === 'administrator';
@@ -27,6 +27,8 @@ function loggedUserToUser(logged: { email: string; name: string; lastName: strin
     isActive,
     createdAt: new Date(),
     updatedAt: new Date(),
+    phone: (logged as any).phone,
+    avatar: (logged as any).avatar
   };
 }
 
@@ -235,6 +237,20 @@ export function useAuth() {
     }
   }, []);
 
+  /** Refresca el usuario en estado desde localStorage (útil tras actualizar perfil) */
+  const refreshUser = useCallback((): void => {
+    const loggedUser = getLoggedUser();
+    if (loggedUser) {
+      apiClient.setAuthToken(loggedUser.token);
+      const user = loggedUserToUser(loggedUser);
+      setAuthState(prev => ({
+        ...prev,
+        user,
+        isAuthenticated: true
+      }));
+    }
+  }, []);
+
   return {
     ...authState,
     login,
@@ -242,6 +258,7 @@ export function useAuth() {
     logout,
     resetPassword,
     confirmResetPassword,
-    refreshSession
+    refreshSession,
+    refreshUser
   };
 }

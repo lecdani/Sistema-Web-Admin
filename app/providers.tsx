@@ -2,6 +2,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { ToastProvider } from '../src/shared/components/base/Toast';
+import { LanguageProvider } from '../src/shared/contexts/LanguageContext';
 import { initializeDatabase } from '../src/shared/services/database';
 
 export function Providers({ children }: { children: React.ReactNode }) {
@@ -36,5 +37,9 @@ export function Providers({ children }: { children: React.ReactNode }) {
     );
   }
 
-  return <ToastProvider>{children}</ToastProvider>;
+  return (
+    <LanguageProvider>
+      <ToastProvider>{children}</ToastProvider>
+    </LanguageProvider>
+  );
 }
