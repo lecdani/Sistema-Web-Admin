@@ -69,29 +69,7 @@ export class AuthService {
         password: credentials.password
       });
 
-      const roleRaw = (response as any).role ?? (response as any).Role ?? '';
-      let effectiveRole = roleRaw;
-      if (!effectiveRole && (response as any).token) {
-        try {
-          const token = (response as any).token;
-          const parts = token.split('.');
-          if (parts.length >= 2) {
-            const payload = JSON.parse(atob(parts[1].replace(/-/g, '+').replace(/_/g, '/')));
-            const claim = payload.role ?? payload.Role ?? payload['http://schemas.microsoft.com/ws/2008/06/identity/claims/role'];
-            effectiveRole = (claim ?? '').toString().trim();
-          }
-        } catch {}
-      }
-      const effectiveNorm = effectiveRole.toLowerCase();
-      const effectiveIsAdmin = effectiveNorm === 'admin' || effectiveNorm === 'administrator';
-      if (!effectiveIsAdmin) {
-        return {
-          success: false,
-          message: 'No posee cuenta de administrador.'
-        };
-      }
-
-      // Verificar estado activo desde GET /users (fuente fiable) y obtener datos completos (phone, avatar)
+      // Verificar rol y estado activo desde GET /users (BD = fuente de verdad; si editaron admin→vendedor, se niega)
       const token = (response as any).token;
       let fullUser: User | null = null;
       if (token) apiClient.setAuthToken(token);
@@ -110,6 +88,10 @@ export class AuthService {
         if (!fullUser) {
           if (token) apiClient.clearAuthToken();
           return { success: false, message: 'No se pudo verificar el estado de la cuenta.' };
+        }
+        if (fullUser.role !== 'admin') {
+          if (token) apiClient.clearAuthToken();
+          return { success: false, message: 'No posee cuenta de administrador.' };
         }
         if (fullUser.isActive === false) {
           if (token) apiClient.clearAuthToken();

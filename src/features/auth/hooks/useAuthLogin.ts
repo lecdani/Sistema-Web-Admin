@@ -8,27 +8,7 @@ import { loginService } from '@/shared/services/apiService';
 import { apiClient } from '@/shared/config/api';
 import { fetchUserById, fetchUsers } from '@/shared/services/users-api';
 
-/** Obtiene el rol del usuario: del body o del payload del JWT */
-function getRoleFromLoginResponse(user: any): string {
-  const fromBody = (user?.role ?? user?.Role ?? '').toString().trim();
-  if (fromBody) return fromBody;
-  const token = user?.token ?? user?.Token;
-  if (!token || typeof token !== 'string') return '';
-  try {
-    const parts = token.split('.');
-    if (parts.length < 2) return '';
-    const payload = JSON.parse(atob(parts[1].replace(/-/g, '+').replace(/_/g, '/')));
-    const roleClaim =
-      payload.role ??
-      payload.Role ??
-      payload['http://schemas.microsoft.com/ws/2008/06/identity/claims/role'];
-    return (roleClaim ?? '').toString().trim();
-  } catch {
-    return '';
-  }
-}
-
-/** Obtiene el estado activo real del usuario desde GET /users (fuente fiable). Si no se puede obtener, bloquea por seguridad. */
+/** Verifica en la API (BD) que el usuario sea admin y esté activo. Rol desde BD = fuente de verdad (si lo editaron a vendedor, se niega). */
 async function checkUserActiveFromApi(loginUser: any): Promise<{ allowed: boolean; error?: string }> {
   const token = loginUser?.token ?? loginUser?.Token;
   if (!token || typeof token !== 'string') return { allowed: false, error: 'Sesión no válida.' };
@@ -46,6 +26,9 @@ async function checkUserActiveFromApi(loginUser: any): Promise<{ allowed: boolea
     const fullUser = await fetchUserById(userId);
     if (!fullUser) {
       return { allowed: false, error: 'No se pudo verificar el estado de la cuenta.' };
+    }
+    if (fullUser.role !== 'admin') {
+      return { allowed: false, error: 'No posee cuenta de administrador.' };
     }
     if (fullUser.isActive === false) {
       return { allowed: false, error: 'Su cuenta de administrador está inactiva. Contacte al administrador del sistema.' };
@@ -81,23 +64,12 @@ export function useAuthLogin() {
         password: credentials.password,
       });
 
-      // Solo administradores activos pueden entrar al sistema admin
-      const roleRaw = getRoleFromLoginResponse(user);
-      const roleNorm = roleRaw.toLowerCase();
-      const isAdmin = roleNorm === 'admin' || roleNorm === 'administrator';
-
-      if (!isAdmin) {
-        setLoading(false);
-        setError('No posee cuenta de administrador.');
-        return { success: false, error: 'No posee cuenta de administrador.' };
-      }
-
-      // Verificar estado activo desde la API (GET /users) — fuente fiable
+      // Verificar rol y estado activo desde la API (GET /users) — BD = fuente de verdad (si editaron admin→vendedor, se niega)
       const activeCheck = await checkUserActiveFromApi(user);
       if (!activeCheck.allowed) {
         setLoading(false);
-        setError(activeCheck.error ?? 'Su cuenta está inactiva.');
-        return { success: false, error: activeCheck.error ?? 'Su cuenta está inactiva.' };
+        setError(activeCheck.error ?? 'No posee cuenta de administrador.');
+        return { success: false, error: activeCheck.error ?? 'No posee cuenta de administrador.' };
       }
 
       apiClient.setAuthToken(user?.token ?? user?.Token ?? '');

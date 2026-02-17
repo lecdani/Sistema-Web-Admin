@@ -57,6 +57,7 @@ export function UserProfile({ onBack }: UserProfileProps) {
   const [passwordLoading, setPasswordLoading] = useState(false);
   const [showPasswords, setShowPasswords] = useState({ current: false, new: false, confirm: false });
   const [showPasswordDialog, setShowPasswordDialog] = useState(false);
+  const [passwordChangeSuccess, setPasswordChangeSuccess] = useState(false);
   const [passwordErrors, setPasswordErrors] = useState<{ current?: string; newPassword?: string; confirm?: string }>({});
 
   // Cargar id real y datos de sesión (como en Gestión de usuarios: todo por id)
@@ -210,8 +211,12 @@ export function UserProfile({ onBack }: UserProfileProps) {
       });
       setPasswordData({ currentPassword: '', newPassword: '', confirmPassword: '' });
       setPasswordErrors({});
-      setShowPasswordDialog(false);
+      setPasswordChangeSuccess(true);
       toast.success(translate('passwordResetSuccess'));
+      setTimeout(() => {
+        setShowPasswordDialog(false);
+        setPasswordChangeSuccess(false);
+      }, 2000);
     } catch (err: any) {
       const status = err?.response?.status ?? err?.status;
       const raw = err?.data?.message ?? (typeof err?.data === 'string' ? err.data : err?.data?.message) ?? err?.message ?? '';
@@ -366,7 +371,7 @@ export function UserProfile({ onBack }: UserProfileProps) {
           <CardDescription>{translate('securityDesc')}</CardDescription>
         </CardHeader>
         <CardContent>
-            <Dialog open={showPasswordDialog} onOpenChange={(open) => { setShowPasswordDialog(open); if (!open) setPasswordErrors({}); }}>
+            <Dialog open={showPasswordDialog} onOpenChange={(open) => { setShowPasswordDialog(open); if (!open) { setPasswordErrors({}); setPasswordChangeSuccess(false); } }}>
               <Button variant="outline" onClick={() => { setShowPasswordDialog(true); setPasswordErrors({}); }}>
                 <Key className="h-4 w-4 mr-2" />
                 {translate('changePassword')}
@@ -376,6 +381,17 @@ export function UserProfile({ onBack }: UserProfileProps) {
                   <DialogTitle>{translate('changePassword')}</DialogTitle>
                   <DialogDescription>{translate('changePasswordDesc')}</DialogDescription>
                 </DialogHeader>
+                {passwordChangeSuccess && (
+                  <div className="mx-6 mb-4 p-3 rounded-lg bg-green-50 border border-green-200 text-green-800 text-sm">
+                    {translate('passwordResetSuccess')}
+                  </div>
+                )}
+                {(passwordErrors.current || passwordErrors.newPassword) && (
+                  <div className="mx-6 mb-4 p-3 rounded-lg bg-red-50 border border-red-200 text-red-800 text-sm space-y-1">
+                    {passwordErrors.current && <p>{translate('currentPasswordDoesNotMatch')}</p>}
+                    {passwordErrors.newPassword && <p>{translate('weakPassword')}: {passwordErrors.newPassword}</p>}
+                  </div>
+                )}
                 <div className="space-y-4 px-6 pb-2">
                   <div>
                     <Label htmlFor="currentPassword">{translate('currentPassword')}</Label>
