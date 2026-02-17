@@ -35,7 +35,19 @@ export async function fetchBrandById(id: string): Promise<Brand | null> {
 export async function createBrand(data: { name: string }): Promise<Brand> {
   const payload = { name: (data.name ?? '').trim() || 'Marca', Name: (data.name ?? '').trim() || 'Marca' };
   const res = await apiClient.post<any>(E.CREATE, payload);
-  return res ? toBrand(res) : toBrand({ id: '', ...payload });
+
+  // Algunos backends devuelven solo el id o un objeto sin nombre.
+  // Aseguramos que el Brand resultante siempre tenga el nombre que el usuario escribió.
+  if (res) {
+    const raw = { ...res };
+    if (!raw.name && !raw.Name) {
+      raw.name = payload.name;
+      raw.Name = payload.Name;
+    }
+    return toBrand(raw);
+  }
+
+  return toBrand({ id: '', ...payload });
 }
 
 /** Actualiza una marca */
@@ -43,7 +55,14 @@ export async function updateBrand(id: string, data: { name: string }): Promise<B
   const endpoint = E.UPDATE.replace('{id}', encodeURIComponent(id));
   const payload = { id, name: (data.name ?? '').trim(), Name: (data.name ?? '').trim() };
   const res = await apiClient.put<any>(endpoint, payload);
-  if (res) return toBrand(res);
+  if (res) {
+    const raw = { ...res };
+    if (!raw.name && !raw.Name) {
+      raw.name = payload.name;
+      raw.Name = payload.Name;
+    }
+    return toBrand(raw);
+  }
   const fetched = await fetchBrandById(id);
   return fetched ?? toBrand({ id, name: data.name, isActive: true, createdAt: new Date(), updatedAt: new Date() });
 }

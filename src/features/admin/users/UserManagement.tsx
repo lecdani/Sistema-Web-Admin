@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import {
   Users,
   Plus,
@@ -48,7 +49,7 @@ import { usersApi } from '@/shared/services/users-api';
 import { toast } from '@/shared/components/base/Toast';
 
 interface UserManagementProps {
-  onBack: () => void;
+  onBack?: () => void;
 }
 
 interface UserFormData {
@@ -61,6 +62,7 @@ interface UserFormData {
 }
 
 export const UserManagement: React.FC<UserManagementProps> = ({ onBack }) => {
+  const router = useRouter();
   const { translate } = useLanguage();
   const [users, setUsers] = useState<User[]>([]);
 
@@ -209,14 +211,11 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onBack }) => {
         role: formData.role
       };
 
-      if (formData.password.trim()) {
-        userData.password = formData.password.trim();
-      }
-
       if (editingUser) {
         await usersApi.update(editingUser.id, userData);
         toast.success(translate('userSaved'));
       } else {
+        if (formData.password.trim()) userData.password = formData.password.trim();
         await usersApi.create(userData);
         toast.success(translate('userCreated'));
       }
@@ -295,12 +294,20 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onBack }) => {
     );
   }
 
+  const handleBack = () => {
+    if (onBack) {
+      onBack();
+    } else {
+      router.push('/dashboard');
+    }
+  };
+
   return (
     <div className="space-y-6">
       {/* Header */}
       <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
         <div className="flex items-center gap-4">
-          <Button variant="ghost" size="sm" onClick={onBack}>
+          <Button variant="ghost" size="sm" onClick={handleBack}>
             <ArrowLeft className="h-4 w-4" />
           </Button>
           <div className="p-2.5 bg-indigo-100 rounded-lg">
@@ -428,11 +435,9 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onBack }) => {
               {formErrors.phone && <p className="text-sm text-red-600 mt-1">{formErrors.phone}</p>}
             </div>
 
-            {(!editingUser || showPassword) && (
+            {!editingUser && (
               <div>
-                <Label htmlFor="password">
-                  {editingUser ? translate('newPasswordOptional') : `${translate('password')} *`}
-                </Label>
+                <Label htmlFor="password">{translate('password')} *</Label>
                 <div className="relative">
                   <Input
                     id="password"
@@ -467,18 +472,6 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onBack }) => {
                   </ul>
                 )}
               </div>
-            )}
-
-            {editingUser && !showPassword && (
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => setShowPassword(true)}
-                className="text-sm"
-              >
-                {translate('changePassword')}
-              </Button>
             )}
 
           </div>
@@ -783,15 +776,12 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onBack }) => {
           </DialogHeader>
 
           {selectedUser && (
-            <div className="space-y-6 px-6 py-4">
+            <div className="space-y-4 px-6 py-4">
               <div className="flex items-center justify-between">
-                <div>
-                  <h3 className="text-lg font-semibold text-gray-900">
-                    {selectedUser.firstName} {selectedUser.lastName}
-                  </h3>
-                  <p className="text-sm text-gray-500">{selectedUser.email}</p>
-                </div>
-                <div className="flex flex-col items-end gap-2">
+                <h3 className="text-lg font-semibold text-gray-900">
+                  {selectedUser.firstName} {selectedUser.lastName}
+                </h3>
+                <div className="flex gap-2">
                   <Badge className={getStatusBadgeColor(selectedUser.isActive)}>
                     {selectedUser.isActive ? translate('active') : translate('inactive')}
                   </Badge>
@@ -801,22 +791,39 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onBack }) => {
                 </div>
               </div>
 
-              {selectedUser.phone && (
-                <div className="bg-indigo-50 rounded-lg p-4 border border-indigo-100">
-                  <Label className="text-xs font-semibold text-indigo-700 uppercase tracking-wider mb-2 block">
-                    {translate('contactPhone')}
-                  </Label>
-                  <div className="flex items-center gap-2">
-                    <Phone className="h-4 w-4 text-indigo-600" />
-                    <p className="text-sm font-medium text-gray-900">
-                      {selectedUser.phone}
-                    </p>
+              <div className="bg-gray-50 rounded-lg border border-gray-200 p-4 space-y-3">
+                <div className="grid grid-cols-1 gap-3 text-sm">
+                  <div className="flex justify-between gap-4">
+                    <span className="text-gray-500 font-medium">{translate('firstName')}</span>
+                    <span className="text-gray-900">{selectedUser.firstName || '-'}</span>
+                  </div>
+                  <div className="flex justify-between gap-4">
+                    <span className="text-gray-500 font-medium">{translate('lastName')}</span>
+                    <span className="text-gray-900">{selectedUser.lastName || '-'}</span>
+                  </div>
+                  <div className="flex justify-between gap-4">
+                    <span className="text-gray-500 font-medium">{translate('email')}</span>
+                    <span className="text-gray-900 break-all">{selectedUser.email || '-'}</span>
+                  </div>
+                  <div className="flex justify-between gap-4 items-center">
+                    <span className="text-gray-500 font-medium">{translate('phone')}</span>
+                    <span className="text-gray-900 flex items-center gap-1.5">
+                      <Phone className="h-4 w-4 text-gray-400 shrink-0" />
+                      {selectedUser.phone ? selectedUser.phone : '-'}
+                    </span>
+                  </div>
+                  <div className="flex justify-between gap-4">
+                    <span className="text-gray-500 font-medium">{translate('rolePlaceholder')}</span>
+                    <span className="text-gray-900">{getRoleText(selectedUser.role)}</span>
+                  </div>
+                  <div className="flex justify-between gap-4">
+                    <span className="text-gray-500 font-medium">{translate('status')}</span>
+                    <Badge className={getStatusBadgeColor(selectedUser.isActive)}>
+                      {selectedUser.isActive ? translate('active') : translate('inactive')}
+                    </Badge>
                   </div>
                 </div>
-              )}
-
-
-
+              </div>
             </div>
           )}
 

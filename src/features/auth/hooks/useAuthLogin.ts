@@ -102,13 +102,25 @@ export function useAuthLogin() {
 
       apiClient.setAuthToken(user?.token ?? user?.Token ?? '');
 
-      // Guardar el usuario en localStorage (asegurar role e isActive para AuthGuard/useAuth)
+      // Obtener usuario completo (phone, avatar) para guardarlo en sesión y que se muestre en Perfil
+      let userId: string | undefined = user?.id ?? user?.Id;
+      if (!userId && user?.email) {
+        const list = await fetchUsers();
+        const byEmail = list.find((u) => (u.email || '').toLowerCase() === (user.email || '').toLowerCase());
+        userId = byEmail?.id;
+      }
+      let fullUser: Awaited<ReturnType<typeof fetchUserById>> = null;
+      if (userId) fullUser = await fetchUserById(userId);
+
+      // Guardar el usuario en localStorage (incluir phone y avatar para Perfil y useAuth)
       const userToStore = {
         ...user,
         role: 'admin',
         Role: 'Admin',
         isActive: true,
         IsActive: true,
+        phone: fullUser?.phone ?? (user as any).phone,
+        avatar: fullUser?.avatar ?? (user as any).avatar,
       };
       setLoggedUser(userToStore);
 

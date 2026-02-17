@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import { Button } from '@/shared/components/base/Button';
 import { Input } from '@/shared/components/base/Input';
 import { Label } from '@/shared/components/base/Label';
@@ -56,10 +57,11 @@ const COUNTRIES = [
 ];
 
 interface CityManagementProps {
-  onBack: () => void;
+  onBack?: () => void;
 }
 
 export function CityManagement({ onBack }: CityManagementProps) {
+  const router = useRouter();
   const { translate } = useLanguage();
   const [cities, setCities] = useState<City[]>([]);
   const [filteredCities, setFilteredCities] = useState<City[]>([]);
@@ -217,6 +219,14 @@ export function CityManagement({ onBack }: CityManagementProps) {
     return storeCounts[cityId] ?? 0;
   };
 
+  const handleBack = () => {
+    if (onBack) {
+      onBack();
+    } else {
+      router.push('/dashboard');
+    }
+  };
+
   if (isLoading) {
     return (
       <div className="flex items-center justify-center min-h-[400px]">
@@ -233,7 +243,7 @@ export function CityManagement({ onBack }: CityManagementProps) {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-4">
-          <Button variant="ghost" size="sm" onClick={onBack}>
+          <Button variant="ghost" size="sm" onClick={handleBack}>
             <ArrowLeft className="h-4 w-4" />
           </Button>
           <div className="p-2.5 bg-green-100 rounded-lg">

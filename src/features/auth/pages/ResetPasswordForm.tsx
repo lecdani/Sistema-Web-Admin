@@ -221,7 +221,7 @@ export const ResetPasswordForm: React.FC<ResetPasswordFormProps> = ({ token, ema
                     <span>{translate('saving')}</span>
                   </div>
                 ) : (
-                  {translate('resetPasswordButton')}
+                  translate('resetPasswordButton')
                 )}
               </Button>
               <Link

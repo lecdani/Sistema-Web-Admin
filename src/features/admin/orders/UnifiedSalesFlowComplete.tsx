@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import { Button } from '@/shared/components/base/Button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/shared/components/base/Card';
 import { Badge } from '@/shared/components/base/Badge';
@@ -27,10 +28,11 @@ import { useLanguage } from '@/shared/hooks/useLanguage';
 import { OrderManagement } from '@/features/admin/orders/OrderManagement';
 
 interface UnifiedSalesFlowCompleteProps {
-  onBack: () => void;
+  onBack?: () => void;
 }
 
 export function UnifiedSalesFlowComplete({ onBack }: UnifiedSalesFlowCompleteProps) {
+  const router = useRouter();
   const { user } = useAuth();
   const { translate } = useLanguage();
   const [orders, setOrders] = useState<Order[]>([]);
@@ -101,10 +103,18 @@ export function UnifiedSalesFlowComplete({ onBack }: UnifiedSalesFlowCompletePro
     checkDataIntegrity();
   };
 
+  const handleBack = () => {
+    if (onBack) {
+      onBack();
+    } else {
+      router.push('/dashboard');
+    }
+  };
+
   return (
     <div className="space-y-6">
       {/* Gestión de Pedidos Completa */}
-      <OrderManagement onBack={onBack} />
+      <OrderManagement onBack={handleBack} />
     </div>
   );
 }

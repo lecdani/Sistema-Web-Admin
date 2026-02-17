@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { useRouter } from 'next/navigation';
 import { 
   BarChart3, 
   FileText, 
@@ -45,7 +46,7 @@ import { Order, Invoice, Product, Store, City, User } from '@/shared/types';
 import { toast } from 'sonner';
 
 interface ReportsManagementProps {
-  onBack: () => void;
+  onBack?: () => void;
 }
 
 interface SalesReport {
@@ -81,6 +82,7 @@ interface FilterState {
 const COLORS = ['#4f46e5', '#7c3aed', '#06b6d4', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899'];
 
 export function ReportsManagement({ onBack }: ReportsManagementProps) {
+  const router = useRouter();
   const { translate } = useLanguage();
   const [salesData, setSalesData] = useState<SalesReport[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
@@ -422,12 +424,20 @@ ${salesMetrics.topSellers.map((s, i) =>
     );
   }
 
+  const handleBack = () => {
+    if (onBack) {
+      onBack();
+    } else {
+      router.push('/dashboard');
+    }
+  };
+
   return (
     <div className="space-y-6">
       {/* Header */}
       <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
         <div className="flex items-center gap-4">
-          <Button variant="ghost" size="sm" onClick={onBack}>
+          <Button variant="ghost" size="sm" onClick={handleBack}>
             <ArrowLeft className="h-4 w-4" />
           </Button>
           <div className="p-2.5 bg-blue-100 rounded-lg">

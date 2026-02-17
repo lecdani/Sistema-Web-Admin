@@ -11,6 +11,8 @@ export interface LoginResponse {
   role?: string; // Admin, Vendedor, etc.
   isActive?: boolean;
   id?: string;
+  phone?: string;
+  avatar?: string;
 }
 
 // Datos del usuario autenticado

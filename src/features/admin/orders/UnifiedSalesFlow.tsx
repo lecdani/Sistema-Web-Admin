@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import { Button } from '@/shared/components/base/Button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/shared/components/base/Card';
 import { Badge } from '@/shared/components/base/Badge';
@@ -27,10 +28,11 @@ import { useAuth } from '@/features/auth/hooks/useAuth';
 import { useLanguage } from '@/shared/hooks/useLanguage';
 
 interface UnifiedSalesFlowProps {
-  onBack: () => void;
+  onBack?: () => void;
 }
 
 export function UnifiedSalesFlow({ onBack }: UnifiedSalesFlowProps) {
+  const router = useRouter();
   const { user } = useAuth();
   const { translate } = useLanguage();
   const [orders, setOrders] = useState<Order[]>([]);
@@ -95,12 +97,20 @@ export function UnifiedSalesFlow({ onBack }: UnifiedSalesFlowProps) {
     ? ((invoicesWithPOD.length / orders.length) * 100).toFixed(1)
     : '0';
 
+  const handleBack = () => {
+    if (onBack) {
+      onBack();
+    } else {
+      router.push('/dashboard');
+    }
+  };
+
   return (
     <div className="space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-4">
-          <Button variant="ghost" size="sm" onClick={onBack}>
+          <Button variant="ghost" size="sm" onClick={handleBack}>
             <ArrowLeft className="h-4 w-4" />
           </Button>
           <div className="p-2.5 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-lg">

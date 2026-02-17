@@ -91,8 +91,9 @@ export class AuthService {
         };
       }
 
-      // Verificar estado activo desde GET /users (fuente fiable)
+      // Verificar estado activo desde GET /users (fuente fiable) y obtener datos completos (phone, avatar)
       const token = (response as any).token;
+      let fullUser: User | null = null;
       if (token) apiClient.setAuthToken(token);
       try {
         let userId: string | undefined = (response as any).id ?? (response as any).Id ?? (response as any).email;
@@ -105,7 +106,7 @@ export class AuthService {
           if (token) apiClient.clearAuthToken();
           return { success: false, message: 'No se pudo verificar el estado de la cuenta.' };
         }
-        const fullUser = await fetchUserById(userId);
+        fullUser = await fetchUserById(userId);
         if (!fullUser) {
           if (token) apiClient.clearAuthToken();
           return { success: false, message: 'No se pudo verificar el estado de la cuenta.' };
@@ -124,10 +125,12 @@ export class AuthService {
         email: response.email,
         firstName: response.name,
         lastName: response.lastName,
+        phone: fullUser?.phone ?? (response as any).phone ?? '',
+        avatar: fullUser?.avatar ?? (response as any).avatar,
         role: 'admin',
         isActive: true,
-        createdAt: new Date(),
-        updatedAt: new Date()
+        createdAt: fullUser?.createdAt ?? new Date(),
+        updatedAt: fullUser?.updatedAt ?? new Date()
       };
 
       const users: User[] = getFromLocalStorage('app-users') || [];
@@ -136,7 +139,15 @@ export class AuthService {
       else users.push(user);
       setToLocalStorage('app-users', users);
 
-      setLoggedUser({ ...response, role: 'admin', Role: 'Admin', isActive: true, IsActive: true });
+      setLoggedUser({
+        ...response,
+        role: 'admin',
+        Role: 'Admin',
+        isActive: true,
+        IsActive: true,
+        phone: fullUser?.phone ?? (response as any).phone,
+        avatar: fullUser?.avatar ?? (response as any).avatar
+      });
       apiClient.setAuthToken(response.token);
 
       const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);

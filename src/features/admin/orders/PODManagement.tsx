@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import { Button } from '@/shared/components/base/Button';
 import { Input } from '@/shared/components/base/Input';
 import { Label } from '@/shared/components/base/Label';
@@ -35,10 +36,11 @@ import { POD, Store, User, Order, Invoice, PODFilters, IntegrityIssue } from '@/
 import { toast } from 'sonner';
 
 interface PODManagementProps {
-  onBack: () => void;
+  onBack?: () => void;
 }
 
 export function PODManagement({ onBack }: PODManagementProps) {
+  const router = useRouter();
   const { translate } = useLanguage();
   const [pods, setPods] = useState<POD[]>([]);
   const [filteredPods, setFilteredPods] = useState<POD[]>([]);
@@ -318,12 +320,20 @@ export function PODManagement({ onBack }: PODManagementProps) {
     setSearchTerm('');
   };
 
+  const handleBack = () => {
+    if (onBack) {
+      onBack();
+    } else {
+      router.push('/dashboard');
+    }
+  };
+
   return (
     <div className="space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-4">
-          <Button variant="ghost" size="sm" onClick={onBack}>
+          <Button variant="ghost" size="sm" onClick={handleBack}>
             <ArrowLeft className="h-4 w-4" />
           </Button>
           <div className="p-2.5 bg-green-100 rounded-lg">

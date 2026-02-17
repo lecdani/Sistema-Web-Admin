@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import {
   Package,
   Plus,
@@ -61,7 +62,7 @@ import { histpricesApi, type HistPrice } from '@/shared/services/histprices-api'
 import { toast } from '@/shared/components/base/Toast';
 
 interface ProductManagementProps {
-  onBack: () => void;
+  onBack?: () => void;
 }
 
 interface ProductFormData {
@@ -79,6 +80,7 @@ interface PriceUpdateData {
 }
 
 export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) => {
+  const router = useRouter();
   const { translate } = useLanguage();
   const [products, setProducts] = useState<Product[]>([]);
   const [filteredProducts, setFilteredProducts] = useState<Product[]>([]);
@@ -194,12 +196,15 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
     // Filtro de búsqueda
     if (searchTerm.trim()) {
       const searchLower = searchTerm.toLowerCase();
-      filtered = filtered.filter(product =>
-        product.name.toLowerCase().includes(searchLower) ||
-        product.sku.toLowerCase().includes(searchLower) ||
-        product.category.toLowerCase().includes(searchLower) ||
-        (product.description && product.description.toLowerCase().includes(searchLower))
-      );
+      filtered = filtered.filter((product) => {
+        const categoryName = getCategoryName(product).toLowerCase();
+        return (
+          product.name.toLowerCase().includes(searchLower) ||
+          product.sku.toLowerCase().includes(searchLower) ||
+          categoryName.includes(searchLower) ||
+          (product.description && product.description.toLowerCase().includes(searchLower))
+        );
+      });
     }
 
     // Filtro de estado
@@ -211,7 +216,7 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
 
     // Filtro de categoría
     if (categoryFilter !== 'all' && categoryFilter !== 'all-categories') {
-      filtered = filtered.filter(product => product.category === categoryFilter);
+      filtered = filtered.filter((product) => getCategoryName(product) === categoryFilter);
     }
 
     setFilteredProducts(filtered);
@@ -373,13 +378,26 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
   };
 
   const getUniqueCategories = (): string[] => {
-    const fromProducts = products.map(p => p.category).filter(Boolean);
-    const fromList = categories.map(c => c.name);
+    const fromProducts = products.map((p) => getCategoryName(p)).filter(Boolean);
+    const fromList = categories.map((c) => c.name);
     return Array.from(new Set([...fromList, ...fromProducts])).sort();
   };
 
   const activeBrands = brands.filter(b => b.isActive);
   const activeCategories = categories.filter(c => c.isActive);
+
+  const getCategoryName = (product: Product): string => {
+    const byId = product.categoryId ? categories.find(c => c.id === product.categoryId)?.name : undefined;
+    return byId || product.category || '-';
+  };
+
+  const handleBack = () => {
+    if (onBack) {
+      onBack();
+    } else {
+      router.push('/dashboard');
+    }
+  };
 
   const handleSaveBrand = async () => {
     const name = brandName.trim();
@@ -465,7 +483,7 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-4">
-          <Button variant="ghost" size="sm" onClick={onBack}>
+          <Button variant="ghost" size="sm" onClick={handleBack}>
             <ArrowLeft className="h-4 w-4" />
           </Button>
           <div className="p-2.5 bg-indigo-100 rounded-lg">
@@ -799,7 +817,7 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <Badge variant="outline" className="text-sm">
-                        {product.category}
+                        {getCategoryName(product)}
                       </Badge>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
@@ -1120,40 +1138,17 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
                     <Label className="text-sm font-medium text-gray-500">{translate('categoryHeader')}</Label>
                     <p className="flex items-center gap-1">
                       <Tag className="h-4 w-4 text-gray-400" />
-                      {selectedProduct.category}
+                      {getCategoryName(selectedProduct)}
                     </p>
                   </div>
-                  
-                  <div>
-                    <Label className="text-sm font-medium text-gray-500">ID</Label>
-                    <p className="text-sm text-gray-700 font-mono">{selectedProduct.id}</p>
-                  </div>
-                </div>
-                
-                <div className="space-y-4">
-                  <div>
-                    <Label className="text-sm font-medium text-gray-500">{translate('registrationDate')}</Label>
-                    <p className="flex items-center gap-1">
-                      <Calendar className="h-4 w-4 text-gray-400" />
-                      {new Date(selectedProduct.createdAt).toLocaleDateString('es-ES', {
-                        year: 'numeric',
-                        month: 'long',
-                        day: 'numeric'
-                      })}
-                    </p>
-                  </div>
-                  
-                  <div>
-                    <Label className="text-sm font-medium text-gray-500">{translate('lastUpdate')}</Label>
-                    <p className="flex items-center gap-1">
-                      <Calendar className="h-4 w-4 text-gray-400" />
-                      {new Date(selectedProduct.updatedAt).toLocaleDateString('es-ES', {
-                        year: 'numeric',
-                        month: 'long',
-                        day: 'numeric'
-                      })}
-                    </p>
-                  </div>
+                  {selectedProduct.brandId && (
+                    <div>
+                      <Label className="text-sm font-medium text-gray-500">{translate('brandHeader')}</Label>
+                      <p className="flex items-center gap-1">
+                        {brands.find(b => b.id === selectedProduct.brandId)?.name ?? '-'}
+                      </p>
+                    </div>
+                  )}
                 </div>
               </div>
               
@@ -1368,7 +1363,7 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
             <DialogTitle>{editingBrand ? translate('editBrand') : translate('newBrand')}</DialogTitle>
             <DialogDescription>{editingBrand ? translate('editBrandDesc') : translate('newBrandDesc')}</DialogDescription>
           </DialogHeader>
-          <div className="space-y-4 py-4">
+          <div className="space-y-5 px-6 py-4">
             <Label htmlFor="brandName">{translate('name')} *</Label>
             <Input
               id="brandName"
@@ -1391,7 +1386,7 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
             <DialogTitle>{editingCategory ? translate('editCategory') : translate('newCategory')}</DialogTitle>
             <DialogDescription>{editingCategory ? translate('editCategoryDesc') : translate('newCategoryDesc')}</DialogDescription>
           </DialogHeader>
-          <div className="space-y-4 py-4">
+          <div className="space-y-5 px-6 py-4">
             <Label htmlFor="categoryName">{translate('name')} *</Label>
             <Input
               id="categoryName"

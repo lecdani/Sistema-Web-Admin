@@ -175,7 +175,7 @@ export const ForgotPasswordForm: React.FC<ForgotPasswordFormProps> = ({ onBackTo
                     <span>{translate('sendingLink')}</span>
                   </div>
                 ) : (
-                  {translate('sendRecoveryLink')}
+                  translate('sendRecoveryLink')
                 )}
               </Button>
 

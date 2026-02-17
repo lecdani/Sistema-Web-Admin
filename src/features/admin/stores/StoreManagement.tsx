@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import {
   Store as StoreIcon,
   Plus,
@@ -49,7 +50,7 @@ import { citiesApi } from '@/shared/services/cities-api';
 import { toast } from '@/shared/components/base/Toast';
 
 interface StoreManagementProps {
-  onBack: () => void;
+  onBack?: () => void;
 }
 
 interface StoreFormData {
@@ -59,6 +60,7 @@ interface StoreFormData {
 }
 
 export const StoreManagement: React.FC<StoreManagementProps> = ({ onBack }) => {
+  const router = useRouter();
   const { translate } = useLanguage();
   const [stores, setStores] = useState<Store[]>([]);
   const [cities, setCities] = useState<City[]>([]);
@@ -247,6 +249,14 @@ export const StoreManagement: React.FC<StoreManagementProps> = ({ onBack }) => {
     return cities;
   };
 
+  const handleBack = () => {
+    if (onBack) {
+      onBack();
+    } else {
+      router.push('/dashboard');
+    }
+  };
+
   if (isLoading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -260,7 +270,7 @@ export const StoreManagement: React.FC<StoreManagementProps> = ({ onBack }) => {
       {/* Header */}
       <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
         <div className="flex items-center gap-4">
-          <Button variant="ghost" size="sm" onClick={onBack}>
+          <Button variant="ghost" size="sm" onClick={handleBack}>
             <ArrowLeft className="h-4 w-4" />
           </Button>
           <div className="p-2.5 bg-blue-100 rounded-lg">

@@ -35,7 +35,18 @@ export async function fetchCategoryById(id: string): Promise<Category | null> {
 export async function createCategory(data: { name: string }): Promise<Category> {
   const payload = { name: (data.name ?? '').trim() || 'Categoría', Name: (data.name ?? '').trim() || 'Categoría' };
   const res = await apiClient.post<any>(E.CREATE, payload);
-  return res ? toCategory(res) : toCategory({ id: '', ...payload });
+
+  // Igual que en marcas: si el backend no devuelve el nombre, usamos el que el usuario escribió
+  if (res) {
+    const raw = { ...res };
+    if (!raw.name && !raw.Name) {
+      raw.name = payload.name;
+      raw.Name = payload.Name;
+    }
+    return toCategory(raw);
+  }
+
+  return toCategory({ id: '', ...payload });
 }
 
 /** Actualiza una categoría */
@@ -43,7 +54,14 @@ export async function updateCategory(id: string, data: { name: string }): Promis
   const endpoint = E.UPDATE.replace('{id}', encodeURIComponent(id));
   const payload = { id, name: (data.name ?? '').trim(), Name: (data.name ?? '').trim() };
   const res = await apiClient.put<any>(endpoint, payload);
-  if (res) return toCategory(res);
+  if (res) {
+    const raw = { ...res };
+    if (!raw.name && !raw.Name) {
+      raw.name = payload.name;
+      raw.Name = payload.Name;
+    }
+    return toCategory(raw);
+  }
   const fetched = await fetchCategoryById(id);
   return fetched ?? toCategory({ id, name: data.name, isActive: true, createdAt: new Date(), updatedAt: new Date() });
 }

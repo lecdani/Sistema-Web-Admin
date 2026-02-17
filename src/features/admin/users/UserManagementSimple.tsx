@@ -1,15 +1,17 @@
 import React, { useState, useEffect } from 'react';
 import { Users, ArrowLeft } from 'lucide-react';
+import { useRouter } from 'next/navigation';
 import { Card, CardContent, CardHeader, CardTitle } from '@/shared/components/base/Card';
 import { Button } from '@/shared/components/base/Button';
 import { User } from '@/shared/types';
 import { getFromLocalStorage } from '@/shared/services/database';
 
 interface UserManagementProps {
-  onBack: () => void;
+  onBack?: () => void;
 }
 
 export const UserManagementSimple: React.FC<UserManagementProps> = ({ onBack }) => {
+  const router = useRouter();
   const [users, setUsers] = useState<User[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -36,6 +38,14 @@ export const UserManagementSimple: React.FC<UserManagementProps> = ({ onBack }) 
     );
   }
 
+  const handleBack = () => {
+    if (onBack) {
+      onBack();
+    } else {
+      router.push('/dashboard');
+    }
+  };
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -43,7 +53,7 @@ export const UserManagementSimple: React.FC<UserManagementProps> = ({ onBack }) 
         <Button
           variant="outline"
           size="sm"
-          onClick={onBack}
+          onClick={handleBack}
           className="flex items-center gap-2"
         >
           <ArrowLeft className="h-4 w-4" />

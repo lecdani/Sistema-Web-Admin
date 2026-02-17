@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import { Button } from '@/shared/components/base/Button';
 import { Input } from '@/shared/components/base/Input';
 import { Label } from '@/shared/components/base/Label';
@@ -43,10 +44,11 @@ import { OrderPlanogramView } from './components/OrderPlanogramView';
 import { CreateOrderDialog } from './components/CreateOrderDialog';
 
 interface OrderManagementProps {
-  onBack: () => void;
+  onBack?: () => void;
 }
 
 export function OrderManagement({ onBack }: OrderManagementProps) {
+  const router = useRouter();
   const { translate } = useLanguage();
   const [orders, setOrders] = useState<Order[]>([]);
   const [filteredOrders, setFilteredOrders] = useState<Order[]>([]);
@@ -247,12 +249,20 @@ export function OrderManagement({ onBack }: OrderManagementProps) {
     setSearchTerm('');
   };
 
+  const handleBack = () => {
+    if (onBack) {
+      onBack();
+    } else {
+      router.push('/dashboard');
+    }
+  };
+
   return (
     <div className="space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-4">
-          <Button variant="ghost" size="sm" onClick={onBack}>
+          <Button variant="ghost" size="sm" onClick={handleBack}>
             <ArrowLeft className="h-4 w-4" />
           </Button>
           <div className="p-2.5 bg-blue-100 rounded-lg">

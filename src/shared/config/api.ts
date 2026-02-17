@@ -184,9 +184,12 @@ export class ApiClient {
         try {
           data = text ? JSON.parse(text) : {};
         } catch (e) {
-          console.warn('[ApiClient] Error al parsear JSON, usando texto plano:', text);
-          // Si el servidor dice que es JSON pero envía texto plano (ej. un ID), lo devolvemos tal cual
-          data = text;
+          const isSilentEndpoint = endpoint === API_CONFIG.ENDPOINTS.AUTH.CHANGE_PASSWORD ||
+            endpoint === API_CONFIG.ENDPOINTS.USERS.GET_PROFILE || endpoint === API_CONFIG.ENDPOINTS.USERS.UPDATE_PROFILE;
+          if (!isSilentEndpoint) {
+            console.warn('[ApiClient] Error al parsear JSON, usando texto plano:', text);
+          }
+          data = typeof text === 'string' && text ? { message: text } : {};
         }
       } else {
         data = text ? { message: text } : {};
@@ -198,7 +201,20 @@ export class ApiClient {
         error.response = response;
         error.data = data;
         error.status = response.status;
-        console.error(`[ApiClient] Error en respuesta: ${response.status}`, data);
+
+        // No loguear errores de endpoints de perfil o cambio de contraseña
+        const isProfileEndpoint =
+          endpoint === API_CONFIG.ENDPOINTS.USERS.GET_PROFILE ||
+          endpoint === API_CONFIG.ENDPOINTS.USERS.UPDATE_PROFILE;
+        const isChangePasswordEndpoint = endpoint === API_CONFIG.ENDPOINTS.AUTH.CHANGE_PASSWORD;
+        const isExpected404 =
+          response.status === 404 &&
+          (isProfileEndpoint || endpoint.startsWith('/users/users/'));
+
+        if (!isExpected404 && !isProfileEndpoint && !isChangePasswordEndpoint) {
+          console.error(`[ApiClient] Error en respuesta: ${response.status}`, data);
+        }
+
         throw error;
       }
 

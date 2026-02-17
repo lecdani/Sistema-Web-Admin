@@ -70,7 +70,8 @@ export const validatePassword = (password: string): PasswordStrengthResult => {
   const hasUpperCase = /[A-Z]/.test(password);
   const hasLowerCase = /[a-z]/.test(password);
   const hasNumbers = /\d/.test(password);
-  const hasSpecialChar = /[!@#$%^&*(),.?":{}|<>]/.test(password);
+  // Incluimos también el guion (-) como carácter especial
+  const hasSpecialChar = /[!@#$%^&*(),.?":{}|<>-]/.test(password);
   
   if (!hasUpperCase) {
     warnings.push('Se recomienda incluir al menos una letra mayúscula');
@@ -545,11 +546,11 @@ export const validateProfileData = (data: ProfileData): ValidationErrors => {
   return errors;
 };
 
-// Validación de fortaleza de contraseña - función específica para UserProfile
+// Validación de fortaleza de contraseña (requisitos obligatorios)
 export const validatePasswordStrength = (password: string): PasswordStrengthResult => {
   const feedback: string[] = [];
   let score = 0;
-  
+
   if (!password) {
     return {
       isValid: false,
@@ -557,72 +558,42 @@ export const validatePasswordStrength = (password: string): PasswordStrengthResu
       feedback: ['La contraseña es requerida']
     };
   }
-  
-  // Verificar longitud mínima
+
+  // Solo requisitos obligatorios: 8 caracteres, mayúscula, minúscula, número, carácter especial
   if (password.length >= 8) {
     score++;
   } else {
-    feedback.push('Debe tener al menos 8 caracteres');
+    feedback.push('Mínimo 8 caracteres');
   }
-  
-  // Verificar mayúsculas
+
   if (/[A-Z]/.test(password)) {
     score++;
   } else {
-    feedback.push('Incluir al menos una letra mayúscula');
+    feedback.push('Al menos una mayúscula');
   }
-  
-  // Verificar minúsculas
+
   if (/[a-z]/.test(password)) {
     score++;
   } else {
-    feedback.push('Incluir al menos una letra minúscula');
+    feedback.push('Al menos una minúscula');
   }
-  
-  // Verificar números
+
   if (/\d/.test(password)) {
     score++;
   } else {
-    feedback.push('Incluir al menos un número');
+    feedback.push('Al menos un número');
   }
-  
-  // Verificar caracteres especiales
-  if (/[!@#$%^&*(),.?":{}|<>]/.test(password)) {
+
+  if (/[!@#$%^&*(),.?":{}|<>\-]/.test(password)) {
     score++;
   } else {
-    feedback.push('Incluir al menos un carácter especial');
+    feedback.push('Al menos un carácter especial (!@#$% etc.)');
   }
-  
-  // Verificar longitud ideal
-  if (password.length >= 12) {
-    score++;
-  } else if (password.length >= 8) {
-    feedback.push('Se recomienda al menos 12 caracteres para mayor seguridad');
-  }
-  
-  // Verificar patrones comunes
-  const commonPatterns = [
-    'password', '123456', 'qwerty', 'abc123', 'admin', 'letmein',
-    'welcome', 'monkey', '1234567890', 'password123', 'admin123'
-  ];
-  
-  if (commonPatterns.some(pattern => password.toLowerCase().includes(pattern))) {
-    score = Math.max(0, score - 2);
-    feedback.push('Evitar patrones comunes como "password", "123456", etc.');
-  }
-  
-  // Verificar caracteres repetidos
-  if (/(.)\1{2,}/.test(password)) {
-    score = Math.max(0, score - 1);
-    feedback.push('Evitar caracteres repetidos consecutivos');
-  }
-  
-  // Determinar si es válida (score >= 3 para considerarla aceptable)
-  const isValid = score >= 3 && feedback.length === 0;
-  
+
+  const isValid = feedback.length === 0;
   return {
     isValid,
-    score: Math.min(5, score), // Máximo 5
+    score: Math.min(5, score),
     feedback
   };
 };

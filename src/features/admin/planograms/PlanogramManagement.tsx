@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import {
   Layout,
   Plus,
@@ -48,10 +49,11 @@ import { PlanogramEditor } from './components/PlanogramEditor';
 import { PlanogramViewer } from './components/PlanogramViewer';
 
 interface PlanogramManagementProps {
-  onBack: () => void;
+  onBack?: () => void;
 }
 
 export const PlanogramManagement: React.FC<PlanogramManagementProps> = ({ onBack }) => {
+  const router = useRouter();
   const { translate } = useLanguage();
   const [planograms, setPlanograms] = useState<Planogram[]>([]);
   const [filteredPlanograms, setFilteredPlanograms] = useState<Planogram[]>([]);
@@ -194,6 +196,14 @@ export const PlanogramManagement: React.FC<PlanogramManagementProps> = ({ onBack
     return distributions.filter(d => d.planogramId === planogramId).length;
   };
 
+  const handleBack = () => {
+    if (onBack) {
+      onBack();
+    } else {
+      router.push('/dashboard');
+    }
+  };
+
   if (isLoading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -207,7 +217,7 @@ export const PlanogramManagement: React.FC<PlanogramManagementProps> = ({ onBack
       {/* Header */}
       <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
         <div className="flex items-center gap-4">
-          <Button variant="ghost" size="sm" onClick={onBack}>
+          <Button variant="ghost" size="sm" onClick={handleBack}>
             <ArrowLeft className="h-4 w-4" />
           </Button>
           <div className="p-2.5 bg-purple-100 rounded-lg">

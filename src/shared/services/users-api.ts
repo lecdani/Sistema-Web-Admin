@@ -35,6 +35,9 @@ function toPayload(data: Partial<User> & { password?: string }) {
 
     if (data.password) {
         payload.password = data.password;
+        payload.newPassword = data.password;
+        payload.NewPassword = data.password;
+        payload.Password = data.password;
     }
 
     return payload;
@@ -163,13 +166,27 @@ export async function updateProfile(data: Partial<User> & { address?: string }):
     } as User;
 }
 
-/** Cambia la contraseña del usuario autenticado (POST /auth/change-password) */
-export async function changePassword(currentPassword: string, newPassword: string): Promise<void> {
+/** Cambia la contraseña (POST /auth/change-password). Misma lógica que en login/reset. */
+export async function changePassword(params: {
+    email: string;
+    currentPassword: string;
+    newPassword: string;
+}): Promise<void> {
     const endpoint = API_CONFIG.ENDPOINTS.AUTH.CHANGE_PASSWORD;
-    await apiClient.post(endpoint, {
-        currentPassword,
-        newPassword
-    });
+    const body = {
+        email: params.email.trim(),
+        currentPassword: params.currentPassword,
+        newPassword: params.newPassword,
+        Email: params.email.trim(),
+        CurrentPassword: params.currentPassword,
+        NewPassword: params.newPassword
+    };
+    await apiClient.post(endpoint, body);
+}
+
+/** Cambia la contraseña de un usuario por email (admin). Usa change-password con currentPassword vacío. */
+export async function changePasswordByEmail(email: string, newPassword: string): Promise<void> {
+    return changePassword({ email, currentPassword: '', newPassword });
 }
 
 export const usersApi = {
@@ -180,5 +197,6 @@ export const usersApi = {
     deactivate: deactivateUser,
     getProfile,
     updateProfile,
-    changePassword
+    changePassword,
+    changePasswordByEmail
 };

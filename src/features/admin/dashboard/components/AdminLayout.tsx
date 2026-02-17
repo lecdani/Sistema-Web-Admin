@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter, usePathname } from 'next/navigation';
 import { 
@@ -44,11 +44,18 @@ interface AdminLayoutProps {
 }
 
 export const AdminLayout: React.FC<AdminLayoutProps> = ({ children, currentPage, onNavigate }) => {
-  const { user, logout } = useAuth();
+  const { user, logout, refreshUser } = useAuth();
   const { translate } = useLanguage();
   const router = useRouter();
   const pathname = usePathname();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  // Actualizar barra y menú cuando el perfil guarda cambios (nombre, email, etc.)
+  useEffect(() => {
+    const handler = () => refreshUser?.();
+    window.addEventListener('user-updated', handler);
+    return () => window.removeEventListener('user-updated', handler);
+  }, [refreshUser]);
 
   // Determinar la página actual desde la ruta si no se proporciona
   const activePage = currentPage || pathname?.split('/').pop() || 'dashboard';
