@@ -198,8 +198,10 @@ export function CityManagement({ onBack }: CityManagementProps) {
         await citiesApi.update(editingCity.id, payload);
         toast.success(translate('citySaved'));
       } else {
-        await citiesApi.create(payload);
+        const created = await citiesApi.create(payload);
         toast.success(translate('cityCreated'));
+        setSearchTerm(created.name);
+        setCurrentPage(1);
       }
 
       setShowCityDialog(false);

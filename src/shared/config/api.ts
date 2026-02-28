@@ -9,6 +9,14 @@ export const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || DEFAULT_API_URL;
 
 const USE_PROXY = process.env.NEXT_PUBLIC_USE_API_PROXY !== 'false'; // Por defecto true
 
+/** URL para mostrar imágenes del backend (POD, etc.). Si usas proxy, carga por proxy para evitar CORS. */
+export function getBackendAssetUrl(path: string): string {
+  if (!path || path.startsWith('data:') || path.startsWith('http')) return path;
+  const base = USE_PROXY ? '/api/proxy' : API_BASE_URL.replace(/\/$/, '');
+  const clean = (path as string).replace(/^\//, '');
+  return `${base}/${clean}`;
+}
+
 export const API_CONFIG = {
   // URL base del API (usa API_BASE_URL)
   BASE_URL: USE_PROXY ? '' : API_BASE_URL,
@@ -186,13 +194,23 @@ export class ApiClient {
         } catch (e) {
           const isSilentEndpoint = endpoint === API_CONFIG.ENDPOINTS.AUTH.CHANGE_PASSWORD ||
             endpoint === API_CONFIG.ENDPOINTS.USERS.GET_PROFILE || endpoint === API_CONFIG.ENDPOINTS.USERS.UPDATE_PROFILE;
-          if (!isSilentEndpoint) {
-            console.warn('[ApiClient] Error al parsear JSON, usando texto plano:', text);
+          const trimmed = (text || '').trim();
+          // Si el backend devuelve un valor simple (Guid, número, texto plano), tratarlo como tal
+          const guidRegex = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+          if (trimmed && (guidRegex.test(trimmed))) {
+            // Valor tipo Guid: úsalo directamente y no hagas ruido en consola
+            data = trimmed;
+          } else {
+            if (!isSilentEndpoint) {
+              console.warn('[ApiClient] Error al parsear JSON, usando texto plano:', text);
+            }
+            data = typeof text === 'string' && text ? { message: text } : {};
           }
-          data = typeof text === 'string' && text ? { message: text } : {};
         }
       } else {
-        data = text ? { message: text } : {};
+        // Respuesta no JSON: devolver el texto tal cual (útil para ids simples, Guids, etc.)
+        const trimmed = (text || '').trim();
+        data = trimmed || '';
       }
 
       if (!response.ok) {
@@ -202,14 +220,18 @@ export class ApiClient {
         error.data = data;
         error.status = response.status;
 
-        // No loguear errores de endpoints de perfil o cambio de contraseña
+        // No loguear errores de endpoints de perfil, cambio de contraseña o 404 esperados
         const isProfileEndpoint =
           endpoint === API_CONFIG.ENDPOINTS.USERS.GET_PROFILE ||
           endpoint === API_CONFIG.ENDPOINTS.USERS.UPDATE_PROFILE;
         const isChangePasswordEndpoint = endpoint === API_CONFIG.ENDPOINTS.AUTH.CHANGE_PASSWORD;
+        const isHistPriceLatestEndpoint =
+          endpoint.startsWith(API_CONFIG.ENDPOINTS.HISTPRICES.GET_LATEST.replace('{productId}', ''));
+        const isOrdersByUserEndpoint =
+          endpoint.startsWith('/orders/orders/user/');
         const isExpected404 =
           response.status === 404 &&
-          (isProfileEndpoint || endpoint.startsWith('/users/users/'));
+          (isProfileEndpoint || endpoint.startsWith('/users/users/') || isHistPriceLatestEndpoint || isOrdersByUserEndpoint);
 
         if (!isExpected404 && !isProfileEndpoint && !isChangePasswordEndpoint) {
           console.error(`[ApiClient] Error en respuesta: ${response.status}`, data);
@@ -269,6 +291,13 @@ export class ApiClient {
   async put<T = any>(endpoint: string, data?: any): Promise<T> {
     return this.request<T>(endpoint, {
       method: 'PUT',
+      body: data ? JSON.stringify(data) : undefined
+    });
+  }
+
+  async patch<T = any>(endpoint: string, data?: any): Promise<T> {
+    return this.request<T>(endpoint, {
+      method: 'PATCH',
       body: data ? JSON.stringify(data) : undefined
     });
   }

@@ -4,8 +4,20 @@ import type { Brand } from '@/shared/types';
 const E = API_CONFIG.ENDPOINTS.BRANDS;
 
 function toBrand(raw: any): Brand {
+  // Asegurar un id no vacío para evitar keys `` duplicadas en React
+  let idValue =
+    raw?.id ??
+    raw?.Id ??
+    raw?.name ??
+    raw?.Name ??
+    null;
+
+  if (idValue == null || String(idValue).trim() === '') {
+    idValue = `temp-${Math.random().toString(36).slice(2, 10)}`;
+  }
+
   return {
-    id: String(raw.id ?? raw.Id ?? ''),
+    id: String(idValue),
     name: String(raw.name ?? raw.Name ?? '').trim() || 'Marca',
     isActive: typeof raw.isActive === 'boolean' ? raw.isActive : (raw.IsActive ?? true),
     createdAt: raw.createdAt ? new Date(raw.createdAt) : raw.CreatedAt ? new Date(raw.CreatedAt) : new Date(),
@@ -47,7 +59,8 @@ export async function createBrand(data: { name: string }): Promise<Brand> {
     return toBrand(raw);
   }
 
-  return toBrand({ id: '', ...payload });
+  // Si el backend no devuelve nada, crear una marca temporal con id único
+  return toBrand({ id: `temp-${Math.random().toString(36).slice(2, 10)}`, ...payload });
 }
 
 /** Actualiza una marca */

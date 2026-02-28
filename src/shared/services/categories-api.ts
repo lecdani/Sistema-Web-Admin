@@ -4,8 +4,20 @@ import type { Category } from '@/shared/types';
 const E = API_CONFIG.ENDPOINTS.CATEGORIES;
 
 function toCategory(raw: any): Category {
+  // Asegurar un id no vacío para evitar keys `` duplicadas en React
+  let idValue =
+    raw?.id ??
+    raw?.Id ??
+    raw?.name ??
+    raw?.Name ??
+    null;
+
+  if (idValue == null || String(idValue).trim() === '') {
+    idValue = `temp-${Math.random().toString(36).slice(2, 10)}`;
+  }
+
   return {
-    id: String(raw.id ?? raw.Id ?? ''),
+    id: String(idValue),
     name: String(raw.name ?? raw.Name ?? '').trim() || 'Categoría',
     isActive: typeof raw.isActive === 'boolean' ? raw.isActive : (raw.IsActive ?? true),
     createdAt: raw.createdAt ? new Date(raw.createdAt) : raw.CreatedAt ? new Date(raw.CreatedAt) : new Date(),
@@ -46,7 +58,8 @@ export async function createCategory(data: { name: string }): Promise<Category> 
     return toCategory(raw);
   }
 
-  return toCategory({ id: '', ...payload });
+  // Si el backend no devuelve nada, crear una categoría temporal con id único
+  return toCategory({ id: `temp-${Math.random().toString(36).slice(2, 10)}`, ...payload });
 }
 
 /** Actualiza una categoría */

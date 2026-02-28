@@ -218,6 +218,8 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onBack }) => {
         if (formData.password.trim()) userData.password = formData.password.trim();
         await usersApi.create(userData);
         toast.success(translate('userCreated'));
+        setSearchTerm(formData.firstName.trim() || formData.email.trim());
+        setCurrentPage(1);
       }
 
       loadUsers();

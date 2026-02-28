@@ -405,3 +405,25 @@ html {
 .scrollbar-hidden::-webkit-scrollbar {
   display: none;
 }
+
+/* Al imprimir: solo la factura (#invoice-print), resto de la página oculto */
+@media print {
+  body * {
+    visibility: hidden;
+  }
+  #invoice-print,
+  #invoice-print * {
+    visibility: visible;
+  }
+  #invoice-print {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    max-width: 100%;
+    margin: 0;
+    padding: 0;
+    box-shadow: none;
+    border: none;
+  }
+}

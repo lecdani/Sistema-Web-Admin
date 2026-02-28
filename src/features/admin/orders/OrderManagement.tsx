@@ -18,7 +18,6 @@ import {
   Search,
   Filter,
   Download,
-  Plus,
   Calendar,
   Package,
   User as UserIcon,
@@ -32,16 +31,27 @@ import {
   ExternalLink,
   Printer,
   Upload,
-  Edit
+  Edit,
+  Trash2,
+  MoreHorizontal,
 } from 'lucide-react';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/shared/components/base/DropdownMenu';
 import { getFromLocalStorage, setToLocalStorage } from '@/shared/services/database';
 import { useLanguage } from '@/shared/hooks/useLanguage';
 import { Order, OrderItem, Store as StoreType, User, Product, Planogram, OrderFilters, Invoice, POD } from '@/shared/types';
 import { planogramsApi } from '@/shared/services/planograms-api';
+import { ordersApi } from '@/shared/services/orders-api';
+import { usersApi } from '@/shared/services/users-api';
+import { storesApi } from '@/shared/services/stores-api';
 import { toast } from 'sonner';
 import { OrderDetailView } from './OrderDetailView';
 import { OrderPlanogramView } from './components/OrderPlanogramView';
-import { CreateOrderDialog } from './components/CreateOrderDialog';
+import { EditOrderPlanogram } from './components/EditOrderPlanogram';
 
 interface OrderManagementProps {
   onBack?: () => void;
@@ -61,8 +71,9 @@ export function OrderManagement({ onBack }: OrderManagementProps) {
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
   const [showOrderDetail, setShowOrderDetail] = useState(false);
   const [showPlanogramDialog, setShowPlanogramDialog] = useState(false);
-  const [showCreateOrderDialog, setShowCreateOrderDialog] = useState(false);
-  const [editingOrder, setEditingOrder] = useState<Order | null>(null);
+  const [planogramDialogMode, setPlanogramDialogMode] = useState<'view' | 'edit'>('view');
+  const [orderToDelete, setOrderToDelete] = useState<Order | null>(null);
+  const [deletingOrderId, setDeletingOrderId] = useState<string | null>(null);
 
   const [filters, setFilters] = useState<OrderFilters>({
     dateFrom: '',
@@ -82,10 +93,9 @@ export function OrderManagement({ onBack }: OrderManagementProps) {
 
   const loadData = async () => {
     try {
-      const ordersData = getFromLocalStorage('app-orders') || [];
-      const storesData = getFromLocalStorage('app-stores') || [];
-      const usersData = getFromLocalStorage('app-users') || [];
-      const productsData = getFromLocalStorage('app-products') || [];
+      let storesData = getFromLocalStorage('app-stores') || [];
+      const usersData: User[] = getFromLocalStorage('app-users') || [];
+      const productsData: Product[] = getFromLocalStorage('app-products') || [];
       let planogramsData: Planogram[] = [];
       try {
         planogramsData = await planogramsApi.fetchAll();
@@ -93,30 +103,111 @@ export function OrderManagement({ onBack }: OrderManagementProps) {
         planogramsData = getFromLocalStorage('app-planograms') || [];
       }
 
-      const enrichedOrders = ordersData.map((order: Order) => {
-        const store = storesData.find((s: StoreType) => s.id === order.storeId);
-        const seller = usersData.find((u: User) => u.id === order.salespersonId);
+      // Tiendas siempre desde la API para mostrar NOMBRE de tienda en la tabla (no el id)
+      try {
+        storesData = await storesApi.fetchAll();
+        setToLocalStorage('app-stores', storesData);
+      } catch (e) {
+        console.error('[OrderManagement] Error cargando tiendas desde la API', e);
+        if (!storesData.length) storesData = [];
+      }
+
+      // Lista de pedidos desde API (getAllOrders usa la misma lógica que la PWA para total/subtotal)
+      const apiOrders = await ordersApi.getAllOrders();
+
+      // Mapear al tipo Order del Admin (total/subtotal ya vienen de getAllOrders)
+      const mappedOrders: Order[] = apiOrders.map((o) => {
+        const rawStatus = (o.status || '').toLowerCase();
+        const normalizedStatus: 'completed' | 'pending' =
+          rawStatus === 'completed' || rawStatus === 'invoiced' || rawStatus === 'delivered'
+            ? 'completed'
+            : 'pending';
+        const total = Number(o.total) || 0;
+        const subtotal = Number(o.subtotal) || 0 || total;
+
+        return {
+          id: o.id,
+          salespersonId: o.salespersonId || '',
+          storeId: o.storeId,
+          createdAt: new Date(o.date),
+          po: o.id,
+          status: normalizedStatus,
+          storeName: o.storeName,
+          sellerName: undefined,
+          planogramId: undefined,
+          planogramName: undefined,
+          subtotal,
+          total,
+          notes: undefined,
+          updatedAt: new Date(o.date),
+          completedAt: normalizedStatus === 'completed' ? new Date(o.date) : undefined,
+          items: [],
+        };
+      });
+
+      // Asegurar que tenemos los datos de los vendedores desde la API cuando falten en local
+      const salespersonIds = Array.from(
+        new Set(
+          mappedOrders
+            .map((o) => o.salespersonId)
+            .filter((id): id is string => !!id)
+        )
+      );
+      const knownUserIds = new Set(usersData.map((u) => u.id));
+      const missingSalespersons = salespersonIds.filter(
+        (id) => !knownUserIds.has(id)
+      );
+
+      let apiUsers: User[] = [];
+      if (missingSalespersons.length > 0) {
+        try {
+          const fetched = await Promise.all(
+            missingSalespersons.map((id) => usersApi.getById(id))
+          );
+          apiUsers = fetched.filter((u): u is User => u != null);
+        } catch (e) {
+          console.error(
+            '[OrderManagement] Error cargando vendedores desde la API',
+            e
+          );
+        }
+      }
+
+      const allUsers: User[] = [
+        ...usersData,
+        ...apiUsers.filter((u) => !knownUserIds.has(u.id)),
+      ];
+
+      const enrichedOrders = mappedOrders.map((order: Order) => {
+        const store = storesData.find((s: StoreType) => String(s.id) === String(order.storeId));
+        const seller = allUsers.find((u: User) => u.id === order.salespersonId);
         const planogram = planogramsData.find((p: Planogram) => p.id === order.planogramId);
 
         return {
           ...order,
-          storeName: store?.name || translate('storeNotFound'),
-          sellerName: `${seller?.firstName || ''} ${seller?.lastName || ''}`.trim() || translate('sellerNotFound'),
-          planogramName: planogram?.name || translate('noPlanogram'),
-          items: order.items?.map((item: OrderItem) => {
-            const product = productsData.find((p: Product) => p.id === item.productId);
-            return {
-              ...item,
-              productName: product?.name || translate('productNotFound'),
-              productBrand: product?.category || translate('noCategory')
-            };
-          }) || []
+          storeName: store?.name || order.storeName || translate('storeNotFound'),
+          sellerName:
+            `${seller?.firstName || ''} ${seller?.lastName || ''}`.trim() ||
+            order.sellerName ||
+            translate('sellerNotFound'),
+          planogramName: planogram?.name || order.planogramName || translate('noPlanogram'),
+          items:
+            order.items?.map((item: OrderItem) => {
+              const product = productsData.find((p: Product) => p.id === item.productId);
+              return {
+                ...item,
+                productName: item.productName || product?.name || translate('productNotFound'),
+                productBrand: item.productBrand || product?.category || translate('noCategory'),
+              };
+            }) || [],
         };
       });
 
       setOrders(enrichedOrders);
+      // Sincronizar con el almacenamiento local para mantener compatibilidad con otras pantallas
+      setToLocalStorage('app-orders', enrichedOrders);
       setStores(storesData);
-      setUsers(usersData.filter((u: User) => u.role === 'user')); // Solo vendedores
+      setUsers(allUsers.filter((u: User) => u.role === 'user')); // Solo vendedores
       setProducts(productsData);
       setPlanograms(planogramsData);
     } catch (error) {
@@ -162,6 +253,9 @@ export function OrderManagement({ onBack }: OrderManagementProps) {
       filtered = filtered.filter(order => order.status === filters.status);
     }
 
+    // Ordenar por fecha: más recientes primero
+    filtered.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+
     setFilteredOrders(filtered);
   };
 
@@ -205,6 +299,7 @@ export function OrderManagement({ onBack }: OrderManagementProps) {
   const handleViewPlanogram = (order: Order) => {
     if (order.planogramId) {
       setSelectedOrder(order);
+      setPlanogramDialogMode('view');
       setShowPlanogramDialog(true);
     } else {
       toast.error(translate('orderNoPlanogram'));
@@ -216,21 +311,141 @@ export function OrderManagement({ onBack }: OrderManagementProps) {
       toast.error(translate('cannotEditCompletedOrder'));
       return;
     }
-    setEditingOrder(order);
-    setShowCreateOrderDialog(true);
+    setSelectedOrder(order);
+    setPlanogramDialogMode('edit');
+    setShowPlanogramDialog(true);
+  };
+
+  const handleEditOrderSaved = (orderId: string) => {
+    setShowPlanogramDialog(false);
+    loadData();
+    setSelectedOrder({
+      id: orderId,
+      storeId: '',
+      createdAt: new Date(),
+      po: orderId,
+      status: 'pending',
+      storeName: '',
+      sellerName: undefined,
+      planogramId: undefined,
+      planogramName: undefined,
+      subtotal: 0,
+      total: 0,
+      notes: undefined,
+      updatedAt: new Date(),
+      completedAt: undefined,
+      items: [],
+      salespersonId: '',
+    } as Order);
+    setShowOrderDetail(true);
+  };
+
+  const handleDeleteOrderClick = (order: Order, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if ((order.status || '').toLowerCase() !== 'pending') {
+      toast.error('Solo se puede eliminar pedidos en estado pendiente.');
+      return;
+    }
+    setOrderToDelete(order);
+  };
+
+  const handleConfirmDeleteOrder = async () => {
+    if (!orderToDelete) return;
+    setDeletingOrderId(orderToDelete.id);
+    const ok = await ordersApi.deleteOrder(orderToDelete.id);
+    setDeletingOrderId(null);
+    setOrderToDelete(null);
+    if (ok) {
+      toast.success('Pedido eliminado.');
+      loadData();
+    } else {
+      toast.error('No se pudo eliminar el pedido.');
+    }
+  };
+
+  const escapeCsv = (v: string | number | undefined | null): string => {
+    const s = v == null ? '' : String(v).trim();
+    if (s.includes(';') || s.includes('"') || s.includes('\n') || s.includes('\r')) {
+      return '"' + s.replace(/"/g, '""') + '"';
+    }
+    return s;
   };
 
   const exportOrders = () => {
     try {
-      const dataStr = JSON.stringify(filteredOrders, null, 2);
-      const dataUri = 'data:application/json;charset=utf-8,'+ encodeURIComponent(dataStr);
-      const exportFileDefaultName = `pedidos_${new Date().toISOString().split('T')[0]}.json`;
-      
-      const linkElement = document.createElement('a');
-      linkElement.setAttribute('href', dataUri);
-      linkElement.setAttribute('download', exportFileDefaultName);
-      linkElement.click();
-      
+      const BOM = '\uFEFF';
+      const sep = ';';
+      const lines: string[] = [];
+      const now = new Date();
+      const dateStr = now.toLocaleDateString('es-ES', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+      const timeStr = now.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
+
+      // Bloque de cabecera profesional
+      lines.push('');
+      lines.push('ETERNAL COSMETICS, LLC');
+      lines.push('Informe de pedidos');
+      lines.push('');
+      lines.push(`Generado;${dateStr} a las ${timeStr}`);
+      const hasFilters = !!(filters.dateFrom || filters.dateTo || filters.sellerId !== 'all' || filters.storeId !== 'all' || filters.status !== 'all');
+      lines.push(`Filtros aplicados;${hasFilters ? 'Sí' : 'Todos'}`);
+      if (filters.dateFrom || filters.dateTo) {
+        lines.push(`Rango fechas;${filters.dateFrom || '—'} a ${filters.dateTo || '—'}`);
+      }
+      lines.push('');
+      lines.push('========================================');
+      lines.push('  DETALLE DE PEDIDOS');
+      lines.push('========================================');
+      lines.push('');
+
+      // Encabezados de datos
+      const headers = ['Nº Pedido', 'ID', 'Fecha', 'Estado', 'Tienda', 'Vendedor', 'Subtotal ($)', 'Total ($)', 'Notas'];
+      lines.push(headers.join(sep));
+      let sumSubtotal = 0;
+      let sumTotal = 0;
+      for (const o of filteredOrders) {
+        const subtotal = Number(o.subtotal ?? 0);
+        const total = Number(o.total ?? 0);
+        sumSubtotal += subtotal;
+        sumTotal += total;
+        const row = [
+          escapeCsv(o.po ?? o.id),
+          escapeCsv(o.id),
+          new Date(o.createdAt).toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric' }),
+          (o.status === 'completed' ? 'Completado' : 'Pendiente'),
+          escapeCsv(o.storeName),
+          escapeCsv(o.sellerName),
+          subtotal.toFixed(2),
+          total.toFixed(2),
+          escapeCsv((o as any).notes),
+        ];
+        lines.push(row.join(sep));
+      }
+
+      // Pie con resumen
+      lines.push('');
+      lines.push('========================================');
+      lines.push('  RESUMEN');
+      lines.push('========================================');
+      lines.push('');
+      lines.push(`Total pedidos exportados;${filteredOrders.length}`);
+      lines.push(`Pendientes;${filteredOrders.filter((o) => (o.status || '').toLowerCase() === 'pending').length}`);
+      lines.push(`Completados;${filteredOrders.filter((o) => (o.status || '').toLowerCase() === 'completed').length}`);
+      lines.push(`Suma subtotales ($);${sumSubtotal.toFixed(2)}`);
+      lines.push(`Suma totales ($);${sumTotal.toFixed(2)}`);
+      lines.push('');
+      lines.push('========================================');
+      lines.push('  Fin del informe');
+      lines.push('========================================');
+      lines.push('');
+
+      const csv = BOM + lines.join('\r\n');
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `Informe_Pedidos_${now.toISOString().slice(0, 10)}.csv`;
+      link.click();
+      URL.revokeObjectURL(url);
       toast.success(translate('ordersExportedSuccess'));
     } catch (error) {
       console.error('Error exportando pedidos:', error);
@@ -278,10 +493,6 @@ export function OrderManagement({ onBack }: OrderManagementProps) {
           <Button variant="outline" onClick={exportOrders}>
             <Download className="h-4 w-4 mr-2" />
             {translate('export')}
-          </Button>
-          <Button className="bg-indigo-600 hover:bg-indigo-700" onClick={() => setShowCreateOrderDialog(true)}>
-            <Plus className="h-4 w-4 mr-2" />
-            {translate('newOrder')}
           </Button>
         </div>
       </div>
@@ -340,7 +551,7 @@ export function OrderManagement({ onBack }: OrderManagementProps) {
               <div>
                 <p className="text-xs font-medium text-gray-500">{translate('totalValue')}</p>
                 <p className="text-2xl font-bold text-gray-900 mt-1">
-                  €{orders.reduce((sum, o) => sum + o.total, 0).toFixed(2)}
+                  ${Number(orders.reduce((sum, o) => sum + (Number(o.total) || 0), 0)).toFixed(2)}
                 </p>
               </div>
               <div className="p-2.5 bg-indigo-100 rounded-lg flex items-center justify-center">
@@ -470,38 +681,51 @@ export function OrderManagement({ onBack }: OrderManagementProps) {
                     <TableCell>
                       {getStatusBadge(order.status)}
                     </TableCell>
-                    <TableCell>€{order.total.toFixed(2)}</TableCell>
-                    <TableCell onClick={(e) => e.stopPropagation()}>
-                      <div className="flex items-center gap-2">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => handleViewDetail(order)}
-                          title={translate('viewOrderDetails')}
-                        >
-                          <Eye className="h-4 w-4" />
-                        </Button>
-                        {order.planogramId && (
+                    <TableCell className="font-medium tabular-nums whitespace-nowrap">${Number(order.total ?? 0).toFixed(2)}</TableCell>
+                    <TableCell onClick={(e) => e.stopPropagation()} className="whitespace-nowrap text-center">
+                      <div className="flex items-center justify-center">
+                        {(order.status || '').toLowerCase() === 'completed' ? (
                           <Button
                             variant="outline"
                             size="sm"
-                            onClick={() => handleViewPlanogram(order)}
-                            className="text-blue-600 hover:text-blue-700"
-                            title={translate('viewOrderPlanogram')}
+                            className="h-9 rounded-lg border-slate-200 bg-white px-3 text-slate-600 shadow-sm hover:bg-slate-50"
+                            onClick={() => handleViewDetail(order)}
+                            title={translate('viewOrderDetails')}
                           >
-                            <Layout className="h-4 w-4" />
+                            <Eye className="h-4 w-4" />
                           </Button>
-                        )}
-                        {order.status !== 'completed' && (
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => handleEditOrder(order)}
-                            className="text-amber-600 hover:text-amber-700"
-                            title={translate('editOrder')}
-                          >
-                            <Edit className="h-4 w-4" />
-                          </Button>
+                        ) : (
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="h-9 gap-1.5 rounded-lg border-slate-200 bg-white px-3 text-slate-600 shadow-sm hover:bg-slate-50 hover:text-slate-900"
+                              >
+                                <MoreHorizontal className="h-4 w-4" />
+                                <span className="hidden sm:inline">Acciones</span>
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="center" usePortal className="min-w-[14rem] py-1.5">
+                              <DropdownMenuItem onClick={() => handleViewDetail(order)} className="gap-3 py-3 px-4 text-base text-slate-800 hover:bg-slate-100 cursor-pointer">
+                                <Eye className="h-4 w-4 shrink-0" />
+                                <span>{translate('viewOrderDetails')}</span>
+                              </DropdownMenuItem>
+                              <DropdownMenuItem onClick={() => handleEditOrder(order)} className="gap-3 py-3 px-4 text-base text-slate-800 hover:bg-slate-100 cursor-pointer">
+                                <Edit className="h-4 w-4 shrink-0" />
+                                <span>{translate('editOrder')}</span>
+                              </DropdownMenuItem>
+                              {(order.status || '').toLowerCase() === 'pending' && (
+                                <DropdownMenuItem
+                                  onClick={(e) => handleDeleteOrderClick(order, e as unknown as React.MouseEvent)}
+                                  className="gap-3 py-3 px-4 text-base text-red-600 hover:bg-red-50 cursor-pointer"
+                                >
+                                  <Trash2 className="h-4 w-4 shrink-0" />
+                                  <span>Eliminar pedido</span>
+                                </DropdownMenuItem>
+                              )}
+                            </DropdownMenuContent>
+                          </DropdownMenu>
                         )}
                       </div>
                     </TableCell>
@@ -531,38 +755,62 @@ export function OrderManagement({ onBack }: OrderManagementProps) {
       {/* Order Detail Dialog */}
       <Dialog open={showOrderDetail} onOpenChange={setShowOrderDetail}>
         <DialogContent className="!w-[65vw] !max-w-[1200px] max-h-[90vh] overflow-y-auto p-0">
-          {selectedOrder && <OrderDetailView order={selectedOrder} />}
+          {selectedOrder && (
+            <OrderDetailView
+              orderId={selectedOrder.id}
+              onClose={() => {
+                setShowOrderDetail(false);
+                setSelectedOrder(null);
+                loadData();
+              }}
+              onOrderUpdated={loadData}
+            />
+          )}
         </DialogContent>
       </Dialog>
 
-      {/* Planogram Dialog */}
+      {/* Modal confirmar eliminar pedido */}
+      <Dialog open={!!orderToDelete} onOpenChange={(open) => !open && setOrderToDelete(null)}>
+        <DialogContent className="max-w-sm rounded-xl">
+          <DialogHeader className="pb-2">
+            <DialogTitle>Eliminar pedido</DialogTitle>
+            <DialogDescription>
+              ¿Eliminar este pedido? No podrás deshacer esta acción.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex gap-3 justify-end px-6 pb-6 pt-2">
+            <Button variant="outline" onClick={() => setOrderToDelete(null)} disabled={!!deletingOrderId}>
+              Cancelar
+            </Button>
+            <Button variant="destructive" onClick={handleConfirmDeleteOrder} disabled={!!deletingOrderId}>
+              {deletingOrderId ? 'Eliminando…' : 'Eliminar'}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Planogram Dialog (ver solo lectura o editar como en PWA) */}
       <Dialog open={showPlanogramDialog} onOpenChange={setShowPlanogramDialog}>
         <DialogContent className="!w-[98vw] !max-w-[98vw] !h-[98vh] max-h-[98vh] overflow-hidden p-6">
-          {selectedOrder && <OrderPlanogramView order={selectedOrder} />}
+          {selectedOrder && planogramDialogMode === 'edit' && (
+            <EditOrderPlanogram
+              order={selectedOrder}
+              onClose={() => setShowPlanogramDialog(false)}
+              onSaved={handleEditOrderSaved}
+            />
+          )}
+          {selectedOrder && planogramDialogMode === 'view' && (
+            <OrderPlanogramView
+              order={selectedOrder}
+              onViewOrder={() => {
+                setShowPlanogramDialog(false);
+                setShowOrderDetail(true);
+              }}
+            />
+          )}
         </DialogContent>
       </Dialog>
 
-      {/* Create Order Dialog */}
-      <Dialog open={showCreateOrderDialog} onOpenChange={(open) => {
-        setShowCreateOrderDialog(open);
-        if (!open) {
-          setEditingOrder(null); // Limpiar el pedido en edición al cerrar
-        }
-      }}>
-        <DialogContent className="!w-[98vw] !max-w-[98vw] !h-[98vh] max-h-[98vh] overflow-hidden p-0">
-          <CreateOrderDialog 
-            onClose={() => {
-              setShowCreateOrderDialog(false);
-              setEditingOrder(null);
-            }}
-            onOrderCreated={() => {
-              loadData();
-              setEditingOrder(null);
-            }}
-            editingOrder={editingOrder}
-          />
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }

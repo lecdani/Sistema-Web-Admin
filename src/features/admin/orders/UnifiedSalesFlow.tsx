@@ -183,7 +183,7 @@ export function UnifiedSalesFlow({ onBack }: UnifiedSalesFlowProps) {
                 <p className="text-xs font-medium text-gray-500">Total Facturas</p>
                 <p className="text-2xl font-bold text-gray-900 mt-1">{invoices.length}</p>
                 <p className="text-xs text-gray-500 mt-1">
-                  €{invoiceStats.totalAmount.toFixed(2)}
+                  ${invoiceStats.totalAmount.toFixed(2)}
                 </p>
               </div>
               <div className="p-2.5 bg-green-100 rounded-lg">

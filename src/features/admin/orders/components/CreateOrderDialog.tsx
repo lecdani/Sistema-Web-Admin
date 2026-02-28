@@ -23,12 +23,13 @@ import {
   Image as ImageIcon,
   Upload
 } from 'lucide-react';
-import { getFromLocalStorage, setToLocalStorage } from '@/shared/services/database';
+import { getFromLocalStorage } from '@/shared/services/database';
 import { useLanguage } from '@/shared/hooks/useLanguage';
 import { Store, User, Product, Planogram, Distribution, Order, OrderItem, Invoice, POD } from '@/shared/types';
 import { planogramsApi } from '@/shared/services/planograms-api';
 import { distributionsApi } from '@/shared/services/distributions-api';
 import { productsApi } from '@/shared/services/products-api';
+import { ordersApi } from '@/shared/services/orders-api';
 import { toast } from 'sonner';
 import { InvoicePreview } from './InvoicePreview';
 import { handleUploadPODImage } from '../services/orderDetailHelpers';
@@ -282,29 +283,67 @@ export function CreateOrderDialog({ onClose, onOrderCreated, editingOrder }: Cre
   const handleCreateOrder = async () => {
     const selectedItems = getSelectedItems();
     const subtotal = calculateSubtotal();
-    const total = calculateTotal();
 
-    // Generar ID único para el pedido
-    const orderId = `order_${Date.now()}`;
-    const orderNumber = `PED-${new Date().getFullYear()}-${String(
-      (getFromLocalStorage('app-orders') || []).length + 1
-    ).padStart(3, '0')}`;
+    // Por ahora no aplicamos impuestos adicionales en el pedido (igual que en la PWA)
+    const tax = 0;
+    const total = subtotal;
 
-    // Crear items del pedido
-    const orderItems: OrderItem[] = selectedItems.map((cell, index) => ({
-      id: `item_${orderId}_${index}`,
-      orderId: orderId,
-      productId: cell.productId!,
-      quantity: cell.quantity,
-      unitPrice: cell.product!.currentPrice,
-      subtotal: cell.product!.currentPrice * cell.quantity,
-      status: 'pending'
-    }));
-
-    // Obtener información de la tienda para el pedido
+    // Información de la tienda
     const selectedStore = stores.find((s) => s.id === selectedStoreId);
 
-    // Crear el pedido
+    const orderPayload = {
+      storeId: selectedStoreId,
+      storeName: selectedStore?.name,
+      storeAddress: selectedStore?.address,
+      salespersonId: selectedSellerId,
+      vendorNumber: '2F318',
+      items: selectedItems.map((cell) => ({
+        productId: cell.productId!,
+        sku: cell.product.sku,
+        productName: cell.product.name,
+        quantity: cell.quantity,
+        price: cell.product.currentPrice,
+      })),
+      subtotal,
+      tax,
+      total,
+    };
+
+    const apiResult = await ordersApi.createOrder(orderPayload);
+    if (!apiResult || apiResult.orderId == null || apiResult.orderId === '') {
+      toast.error(translate('errorProcessOrder'));
+      setIsLoading(false);
+      return;
+    }
+
+    const orderId = String(apiResult.orderId);
+    const invoiceId = apiResult.invoiceId ? String(apiResult.invoiceId) : `invoice_${Date.now()}`;
+
+    // Generar números legibles para PO y factura solo a nivel UI/admin
+    const orderNumber = `PED-${new Date().getFullYear()}-${orderId.slice(-4).padStart(4, '0')}`;
+    const invoiceNumber = `FAC-${new Date().getFullYear()}-${invoiceId.slice(-4).padStart(4, '0')}`;
+
+    // Construir objetos locales para la vista de confirmación (no son la fuente de verdad)
+    const orderItems: OrderItem[] = selectedItems.map((cell, index) => ({
+      id: `item_${orderId}_${index}`,
+      orderId,
+      productId: cell.productId!,
+      quantity: cell.quantity,
+      unitPrice: cell.product.currentPrice,
+      subtotal: cell.product.currentPrice * cell.quantity,
+      status: 'pending',
+    }));
+
+    const currentUser = getFromLocalStorage('current-user');
+    const invoiceItems = selectedItems.map((cell, index) => ({
+      id: `inv_item_${invoiceId}_${index}`,
+      billId: invoiceId,
+      productId: cell.productId!,
+      quantity: cell.quantity,
+      unitPrice: cell.product.currentPrice,
+      subtotal: cell.product.currentPrice * cell.quantity,
+    }));
+
     const newOrder: Order = {
       id: orderId,
       po: orderNumber,
@@ -313,64 +352,38 @@ export function CreateOrderDialog({ onClose, onOrderCreated, editingOrder }: Cre
       salespersonId: selectedSellerId,
       status: 'pending',
       planogramId: activePlanogram!.id,
-      subtotal: subtotal,
-      total: total,
-      notes: notes,
+      subtotal,
+      total,
+      notes,
       createdAt: new Date(),
       updatedAt: new Date(),
-      items: orderItems
+      items: orderItems,
     };
-
-    // Guardar el pedido
-    const orders = getFromLocalStorage('app-orders') || [];
-    orders.push(newOrder);
-    setToLocalStorage('app-orders', orders);
-
-    // Crear la factura automáticamente
-    const invoiceId = `invoice_${Date.now()}`;
-    const invoiceNumber = `FAC-${new Date().getFullYear()}-${String(
-      (getFromLocalStorage('app-invoices') || []).length + 1
-    ).padStart(3, '0')}`;
-
-    const currentUser = getFromLocalStorage('current-user');
-    const invoiceItems = selectedItems.map((cell, index) => ({
-      id: `inv_item_${invoiceId}_${index}`,
-      invoiceId: invoiceId,
-      productId: cell.productId!,
-      quantity: cell.quantity,
-      unitPrice: cell.product!.currentPrice,
-      subtotal: cell.product!.currentPrice * cell.quantity
-    }));
 
     const newInvoice: Invoice = {
       id: invoiceId,
-      invoiceNumber: invoiceNumber,
-      orderId: orderId,
+      invoiceNumber,
+      orderId,
       storeId: selectedStoreId,
       sellerId: selectedSellerId,
       status: 'draft',
       generationType: 'automatic',
-      subtotal: subtotal,
-      taxes: subtotal * 0.21, // 21% IVA
+      subtotal,
+      taxes: subtotal * 0.21,
       total: subtotal * 1.21,
       issueDate: new Date(),
-      dueDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 días
+      dueDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
       createdAt: new Date(),
       updatedAt: new Date(),
       createdBy: currentUser?.id || '1',
-      items: invoiceItems
+      items: invoiceItems,
     };
-
-    // Guardar la factura
-    const invoices = getFromLocalStorage('app-invoices') || [];
-    invoices.push(newInvoice);
-    setToLocalStorage('app-invoices', invoices);
 
     setCreatedOrderId(orderId);
     setCreatedInvoiceId(invoiceId);
     setCreatedInvoice(newInvoice);
     setCreatedOrder(newOrder);
-    
+
     setCurrentStep('confirm');
     setIsLoading(false);
     toast.success(translate('orderAndInvoiceCreated'));
@@ -381,82 +394,104 @@ export function CreateOrderDialog({ onClose, onOrderCreated, editingOrder }: Cre
 
     const selectedItems = getSelectedItems();
     const subtotal = calculateSubtotal();
-    const total = calculateTotal();
+    const tax = 0;
+    const total = subtotal;
 
-    // Actualizar items del pedido
-    const orderItems: OrderItem[] = selectedItems.map((cell, index) => ({
-      id: `item_${editingOrder.id}_${index}`,
-      orderId: editingOrder.id,
-      productId: cell.productId!,
-      quantity: cell.quantity,
-      unitPrice: cell.product!.currentPrice,
-      subtotal: cell.product!.currentPrice * cell.quantity,
-      status: 'pending'
-    }));
-
-    // Obtener información de la tienda para el pedido
     const selectedStore = stores.find((s) => s.id === selectedStoreId);
 
-    // Actualizar el pedido
+    const orderPayload = {
+      storeId: selectedStoreId,
+      storeName: selectedStore?.name,
+      storeAddress: selectedStore?.address,
+      salespersonId: selectedSellerId,
+      vendorNumber: '2F318',
+      items: selectedItems.map((cell) => ({
+        productId: cell.productId!,
+        sku: cell.product.sku,
+        productName: cell.product.name,
+        quantity: cell.quantity,
+        price: cell.product.currentPrice,
+      })),
+      subtotal,
+      tax,
+      total,
+    };
+
+    // Estrategia sencilla: eliminar el pedido pendiente y recrearlo con los nuevos datos
+    try {
+      await ordersApi.deleteOrder(editingOrder.id);
+    } catch (e) {
+      console.error('[CreateOrderDialog] No se pudo eliminar el pedido antes de actualizarlo', e);
+    }
+
+    const apiResult = await ordersApi.createOrder(orderPayload);
+    if (!apiResult || apiResult.orderId == null || apiResult.orderId === '') {
+      toast.error(translate('errorProcessOrder'));
+      setIsLoading(false);
+      return;
+    }
+
+    const newOrderId = String(apiResult.orderId);
+    const newInvoiceId = apiResult.invoiceId ? String(apiResult.invoiceId) : `invoice_${Date.now()}`;
+
+    const orderItems: OrderItem[] = selectedItems.map((cell, index) => ({
+      id: `item_${newOrderId}_${index}`,
+      orderId: newOrderId,
+      productId: cell.productId!,
+      quantity: cell.quantity,
+      unitPrice: cell.product.currentPrice,
+      subtotal: cell.product.currentPrice * cell.quantity,
+      status: 'pending',
+    }));
+
+    const currentUser = getFromLocalStorage('current-user');
+    const invoiceItems = selectedItems.map((cell, index) => ({
+      id: `inv_item_${newInvoiceId}_${index}`,
+      billId: newInvoiceId,
+      productId: cell.productId!,
+      quantity: cell.quantity,
+      unitPrice: cell.product.currentPrice,
+      subtotal: cell.product.currentPrice * cell.quantity,
+    }));
+
     const updatedOrder: Order = {
       ...editingOrder,
+      id: newOrderId,
       storeId: selectedStoreId,
       storeName: selectedStore?.name,
       salespersonId: selectedSellerId,
       planogramId: activePlanogram!.id,
-      subtotal: subtotal,
-      total: total,
-      notes: notes,
+      subtotal,
+      total,
+      notes,
       updatedAt: new Date(),
-      items: orderItems
+      items: orderItems,
     };
 
-    // Guardar el pedido actualizado
-    const orders = getFromLocalStorage('app-orders') || [];
-    const orderIndex = orders.findIndex((o: Order) => o.id === editingOrder.id);
-    if (orderIndex !== -1) {
-      orders[orderIndex] = updatedOrder;
-      setToLocalStorage('app-orders', orders);
-    }
-
-    // Actualizar la factura asociada
-    const invoices = getFromLocalStorage('app-invoices') || [];
-    const invoiceIndex = invoices.findIndex((inv: Invoice) => inv.orderId === editingOrder.id);
-    
-    if (invoiceIndex !== -1) {
-      const existingInvoice = invoices[invoiceIndex];
-      const currentUser = getFromLocalStorage('current-user');
-      
-      const updatedInvoiceItems = selectedItems.map((cell, index) => ({
-        id: `inv_item_${existingInvoice.id}_${index}`,
-        invoiceId: existingInvoice.id,
-        productId: cell.productId!,
-        quantity: cell.quantity,
-        unitPrice: cell.product!.currentPrice,
-        subtotal: cell.product!.currentPrice * cell.quantity
-      }));
-
-      const updatedInvoice: Invoice = {
-        ...existingInvoice,
-        storeId: selectedStoreId,
-        sellerId: selectedSellerId,
-        subtotal: subtotal,
-        taxes: subtotal * 0.21,
-        total: subtotal * 1.21,
-        updatedAt: new Date(),
-        items: updatedInvoiceItems
-      };
-
-      invoices[invoiceIndex] = updatedInvoice;
-      setToLocalStorage('app-invoices', invoices);
-
-      setCreatedInvoice(updatedInvoice);
-    }
+    const updatedInvoice: Invoice = {
+      id: newInvoiceId,
+      invoiceNumber: `FAC-${new Date().getFullYear()}-${newInvoiceId.slice(-4).padStart(4, '0')}`,
+      orderId: newOrderId,
+      storeId: selectedStoreId,
+      sellerId: selectedSellerId,
+      status: 'draft',
+      generationType: 'automatic',
+      subtotal,
+      taxes: subtotal * 0.21,
+      total: subtotal * 1.21,
+      issueDate: new Date(),
+      dueDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+      createdAt: editingOrder.createdAt,
+      updatedAt: new Date(),
+      createdBy: currentUser?.id || '1',
+      items: invoiceItems,
+    };
 
     setCreatedOrder(updatedOrder);
-    setCreatedOrderId(editingOrder.id);
-    setCreatedInvoiceId(invoices[invoiceIndex]?.id || '');
-    
+    setCreatedOrderId(newOrderId);
+    setCreatedInvoice(updatedInvoice);
+    setCreatedInvoiceId(newInvoiceId);
+
     setIsLoading(false);
     toast.success(translate('orderAndInvoiceUpdated'));
     onOrderCreated();
@@ -706,10 +741,10 @@ export function CreateOrderDialog({ onClose, onOrderCreated, editingOrder }: Cre
                     </div>
                     <div className="text-right flex-shrink-0 ml-4">
                       <p className="font-medium text-gray-900 whitespace-nowrap">
-                        {cell.quantity} × €{cell.product!.currentPrice.toFixed(2)}
+                        {cell.quantity} × ${cell.product!.currentPrice.toFixed(2)}
                       </p>
                       <p className="text-sm text-gray-600 whitespace-nowrap">
-                        {translate('subtotal')}: €{(cell.quantity * cell.product!.currentPrice).toFixed(2)}
+                        {translate('subtotal')}: ${(cell.quantity * cell.product!.currentPrice).toFixed(2)}
                       </p>
                     </div>
                   </div>
@@ -720,15 +755,15 @@ export function CreateOrderDialog({ onClose, onOrderCreated, editingOrder }: Cre
               <div className="mt-6 pt-6 border-t space-y-2">
                 <div className="flex justify-between text-gray-600">
                   <span>{translate('subtotal')}:</span>
-                  <span>€{calculateSubtotal().toFixed(2)}</span>
+                  <span>${calculateSubtotal().toFixed(2)}</span>
                 </div>
                 <div className="flex justify-between text-gray-600">
                   <span>{translate('iva21')}:</span>
-                  <span>€{(calculateSubtotal() * 0.21).toFixed(2)}</span>
+                  <span>${(calculateSubtotal() * 0.21).toFixed(2)}</span>
                 </div>
                 <div className="flex justify-between text-lg font-bold text-gray-900 pt-2 border-t">
                   <span>{translate('totalCol')}:</span>
-                  <span>€{(calculateTotal() * 1.21).toFixed(2)}</span>
+                  <span>${(calculateTotal() * 1.21).toFixed(2)}</span>
                 </div>
               </div>
             </CardContent>
@@ -942,7 +977,7 @@ export function CreateOrderDialog({ onClose, onOrderCreated, editingOrder }: Cre
                                   ? 'bg-green-50 border-green-500 text-green-900' 
                                   : 'bg-white border-blue-400 text-gray-600'
                               }`}
-                              title={`${cell.product!.name}\nPrecio: €${cell.product!.currentPrice.toFixed(2)}\nCelda: ${cellRef}`}
+                              title={`${cell.product!.name}\nPrecio: $${cell.product!.currentPrice.toFixed(2)}\nCelda: ${cellRef}`}
                             />
                           </div>
                         </div>
@@ -987,16 +1022,16 @@ export function CreateOrderDialog({ onClose, onOrderCreated, editingOrder }: Cre
                 <div className="space-y-1">
                   <div className="flex items-center gap-4 text-sm">
                     <span className="text-gray-600">{translate('subtotal')}:</span>
-                    <span className="font-medium">€{calculateSubtotal().toFixed(2)}</span>
+                    <span className="font-medium">${calculateSubtotal().toFixed(2)}</span>
                   </div>
                   <div className="flex items-center gap-4 text-sm">
                     <span className="text-gray-600">{translate('iva21')}:</span>
-                    <span className="font-medium">€{(calculateSubtotal() * 0.21).toFixed(2)}</span>
+                    <span className="font-medium">${(calculateSubtotal() * 0.21).toFixed(2)}</span>
                   </div>
                   <div className="flex items-center gap-4 pt-2 border-t">
                     <span className="font-bold text-gray-900">Total:</span>
                     <span className="font-bold text-2xl text-blue-600">
-                      €{(calculateTotal() * 1.21).toFixed(2)}
+                      ${(calculateTotal() * 1.21).toFixed(2)}
                     </span>
                   </div>
                 </div>

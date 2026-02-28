@@ -157,10 +157,10 @@ export const PlanogramManagement: React.FC<PlanogramManagementProps> = ({ onBack
     setShowViewDialog(true);
   };
 
-  const handlePlanogramCreated = () => {
-    // Recargar datos después de crear un planograma
+  const handlePlanogramCreated = (createdName?: string) => {
     loadData();
     setShowCreateDialog(false);
+    if (createdName) setSearchTerm(createdName);
   };
 
   const handlePlanogramUpdated = () => {

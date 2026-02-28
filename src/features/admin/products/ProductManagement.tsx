@@ -107,6 +107,8 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
   const [showCategoryDialog, setShowCategoryDialog] = useState(false);
   const [editingCategory, setEditingCategory] = useState<Category | null>(null);
   const [categoryName, setCategoryName] = useState('');
+  const [brandSearchTerm, setBrandSearchTerm] = useState('');
+  const [categorySearchTerm, setCategorySearchTerm] = useState('');
 
   const [formData, setFormData] = useState<ProductFormData>({
     sku: '',
@@ -285,6 +287,8 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
           });
         }
         toast.success(translate('productCreated'));
+        setSearchTerm(created.name);
+        setCurrentPage(1);
       }
       resetForm();
       setShowAddDialog(false);
@@ -414,6 +418,7 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
         const created = await brandsApi.create({ name });
         setBrands((prev) => [...prev, created]);
         toast.success(translate('brandCreated'));
+        setBrandSearchTerm(created.name);
       }
       setBrandName('');
       setEditingBrand(null);
@@ -438,6 +443,7 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
         const created = await categoriesApi.create({ name });
         setCategories((prev) => [...prev, created]);
         toast.success(translate('categoryCreated'));
+        setCategorySearchTerm(created.name);
       }
       setCategoryName('');
       setEditingCategory(null);
@@ -992,11 +998,23 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
                     {translate('addBrand')}
                   </button>
                 </div>
+                <div className="px-3 py-1.5 border-b border-gray-200 bg-white">
+                  <div className="flex items-center gap-2 w-[90px] h-6 rounded-md border border-gray-200 bg-gray-50 px-2 transition-colors focus-within:ring-1 focus-within:ring-indigo-400 focus-within:border-indigo-400 focus-within:bg-white">
+                    <Search className="h-2.5 w-2.5 text-gray-400 flex-shrink-0" />
+                    <input
+                      type="text"
+                      placeholder={translate('search')}
+                      value={brandSearchTerm}
+                      onChange={(e) => setBrandSearchTerm(e.target.value)}
+                      className="flex-1 min-w-0 h-full border-0 bg-transparent p-0 text-[10px] text-gray-700 placeholder:text-gray-400 focus:outline-none"
+                    />
+                  </div>
+                </div>
                 <div className="divide-y divide-gray-200 bg-white">
-                  {brands.length === 0 ? (
-                    <p className="px-4 py-8 text-sm text-gray-500 text-center">{translate('noBrands')}</p>
+                  {(brandSearchTerm.trim() ? brands.filter(b => b.name.toLowerCase().includes(brandSearchTerm.trim().toLowerCase())) : brands).length === 0 ? (
+                    <p className="px-4 py-8 text-sm text-gray-500 text-center">{brandSearchTerm.trim() ? translate('noResults') : translate('noBrands')}</p>
                   ) : (
-                    brands.map((b) => (
+                    (brandSearchTerm.trim() ? brands.filter(b => b.name.toLowerCase().includes(brandSearchTerm.trim().toLowerCase())) : brands).map((b) => (
                       <div key={b.id} className="flex items-center justify-between px-4 py-3 hover:bg-gray-50 group">
                         <span className="text-sm font-medium text-gray-900">{b.name}</span>
                         <div className="flex items-center gap-1 opacity-70 group-hover:opacity-100">
@@ -1044,11 +1062,23 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
                     {translate('addCategory')}
                   </button>
                 </div>
+                <div className="px-3 py-1.5 border-b border-gray-200 bg-white">
+                  <div className="flex items-center gap-2 w-[90px] h-6 rounded-md border border-gray-200 bg-gray-50 px-2 transition-colors focus-within:ring-1 focus-within:ring-indigo-400 focus-within:border-indigo-400 focus-within:bg-white">
+                    <Search className="h-2.5 w-2.5 text-gray-400 flex-shrink-0" />
+                    <input
+                      type="text"
+                      placeholder={translate('search')}
+                      value={categorySearchTerm}
+                      onChange={(e) => setCategorySearchTerm(e.target.value)}
+                      className="flex-1 min-w-0 h-full border-0 bg-transparent p-0 text-[10px] text-gray-700 placeholder:text-gray-400 focus:outline-none"
+                    />
+                  </div>
+                </div>
                 <div className="divide-y divide-gray-200 bg-white">
-                  {categories.length === 0 ? (
-                    <p className="px-4 py-8 text-sm text-gray-500 text-center">{translate('noCategories')}</p>
+                  {(categorySearchTerm.trim() ? categories.filter(c => c.name.toLowerCase().includes(categorySearchTerm.trim().toLowerCase())) : categories).length === 0 ? (
+                    <p className="px-4 py-8 text-sm text-gray-500 text-center">{categorySearchTerm.trim() ? translate('noResults') : translate('noCategories')}</p>
                   ) : (
-                    categories.map((c) => (
+                    (categorySearchTerm.trim() ? categories.filter(c => c.name.toLowerCase().includes(categorySearchTerm.trim().toLowerCase())) : categories).map((c) => (
                       <div key={c.id} className="flex items-center justify-between px-4 py-3 hover:bg-gray-50 group">
                         <span className="text-sm font-medium text-gray-900">{c.name}</span>
                         <div className="flex items-center gap-1 opacity-70 group-hover:opacity-100">

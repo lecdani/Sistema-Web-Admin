@@ -325,7 +325,7 @@ export function InvoiceManagement({ onBack }: InvoiceManagementProps) {
               <div>
                 <p className="text-xs font-medium text-gray-500">{translate('totalAmountLabel')}</p>
                 <p className="text-2xl font-bold text-gray-900 mt-1">
-                  €{totalAmount.toFixed(2)}
+                  ${totalAmount.toFixed(2)}
                 </p>
               </div>
               <div className="p-2.5 bg-green-100 rounded-lg flex items-center justify-center">
@@ -343,7 +343,7 @@ export function InvoiceManagement({ onBack }: InvoiceManagementProps) {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-xs font-medium text-gray-500">{translate('amountCollected')}</p>
-                <p className="text-xl font-bold text-green-600 mt-1">€{paidAmount.toFixed(2)}</p>
+                <p className="text-xl font-bold text-green-600 mt-1">${paidAmount.toFixed(2)}</p>
               </div>
               <CreditCard className="h-5 w-5 text-green-600" />
             </div>
@@ -355,7 +355,7 @@ export function InvoiceManagement({ onBack }: InvoiceManagementProps) {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-xs font-medium text-gray-500">{translate('amountPending')}</p>
-                <p className="text-xl font-bold text-amber-600 mt-1">€{pendingAmount.toFixed(2)}</p>
+                <p className="text-xl font-bold text-amber-600 mt-1">${pendingAmount.toFixed(2)}</p>
               </div>
               <AlertCircle className="h-5 w-5 text-amber-600" />
             </div>
@@ -488,7 +488,7 @@ export function InvoiceManagement({ onBack }: InvoiceManagementProps) {
                     <TableCell>
                       {getGenerationIcon(invoice.generationType)}
                     </TableCell>
-                    <TableCell>€{invoice.total.toFixed(2)}</TableCell>
+                    <TableCell>${invoice.total.toFixed(2)}</TableCell>
                     <TableCell>
                       <div className="flex items-center gap-2">
                         <Button
@@ -595,15 +595,15 @@ export function InvoiceManagement({ onBack }: InvoiceManagementProps) {
                   <CardContent className="space-y-3">
                     <div className="flex justify-between">
                       <span className="text-gray-600">{translate('subtotal')}:</span>
-                      <span>€{selectedInvoice.subtotal.toFixed(2)}</span>
+                      <span>${selectedInvoice.subtotal.toFixed(2)}</span>
                     </div>
                     <div className="flex justify-between">
                       <span className="text-gray-600">{translate('taxes')}:</span>
-                      <span>€{selectedInvoice.taxes.toFixed(2)}</span>
+                      <span>${selectedInvoice.taxes.toFixed(2)}</span>
                     </div>
                     <div className="flex justify-between font-bold text-lg">
                       <span>{translate('totalCol')}:</span>
-                      <span>€{selectedInvoice.total.toFixed(2)}</span>
+                      <span>${selectedInvoice.total.toFixed(2)}</span>
                     </div>
                     <div className="flex justify-between">
                       <span className="text-gray-600">{translate('productsCount')}:</span>
@@ -640,8 +640,8 @@ export function InvoiceManagement({ onBack }: InvoiceManagementProps) {
                             <TableCell className="font-medium">{item.productName}</TableCell>
                             <TableCell>{item.productBrand}</TableCell>
                             <TableCell>{item.quantity}</TableCell>
-                            <TableCell>€{item.unitPrice.toFixed(2)}</TableCell>
-                            <TableCell>€{item.subtotal.toFixed(2)}</TableCell>
+                            <TableCell>${item.unitPrice.toFixed(2)}</TableCell>
+                            <TableCell>${item.subtotal.toFixed(2)}</TableCell>
                           </TableRow>
                         ))}
                       </TableBody>

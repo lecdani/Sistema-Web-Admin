@@ -1,282 +1,296 @@
 import React, { useState, useEffect } from 'react';
-import { X, Package, Grid3x3, Info } from 'lucide-react';
+import { Loader2 } from 'lucide-react';
 import { Badge } from '@/shared/components/base/Badge';
 import { Order, Planogram, Distribution, Product } from '@/shared/types';
+import { planogramsApi } from '@/shared/services/planograms-api';
+import { distributionsApi } from '@/shared/services/distributions-api';
+import { productsApi } from '@/shared/services/products-api';
+import { ordersApi } from '@/shared/services/orders-api';
+import { histpricesApi } from '@/shared/services/histprices-api';
 import { getFromLocalStorage } from '@/shared/services/database';
 
 interface OrderPlanogramViewProps {
   order: Order;
+  onViewOrder?: () => void;
 }
 
-interface GridCell {
-  x: number;
-  y: number;
-  product: Product | null;
-  quantity: number; // Cantidad pedida de este producto
+interface ProductPosition {
+  row: number;
+  col: number;
+  productId: string;
+  productName: string;
+  sku: string;
+  toOrder: number;
+  price: number;
 }
-
-const GRID_SIZE = 10;
 
 export const OrderPlanogramView: React.FC<OrderPlanogramViewProps> = ({ order }) => {
-  const [grid, setGrid] = useState<GridCell[][]>([]);
-  const [planogram, setPlanogram] = useState<Planogram | null>(null);
+  const [grid, setGrid] = useState<ProductPosition[]>([]);
+  const [planogramName, setPlanogramName] = useState<string | null>(null);
+  const [planogramDescription, setPlanogramDescription] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
-    loadPlanogramData();
-  }, [order]);
+    let mounted = true;
 
-  const loadPlanogramData = () => {
-    try {
+    (async () => {
       setLoading(true);
-
-      // Cargar el planograma
-      const planograms = getFromLocalStorage('app-planograms') || [];
-      const orderPlanogram = planograms.find((p: Planogram) => p.id === order.planogramId);
-      
-      if (!orderPlanogram) {
+      setLoadError(null);
+      const orderId = String(order.id ?? (order as any).backendOrderId ?? '');
+      if (!orderId) {
+        setLoadError('Pedido sin ID');
         setLoading(false);
         return;
       }
-
-      setPlanogram(orderPlanogram);
-
-      // Cargar distribuciones del planograma
-      const distributions = getFromLocalStorage('app-distributions') || [];
-      const planogramDistributions = distributions.filter(
-        (d: Distribution) => d.planogramId === orderPlanogram.id
-      );
-
-      // Cargar productos
-      const products = getFromLocalStorage('app-products') || [];
-
-      // Inicializar grilla vacía
-      const initialGrid: GridCell[][] = [];
-      for (let x = 0; x < GRID_SIZE; x++) {
-        initialGrid[x] = [];
-        for (let y = 0; y < GRID_SIZE; y++) {
-          initialGrid[x][y] = { x, y, product: null, quantity: 0 };
+      try {
+        let apiOrder: any = null;
+        try {
+          apiOrder = await ordersApi.getOrderById(orderId);
+        } catch (_) {
+          apiOrder = null;
         }
+        if (!apiOrder && (order as any).backendOrderId != null) {
+          try {
+            apiOrder = await ordersApi.getOrderById(String((order as any).backendOrderId));
+          } catch (_) {}
+        }
+        if (!mounted) return;
+
+        if (!apiOrder) {
+          setLoadError('Pedido no encontrado');
+          setLoading(false);
+          return;
+        }
+
+
+        let planogramsData: Planogram[] = [];
+        try {
+          planogramsData = await planogramsApi.fetchAll();
+        } catch (_) {
+          planogramsData = (getFromLocalStorage('app-planograms') || []) as Planogram[];
+        }
+        if (!mounted) return;
+
+        const activePlan =
+          planogramsData.find((p: Planogram) => p.isActive) ||
+          (order.planogramId && planogramsData.find((p: Planogram) => p.id === order.planogramId)) ||
+          planogramsData[0];
+        if (!activePlan) {
+          setLoadError('No hay planograma activo. Activa uno en Planogramas.');
+          setLoading(false);
+          return;
+        }
+        setPlanogramName(activePlan.name ?? null);
+        setPlanogramDescription(activePlan.description ?? null);
+
+        let distList: Distribution[] = [];
+        try {
+          distList = await distributionsApi.getByPlanogram(activePlan.id);
+        } catch (_) {
+          const allDist = (getFromLocalStorage('app-distributions') || []) as Distribution[];
+          distList = allDist.filter((d: Distribution) => d.planogramId === activePlan.id);
+        }
+        if (!mounted) return;
+
+        let productsData: Product[] = [];
+        try {
+          productsData = (await productsApi.fetchAll()) as Product[];
+        } catch (_) {
+          productsData = (getFromLocalStorage('app-products') || []) as Product[];
+        }
+        if (!mounted) return;
+
+        const productMap = new Map<string, Product>();
+        productsData.forEach((p) => {
+          productMap.set(String(p.id), p);
+          if (typeof p.id === 'string' && /^\d+$/.test(p.id)) productMap.set(String(Number(p.id)), p);
+        });
+        const getProduct = (id: string) => productMap.get(id) || productMap.get(String(Number(id)));
+
+        const orderItemsByProductId = new Map<string, { productName: string; sku: string; quantity: number; price: number }>();
+        const items = apiOrder.items ?? [];
+        for (const item of items) {
+          const id = String(item.productId ?? item.ProductId ?? item.product_id ?? '');
+          if (id) {
+            let price = Number(item.price ?? item.unitPrice ?? 0) || 0;
+            if (!price) {
+              try {
+                const latest = await histpricesApi.getLatest(id);
+                if (latest?.price != null) price = latest.price;
+              } catch (_) {}
+            }
+            const name = (item.productName ?? item.sku ?? getProduct(id)?.name ?? '').trim();
+            const sku = item.sku ?? getProduct(id)?.sku ?? '';
+            const qty = item.quantity ?? item.toOrder ?? item.Quantity ?? 0;
+            orderItemsByProductId.set(id, {
+              productName: name,
+              sku: sku || name,
+              quantity: Number(qty) || 0,
+              price,
+            });
+          }
+        }
+
+        const planogramGrid: ProductPosition[] = [];
+        for (let row = 0; row < 10; row++) {
+          for (let col = 0; col < 10; col++) {
+            const dist = distList.find((d) => d.xPosition === row && d.yPosition === col);
+            const product = dist ? getProduct(dist.productId) : null;
+            const orderItem = product
+              ? orderItemsByProductId.get(product.id) ?? orderItemsByProductId.get(String(Number(product.id)))
+              : null;
+            planogramGrid.push({
+              row,
+              col,
+              productId: product?.id ?? '',
+              productName: orderItem?.productName ?? product?.name ?? product?.sku ?? '',
+              sku: orderItem?.sku ?? product?.sku ?? '',
+              toOrder: orderItem?.quantity ?? 0,
+              price: orderItem?.price ?? product?.currentPrice ?? 0,
+            });
+          }
+        }
+        if (mounted) setGrid(planogramGrid);
+      } catch (e) {
+        console.error('Error cargando planograma:', e);
+        if (mounted) setLoadError((e as Error)?.message ?? 'Error al cargar');
+      } finally {
+        if (mounted) setLoading(false);
       }
+    })();
+    return () => { mounted = false; };
+  }, [order.id, order.planogramId]);
 
-      // Cargar productos del planograma y sus cantidades pedidas
-      planogramDistributions.forEach((dist: Distribution) => {
-        const product = products.find((p: Product) => p.id === dist.productId);
-        if (product && dist.xPosition < GRID_SIZE && dist.yPosition < GRID_SIZE) {
-          // Buscar la cantidad pedida de este producto
-          const orderItem = order.items?.find(item => item.productId === product.id);
-          
-          initialGrid[dist.xPosition][dist.yPosition] = {
-            x: dist.xPosition,
-            y: dist.yPosition,
-            product: product,
-            quantity: orderItem?.quantity || 0
-          };
-        }
-      });
-
-      setGrid(initialGrid);
-      setLoading(false);
-    } catch (error) {
-      console.error('Error cargando planograma:', error);
-      setLoading(false);
-    }
-  };
-
-  const getTotalItems = () => {
-    return order.items?.reduce((sum, item) => sum + item.quantity, 0) || 0;
-  };
-
-  const getProductsInGrid = (): Set<string> => {
-    const productIds = new Set<string>();
-    grid.forEach(row => {
-      row.forEach(cell => {
-        if (cell.product && cell.quantity > 0) {
-          productIds.add(cell.product.id);
-        }
-      });
-    });
-    return productIds;
+  const getCellStyle = (item: ProductPosition): React.CSSProperties => {
+    if (!item.productId) return { backgroundColor: '#94a3b8', borderColor: '#64748b', borderWidth: 1, borderStyle: 'solid' };
+    if (item.toOrder > 0) return { backgroundColor: '#eff6ff', borderColor: '#93c5fd', borderWidth: 1, borderStyle: 'solid' };
+    return { backgroundColor: '#f1f5f9', borderColor: '#e2e8f0', borderWidth: 1, borderStyle: 'solid' };
   };
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-full py-12">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
-          <p className="text-gray-500">Cargando planograma...</p>
+      <div className="min-h-[280px] bg-slate-50 flex items-center justify-center rounded-lg">
+        <div className="flex flex-col items-center gap-3">
+          <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
+          <p className="text-sm text-slate-600">Cargando planograma...</p>
         </div>
       </div>
     );
   }
 
-  if (!planogram) {
+  if (loadError) {
     return (
-      <div className="flex items-center justify-center h-full py-12">
-        <div className="text-center">
-          <Grid3x3 className="h-16 w-16 text-gray-300 mx-auto mb-4" />
-          <h3 className="text-lg font-medium text-gray-900 mb-2">
-            Planograma no encontrado
-          </h3>
-          <p className="text-gray-500">
-            El planograma asociado a este pedido no está disponible
-          </p>
+      <div className="min-h-[280px] bg-slate-50 flex items-center justify-center rounded-lg">
+        <div className="text-center px-4">
+          <p className="text-slate-600 mb-2">{loadError}</p>
+          <p className="text-xs text-slate-500">Activa un planograma en la sección Planogramas para ver el pedido en la grilla.</p>
         </div>
       </div>
     );
   }
+
+  const totalToOrder = grid.reduce((s, i) => s + i.toOrder, 0);
+  const totalValue = grid.reduce((s, i) => s + i.toOrder * i.price, 0);
+  const productsWithQty = grid.filter((i) => i.productId && i.toOrder > 0).length;
+
+  // Celdas un poco más grandes para buena lectura
+  const cellSize = 56;
+  const gap = 8;
+  const gridTotal = 10 * cellSize + 9 * gap;
 
   return (
-    <div className="flex flex-col h-full">
-      {/* Header con información del planograma y pedido */}
-      <div className="bg-gradient-to-br from-indigo-50 to-blue-50 rounded-xl p-4 mb-4 shadow-sm border border-indigo-100">
+    <div className="bg-slate-50">
+      <div className="bg-white border-b border-slate-200 px-4 py-3 sticky top-0 z-10">
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-3">
-            <Badge className="bg-blue-100 text-blue-800 text-xs px-2 py-0.5">
-              {planogram.name} - v{planogram.version}
-            </Badge>
-            {planogram.description && (
-              <span className="text-sm text-gray-600">{planogram.description}</span>
-            )}
+            <div>
+              <h2 className="text-slate-900 text-sm">{planogramName ?? 'Planograma'}</h2>
+              {planogramDescription && (
+                <p className="text-xs text-slate-500 mt-0.5">{planogramDescription}</p>
+              )}
+            </div>
           </div>
+          <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200">Solo lectura</Badge>
         </div>
-
-        <div className="flex items-center gap-3">
-          {/* Info del pedido */}
-          <div className="flex items-center gap-4 px-3 py-1.5 bg-white rounded-lg border border-indigo-200 shadow-sm flex-1">
-            <div className="text-center">
-              <div className="text-base font-bold text-blue-600">{order.po}</div>
-              <div className="text-[10px] text-gray-600">PO Number</div>
-            </div>
-            <div className="h-7 w-px bg-indigo-200"></div>
-            <div className="text-center">
-              <div className="text-base font-bold text-purple-600">
-                {new Date(order.createdAt).toLocaleDateString('es-ES')}
-              </div>
-              <div className="text-[10px] text-gray-600">Fecha Pedido</div>
-            </div>
+        <div className="grid grid-cols-3 gap-2">
+          <div className="bg-slate-50 rounded-lg p-2 text-center">
+            <p className="text-xs text-slate-500 mb-0.5">Productos</p>
+            <p className="text-sm text-slate-900">{productsWithQty}</p>
           </div>
-
-          {/* Estadísticas del pedido */}
-          <div className="flex items-center gap-4 px-3 py-1.5 bg-white rounded-lg border border-indigo-200 shadow-sm">
-            <div className="text-center">
-              <div className="text-base font-bold text-green-600">{getProductsInGrid().size}</div>
-              <div className="text-[10px] text-gray-600">Productos Pedidos</div>
-            </div>
-            <div className="h-7 w-px bg-indigo-200"></div>
-            <div className="text-center">
-              <div className="text-base font-bold text-orange-600">{getTotalItems()}</div>
-              <div className="text-[10px] text-gray-600">Unidades Totales</div>
-            </div>
-            <div className="h-7 w-px bg-indigo-200"></div>
-            <div className="text-center">
-              <div className="text-base font-bold text-blue-600">€{order.total.toFixed(2)}</div>
-              <div className="text-[10px] text-gray-600">Total</div>
-            </div>
+          <div className="bg-blue-50 rounded-lg p-2 text-center">
+            <p className="text-xs text-blue-600 mb-0.5">Unidades</p>
+            <p className="text-sm text-blue-900">{totalToOrder}</p>
+          </div>
+          <div className="bg-green-50 rounded-lg p-2 text-center">
+            <p className="text-xs text-green-600 mb-0.5">Total</p>
+            <p className="text-sm text-green-900">${totalValue.toFixed(2)}</p>
           </div>
         </div>
       </div>
 
-      {/* Grilla del planograma con cantidades */}
-      <div className="flex-1 overflow-auto bg-gradient-to-br from-gray-50 to-slate-50 rounded-xl p-6 shadow-inner">
-        <div className="flex items-center justify-between mb-4">
-          <div className="flex items-center gap-3">
-            <span className="text-sm font-semibold text-gray-900">Visualización del Pedido</span>
-            <span className="text-sm text-gray-500">Las cantidades se muestran en cada celda</span>
-          </div>
-          <div className="flex items-center gap-3 text-sm">
-            <div className="flex items-center gap-1.5">
-              <div className="w-4 h-4 bg-green-200 border border-green-600 rounded"></div>
-              <span>Pedido realizado</span>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <div className="w-4 h-4 bg-gray-200 border border-gray-400 rounded"></div>
-              <span>No pedido</span>
-            </div>
-          </div>
-        </div>
-
-        <div className="flex items-center justify-center min-h-full">
-          <div className="inline-block border-4 border-gray-800 bg-white shadow-2xl rounded-xl overflow-hidden">
-            {/* Header con letras (A-J) */}
-            <div className="flex">
-              <div className="w-16 h-12 bg-gray-400 border-r-4 border-b-4 border-gray-800 flex items-center justify-center font-bold text-gray-900"></div>
-              {[...Array(GRID_SIZE)].map((_, i) => (
-                <div key={i} className="w-24 h-12 bg-gray-400 border-r-2 border-b-4 border-gray-800 flex items-center justify-center font-bold text-gray-900 text-lg">
-                  {String.fromCharCode(65 + i)}
-                </div>
-              ))}
-            </div>
-
-            {/* Filas de la grilla */}
-            {grid.map((row, x) => (
-              <div key={x} className="flex">
-                {/* Número de fila */}
-                <div className="w-16 h-20 bg-gray-400 border-r-4 border-b-2 border-gray-800 flex items-center justify-center font-bold text-gray-900 text-lg">
-                  {x + 1}
-                </div>
-
-                {/* Celdas */}
-                {row.map((cell, y) => {
-                  const cellRef = `${String.fromCharCode(65 + y)}${x + 1}`;
-                  const isOrdered = cell.quantity > 0;
-                  
-                  return (
-                    <div
-                      key={`${x}-${y}`}
-                      className={`w-24 h-20 border-r-2 border-b-2 flex flex-col items-center justify-center relative transition-all ${
-                        cell.product
-                          ? isOrdered
-                            ? 'bg-green-200 hover:bg-green-300 border-green-600 border-2'
-                            : 'bg-gray-200 hover:bg-gray-300 border-gray-400'
-                          : 'bg-white hover:bg-gray-50 border-gray-400 border-dashed'
-                      }`}
-                      title={
-                        cell.product
-                          ? `${cell.product.name} (${cell.product.sku})\nCelda ${cellRef}\nCantidad: ${cell.quantity} unidades${!isOrdered ? ' - NO PEDIDO' : ''}`
-                          : `Celda ${cellRef} - Vacía`
-                      }
+      <div className="px-4 py-4">
+        <p className="text-sm text-slate-600 mb-3">Vista del planograma según el pedido (solo lectura).</p>
+        <div className="bg-white rounded-xl p-3 shadow-sm border border-slate-200 overflow-x-auto">
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: `repeat(10, ${cellSize}px)`,
+              gap: `${gap}px`,
+              width: `${gridTotal}px`,
+              margin: '0 auto',
+            }}
+          >
+            {grid.map((item) => (
+              <div
+                key={`${item.row}-${item.col}`}
+                style={{
+                  width: cellSize,
+                  height: cellSize,
+                  borderRadius: 8,
+                  ...getCellStyle(item),
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  padding: 2,
+                  textAlign: 'center',
+                  minHeight: 0,
+                  overflow: 'hidden',
+                }}
+              >
+                {item.productId ? (
+                  <>
+                    <span
+                      style={{
+                        fontSize: 10,
+                        lineHeight: 1.25,
+                        fontWeight: 500,
+                        color: '#1e293b',
+                        wordBreak: 'break-word',
+                        overflow: 'hidden',
+                        display: '-webkit-box',
+                        WebkitLineClamp: 2,
+                        WebkitBoxOrient: 'vertical' as any,
+                        width: '100%',
+                      }}
+                      title={item.productName || item.sku}
                     >
-                      {cell.product ? (
-                        <div className="text-center w-full h-full flex flex-col justify-center p-2 relative">
-                          <div className={`font-bold truncate text-sm leading-tight mb-1 ${isOrdered ? 'text-green-800' : 'text-gray-600'}`}>
-                            {cell.product.sku}
-                          </div>
-                          <div className={`text-xs truncate leading-tight ${isOrdered ? 'text-green-700' : 'text-gray-500'}`}>
-                            {cell.product.name.split(' ').slice(0, 2).join(' ')}
-                          </div>
-                          
-                          {/* Badge con cantidad pedida */}
-                          {isOrdered ? (
-                            <div className="absolute -top-1.5 -right-1.5 bg-green-600 text-white rounded-full w-7 h-7 flex items-center justify-center shadow-lg font-bold text-xs">
-                              {cell.quantity}
-                            </div>
-                          ) : (
-                            <div className="absolute top-1 left-1 w-3 h-3 bg-gray-400 rounded-full shadow-md"></div>
-                          )}
-                        </div>
-                      ) : (
-                        <div className="text-gray-400 text-xs font-medium">
-                          {cellRef}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
+                      {item.productName || item.sku}
+                    </span>
+                    <span style={{ fontSize: 10, color: '#64748b', marginTop: 2 }}>${(item.price || 0).toFixed(2)}</span>
+                    {item.toOrder > 0 && (
+                      <span style={{ fontSize: 12, fontWeight: 600, color: '#1d4ed8', marginTop: 2 }}>{item.toOrder} u</span>
+                    )}
+                  </>
+                ) : null}
               </div>
             ))}
           </div>
         </div>
-      </div>
-
-      {/* Leyenda adicional */}
-      <div className="mt-4 p-3 bg-blue-50 rounded-lg border border-blue-200">
-        <div className="flex items-start gap-2">
-          <Info className="h-4 w-4 text-blue-600 mt-0.5 flex-shrink-0" />
-          <div className="text-sm text-blue-800">
-            <strong>Trazabilidad:</strong> Este planograma estaba activo cuando se realizó el pedido.
-            Los productos con número verde fueron pedidos, los grises estaban en el planograma pero no se pidieron.
-          </div>
+        <div className="mt-4 flex flex-wrap gap-4 text-xs text-slate-500">
+          <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-slate-400" />Sin cantidad</span>
+          <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-blue-50 border border-blue-300" />Con cantidad</span>
         </div>
       </div>
     </div>

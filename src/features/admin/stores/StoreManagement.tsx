@@ -194,8 +194,10 @@ export const StoreManagement: React.FC<StoreManagementProps> = ({ onBack }) => {
         await storesApi.update(editingStore.id, storeData);
         toast.success(translate('storeSaved'));
       } else {
-        await storesApi.create(storeData);
+        const created = await storesApi.create(storeData);
         toast.success(translate('storeCreated'));
+        setSearchTerm(created.name);
+        setCurrentPage(1);
       }
 
       loadStores();

@@ -73,8 +73,8 @@ export function InvoicePreview({ invoice, order, companyName = "TU EMPRESA" }: I
                 <td className="border-r-2 border-black px-3 py-2 text-sm">{item.quantity || 0}</td>
                 <td className="border-r-2 border-black px-3 py-2 text-sm">{item.productId.slice(0, 10)}</td>
                 <td className="border-r-2 border-black px-3 py-2 text-sm">{item.productName || 'N/A'}</td>
-                <td className="border-r-2 border-black px-3 py-2 text-right text-sm">€{(item.unitPrice || 0).toFixed(2)}</td>
-                <td className="px-3 py-2 text-right text-sm font-medium">€{(item.subtotal || 0).toFixed(2)}</td>
+                <td className="border-r-2 border-black px-3 py-2 text-right text-sm">${(item.unitPrice || 0).toFixed(2)}</td>
+                <td className="px-3 py-2 text-right text-sm font-medium">${(item.subtotal || 0).toFixed(2)}</td>
               </tr>
             ))}
             
@@ -96,7 +96,7 @@ export function InvoicePreview({ invoice, order, companyName = "TU EMPRESA" }: I
                 {order.items.reduce((sum, item) => sum + (item.quantity || 0), 0)} unidades
               </td>
               <td className="border-r-2 border-black px-3 py-3 text-right text-sm font-bold">TOTAL</td>
-              <td className="px-3 py-3 text-right text-lg font-bold">€{(invoice.totalAmount || 0).toFixed(2)}</td>
+              <td className="px-3 py-3 text-right text-lg font-bold">${(invoice.totalAmount || 0).toFixed(2)}</td>
             </tr>
           </tbody>
         </table>
@@ -110,7 +110,7 @@ export function InvoicePreview({ invoice, order, companyName = "TU EMPRESA" }: I
 
       {/* Footer Information */}
       <div className="text-xs text-gray-600 text-center mt-6">
-        <p>IVA: €{(invoice.taxAmount || 0).toFixed(2)} | Subtotal: €{(order.subtotal || 0).toFixed(2)}</p>
+        <p>IVA: ${(invoice.taxAmount || 0).toFixed(2)} | Subtotal: ${(order.subtotal || 0).toFixed(2)}</p>
         <p className="mt-2">Fecha de creación del pedido: {new Date(order.createdAt).toLocaleString('es-ES')}</p>
       </div>
     </div>

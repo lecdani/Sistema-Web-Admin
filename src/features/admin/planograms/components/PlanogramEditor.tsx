@@ -28,7 +28,7 @@ interface PlanogramEditorProps {
   planogram?: Planogram;
   /** Distribuciones actuales del planograma (para edición, desde API) */
   existingDistributions?: Distribution[];
-  onSave: () => void;
+  onSave?: (createdName?: string) => void;
   onCancel: () => void;
 }
 
@@ -237,6 +237,7 @@ export const PlanogramEditor: React.FC<PlanogramEditorProps> = ({
           }
         }
         toast.success(translate('planogramSaved'));
+        onSave?.();
       } else {
         const created = await planogramsApi.create({
           name: formData.name.trim(),
@@ -263,8 +264,8 @@ export const PlanogramEditor: React.FC<PlanogramEditorProps> = ({
           if (p.id !== created.id && p.isActive) await planogramsApi.toggleActive(p.id);
         }
         toast.success(translate('planogramCreated'));
+        onSave?.(created.name);
       }
-      onSave();
     } catch (err: any) {
       console.error('Error guardando planograma:', err);
       const msg = err?.data?.message ?? err?.message ?? translate('errorSavePlanogram');

@@ -1,9 +1,11 @@
 import React, { createContext, useContext, useState, useRef, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { Check, ChevronRight } from 'lucide-react';
 
 interface DropdownMenuContextType {
   open: boolean;
   setOpen: (open: boolean) => void;
+  triggerRef: React.MutableRefObject<HTMLElement | null>;
 }
 
 const DropdownMenuContext = createContext<DropdownMenuContextType | undefined>(undefined);
@@ -14,9 +16,10 @@ export interface DropdownMenuProps {
 
 export const DropdownMenu: React.FC<DropdownMenuProps> = ({ children }) => {
   const [open, setOpen] = useState(false);
+  const triggerRef = useRef<HTMLElement | null>(null);
 
   return (
-    <DropdownMenuContext.Provider value={{ open, setOpen }}>
+    <DropdownMenuContext.Provider value={{ open, setOpen, triggerRef }}>
       <div className="relative inline-block">{children}</div>
     </DropdownMenuContext.Provider>
   );
@@ -24,6 +27,11 @@ export const DropdownMenu: React.FC<DropdownMenuProps> = ({ children }) => {
 
 export interface DropdownMenuTriggerProps extends React.HTMLAttributes<HTMLElement> {
   asChild?: boolean;
+}
+
+function setRef<T>(ref: React.Ref<T> | undefined, value: T | null) {
+  if (typeof ref === 'function') ref(value);
+  else if (ref && typeof ref === 'object') (ref as React.MutableRefObject<T | null>).current = value;
 }
 
 export const DropdownMenuTrigger = React.forwardRef<HTMLElement, DropdownMenuTriggerProps>(
@@ -36,16 +44,21 @@ export const DropdownMenuTrigger = React.forwardRef<HTMLElement, DropdownMenuTri
       context.setOpen(!context.open);
     };
 
+    const mergedRef = (el: HTMLElement | null) => {
+      (context.triggerRef as React.MutableRefObject<HTMLElement | null>).current = el;
+      setRef(ref, el);
+    };
+
     if (asChild && React.isValidElement(children)) {
       return React.cloneElement(children as React.ReactElement, {
         onClick: handleClick,
-        ref,
+        ref: mergedRef,
       });
     }
 
     return (
       <button
-        ref={ref as any}
+        ref={mergedRef as any}
         onClick={handleClick}
         {...props}
       >
@@ -60,18 +73,22 @@ DropdownMenuTrigger.displayName = 'DropdownMenuTrigger';
 export interface DropdownMenuContentProps extends React.HTMLAttributes<HTMLDivElement> {
   align?: 'start' | 'center' | 'end';
   sideOffset?: number;
+  /** Si true, renderiza en portal con posición fija para no ser recortado por overflow de padres */
+  usePortal?: boolean;
 }
 
 export const DropdownMenuContent = React.forwardRef<HTMLDivElement, DropdownMenuContentProps>(
-  ({ className = '', children, align = 'start', sideOffset = 4, ...props }, ref) => {
+  ({ className = '', children, align = 'start', sideOffset = 4, usePortal = false, ...props }, ref) => {
     const context = useContext(DropdownMenuContext);
     const contentRef = useRef<HTMLDivElement>(null);
+    const [fixedPosition, setFixedPosition] = useState<{ top: number; left: number; width: number } | null>(null);
 
     if (!context) throw new Error('DropdownMenuContent must be used within DropdownMenu');
 
     useEffect(() => {
       const handleClickOutside = (event: MouseEvent) => {
-        if (contentRef.current && !contentRef.current.contains(event.target as Node)) {
+        const target = event.target as Node;
+        if (contentRef.current && !contentRef.current.contains(target) && context.triggerRef.current && !context.triggerRef.current.contains(target)) {
           context.setOpen(false);
         }
       };
@@ -85,6 +102,19 @@ export const DropdownMenuContent = React.forwardRef<HTMLDivElement, DropdownMenu
       };
     }, [context, context.open]);
 
+    useEffect(() => {
+      if (!context.open || !usePortal || !context.triggerRef.current) {
+        setFixedPosition(null);
+        return;
+      }
+      const rect = context.triggerRef.current.getBoundingClientRect();
+      const width = Math.max(rect.width, 1);
+      let left = rect.left;
+      if (align === 'center') left = rect.left + rect.width / 2;
+      else if (align === 'end') left = rect.right;
+      setFixedPosition({ top: rect.bottom + sideOffset, left, width });
+    }, [context.open, usePortal, sideOffset, align]);
+
     if (!context.open) return null;
 
     const alignClasses = {
@@ -93,16 +123,32 @@ export const DropdownMenuContent = React.forwardRef<HTMLDivElement, DropdownMenu
       end: 'right-0',
     };
 
-    return (
+    const contentNode = (
       <div
         ref={contentRef}
-        className={`absolute z-50 min-w-[12rem] overflow-hidden rounded-xl border-2 border-gray-100 bg-white shadow-xl animate-in fade-in-80 slide-in-from-top-2 ${alignClasses[align as keyof typeof alignClasses]} ${className}`}
-        style={{ top: `calc(100% + ${sideOffset}px)` }}
+        className={`z-[9999] min-w-[12rem] rounded-xl border-2 border-gray-100 bg-white shadow-xl animate-in fade-in-80 slide-in-from-top-2 ${!usePortal ? 'absolute' : ''} ${alignClasses[align as keyof typeof alignClasses]} ${className}`}
+        style={
+          usePortal && fixedPosition
+            ? {
+                position: 'fixed' as const,
+                top: fixedPosition.top,
+                left: fixedPosition.left,
+                minWidth: '14rem',
+                ...(align === 'center' ? { transform: 'translateX(-50%)' } : align === 'end' ? { transform: 'translateX(-100%)' } : {}),
+              }
+            : { top: `calc(100% + ${sideOffset}px)` }
+        }
         {...props}
       >
         <div className="p-1.5">{children}</div>
       </div>
     );
+
+    if (usePortal && typeof document !== 'undefined') {
+      return createPortal(contentNode, document.body);
+    }
+
+    return contentNode;
   }
 );
 
