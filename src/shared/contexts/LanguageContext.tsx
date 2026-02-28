@@ -5,8 +5,11 @@ import { Language } from '../types';
 import { t } from '../utils/i18n';
 import { getFromLocalStorage, setToLocalStorage } from '../services/database';
 
+const LOCALE_MAP = { es: 'es-ES', en: 'en-US' } as const;
+
 interface LanguageContextValue {
   language: Language;
+  locale: string;
   setLanguage: (lang: Language) => void;
   changeLanguage: (lang: Language) => void;
   translate: (key: string) => string;
@@ -15,6 +18,7 @@ interface LanguageContextValue {
 
 const defaultValue: LanguageContextValue = {
   language: 'es',
+  locale: 'es-ES',
   setLanguage: () => {},
   changeLanguage: () => {},
   translate: (key: string) => key,
@@ -79,6 +83,7 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
 
   const value: LanguageContextValue = {
     language,
+    locale: LOCALE_MAP[language],
     setLanguage: changeLanguage,
     changeLanguage,
     translate,

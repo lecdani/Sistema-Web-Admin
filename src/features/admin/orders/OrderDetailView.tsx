@@ -15,6 +15,7 @@ import {
   Upload,
   Layout,
 } from 'lucide-react';
+import { useLanguage } from '@/shared/hooks/useLanguage';
 import { ordersApi, OrderForUI } from '@/shared/services/orders-api';
 import { toast } from 'sonner';
 import { histpricesApi } from '@/shared/services/histprices-api';
@@ -37,6 +38,7 @@ function looksLikeId(name: string): boolean {
 }
 
 export function OrderDetailView({ orderId, onClose, onOrderUpdated }: OrderDetailViewProps) {
+  const { translate, locale } = useLanguage();
   const [order, setOrder] = useState<OrderForUI | null>(null);
   const [uploadingPod, setUploadingPod] = useState(false);
   const [invoiceDisplay, setInvoiceDisplay] = useState<{
@@ -99,16 +101,23 @@ export function OrderDetailView({ orderId, onClose, onOrderUpdated }: OrderDetai
       }
       setOrder(orderToSet);
 
-      // Nombre de tienda: si storeName parece id, resolver desde API
+      // Nombre de tienda: resolver desde API si falta o parece ID (y tenemos storeId)
+      const storeIdToResolve = (orderToSet.storeId || '').trim();
       const name = (orderToSet.storeName || '').trim();
-      if (orderToSet.storeId && looksLikeId(name)) {
+      let resolvedStoreName = '';
+      let resolvedStoreAddress = '';
+      const shouldResolveStore = storeIdToResolve && (looksLikeId(name) || !name || name === '—');
+      if (shouldResolveStore) {
         try {
-          const store = await storesApi.getById(orderToSet.storeId);
+          const store = await storesApi.getById(storeIdToResolve);
           if (store) {
+            resolvedStoreName = store.name;
+            resolvedStoreAddress = store.address || '';
             setStoreNameDisplay(store.name);
             setStoreAddressDisplay(store.address || '');
           } else {
-            setStoreNameDisplay(name || orderToSet.storeName || '—');
+            resolvedStoreName = name || orderToSet.storeName || '—';
+            setStoreNameDisplay(resolvedStoreName);
             setStoreAddressDisplay(orderToSet.storeAddress || '');
           }
         } catch {
@@ -116,8 +125,10 @@ export function OrderDetailView({ orderId, onClose, onOrderUpdated }: OrderDetai
           setStoreAddressDisplay(orderToSet.storeAddress || '');
         }
       } else {
-        setStoreNameDisplay(name || orderToSet.storeName || '—');
-        setStoreAddressDisplay(orderToSet.storeAddress || '');
+        resolvedStoreName = name || orderToSet.storeName || '—';
+        resolvedStoreAddress = orderToSet.storeAddress || '';
+        setStoreNameDisplay(resolvedStoreName);
+        setStoreAddressDisplay(resolvedStoreAddress);
       }
 
       // Nombre del vendedor desde API
@@ -140,6 +151,19 @@ export function OrderDetailView({ orderId, onClose, onOrderUpdated }: OrderDetai
 
       const inv = await ordersApi.getInvoiceDisplayForOrder(orderId, orderToSet.invoiceId);
       setInvoiceDisplay(inv);
+      // Si la tienda seguía vacía pero la factura tiene storeId, resolver nombre de tienda
+      const invStoreId = (inv?.storeId != null && inv?.storeId !== '') ? String(inv.storeId).trim() : '';
+      if (!resolvedStoreName && invStoreId) {
+        try {
+          const store = await storesApi.getById(invStoreId);
+          if (store) {
+            setStoreNameDisplay(store.name);
+            setStoreAddressDisplay(store.address || '');
+          }
+        } catch {
+          // ignorar
+        }
+      }
     };
     load();
   }, [orderId]);
@@ -151,7 +175,7 @@ export function OrderDetailView({ orderId, onClose, onOrderUpdated }: OrderDetai
   if (!order) {
     return (
       <div className="p-8 text-center">
-        <p className="text-gray-500">Cargando pedido...</p>
+        <p className="text-gray-500">{translate('loadingOrder')}</p>
       </div>
     );
   }
@@ -159,20 +183,20 @@ export function OrderDetailView({ orderId, onClose, onOrderUpdated }: OrderDetai
   const getStatusLabel = (status: string) => {
     const s = (status || '').toLowerCase().trim();
     const map: Record<string, string> = {
-      pending: 'Pendiente',
-      completed: 'Completado',
-      invoiced: 'Facturado',
-      delivered: 'Entregado',
+      pending: translate('statusPending'),
+      completed: translate('statusCompleted'),
+      invoiced: translate('statusInvoiced'),
+      delivered: translate('statusDelivered'),
     };
     return map[s] || status || '—';
   };
   const getStatusBadge = (status: string) => {
     const s = (status || '').toLowerCase().trim();
     const statusConfig: Record<string, { label: string; color: string }> = {
-      pending: { label: 'Pendiente', color: 'bg-yellow-100 text-yellow-800' },
-      completed: { label: 'Completado', color: 'bg-green-100 text-green-800' },
-      invoiced: { label: 'Facturado', color: 'bg-green-100 text-green-800' },
-      delivered: { label: 'Entregado', color: 'bg-green-100 text-green-800' },
+      pending: { label: translate('statusPending'), color: 'bg-yellow-100 text-yellow-800' },
+      completed: { label: translate('statusCompleted'), color: 'bg-green-100 text-green-800' },
+      invoiced: { label: translate('statusInvoiced'), color: 'bg-green-100 text-green-800' },
+      delivered: { label: translate('statusDelivered'), color: 'bg-green-100 text-green-800' },
     };
     const config = statusConfig[s] || { label: status || '—', color: 'bg-gray-100 text-gray-800' };
     return <Badge className={config.color}>{config.label}</Badge>;
@@ -214,16 +238,16 @@ export function OrderDetailView({ orderId, onClose, onOrderUpdated }: OrderDetai
     input.onchange = async (e: Event) => {
       const file = (e.target as HTMLInputElement).files?.[0];
       if (!file || !file.type.startsWith('image/')) {
-        toast.error('Seleccione un archivo de imagen válido.');
+        toast.error(translate('selectValidImage'));
         return;
       }
       if (file.size > 5 * 1024 * 1024) {
-        toast.error('La imagen no debe superar 5 MB.');
+        toast.error(translate('imageMaxSize'));
         return;
       }
       const invId = String(order?.invoiceId ?? '');
       if (!invId) {
-        toast.error('Este pedido no tiene factura asociada.');
+        toast.error(translate('orderHasNoInvoice'));
         return;
       }
       setUploadingPod(true);
@@ -237,7 +261,7 @@ export function OrderDetailView({ orderId, onClose, onOrderUpdated }: OrderDetai
         });
         if (!podOk) {
           setUploadingPod(false);
-          toast.error('No se pudo subir el POD.');
+          toast.error(translate('podUploadFailed'));
           return;
         }
         // Actualizar estado del pedido a facturado/entregado (como en la PWA)
@@ -245,9 +269,9 @@ export function OrderDetailView({ orderId, onClose, onOrderUpdated }: OrderDetai
         const statusOk = await ordersApi.updateOrderStatus(backendId, true);
         setUploadingPod(false);
         if (!statusOk) {
-          toast.warning('POD guardado pero no se pudo actualizar el estado del pedido.');
+          toast.warning(translate('podSavedStatusNotUpdated'));
         } else {
-          toast.success('POD subido y pedido marcado como facturado.');
+          toast.success(translate('podUploadedSuccess'));
         }
         onOrderUpdated?.();
         const ord = await ordersApi.getOrderById(orderId);
@@ -263,7 +287,7 @@ export function OrderDetailView({ orderId, onClose, onOrderUpdated }: OrderDetai
   // Fecha factura como en PWA (en-US)
   const formatInvoiceDate = (d: string) => {
     if (!d) return '—';
-    return d.includes(',') ? d : new Date(d).toLocaleDateString('en-US');
+    return d.includes(',') ? d : new Date(d).toLocaleDateString(locale);
   };
 
   return (
@@ -275,9 +299,9 @@ export function OrderDetailView({ orderId, onClose, onOrderUpdated }: OrderDetai
               <ShoppingCart className="h-6 w-6" />
             </div>
             <div>
-              <h2 className="text-2xl font-bold">Pedido #{(order as any).po ?? order.id ?? order.backendOrderId ?? '—'}</h2>
+              <h2 className="text-2xl font-bold">{translate('orderNumber')} #{(order as any).po ?? order.id ?? order.backendOrderId ?? '—'}</h2>
               <p className="text-blue-100 text-sm mt-1">
-                Creado el {new Date(order.date || (order as any).createdAt).toLocaleDateString('es-ES', {
+                {translate('createdOn')} {new Date(order.date || (order as any).createdAt).toLocaleDateString(locale, {
                   day: 'numeric',
                   month: 'long',
                   year: 'numeric',
@@ -303,15 +327,15 @@ export function OrderDetailView({ orderId, onClose, onOrderUpdated }: OrderDetai
         <TabsList className="w-full justify-start h-auto p-0 bg-gray-50 border-b rounded-none">
           <TabsTrigger value="info" className="flex items-center gap-2 px-6 py-3 rounded-none border-b-2 border-transparent data-[state=active]:border-indigo-600 data-[state=active]:bg-white data-[state=active]:text-indigo-600">
             <Package className="h-4 w-4" />
-            Información y productos
+            {translate('infoAndProducts')}
           </TabsTrigger>
           <TabsTrigger value="planogram" className="flex items-center gap-2 px-6 py-3 rounded-none border-b-2 border-transparent data-[state=active]:border-indigo-600 data-[state=active]:bg-white data-[state=active]:text-indigo-600">
             <Layout className="h-4 w-4" />
-            Planograma
+            {translate('planogram')}
           </TabsTrigger>
           <TabsTrigger value="invoice" className="flex items-center gap-2 px-6 py-3 rounded-none border-b-2 border-transparent data-[state=active]:border-indigo-600 data-[state=active]:bg-white data-[state=active]:text-indigo-600">
             <FileText className="h-4 w-4" />
-            Factura
+            {translate('invoiceLabel')}
           </TabsTrigger>
           <TabsTrigger value="pod" className="flex items-center gap-2 px-6 py-3 rounded-none border-b-2 border-transparent data-[state=active]:border-indigo-600 data-[state=active]:bg-white data-[state=active]:text-indigo-600">
             <ImageIcon className="h-4 w-4" />
@@ -324,25 +348,25 @@ export function OrderDetailView({ orderId, onClose, onOrderUpdated }: OrderDetai
             <div className="bg-blue-50 rounded-lg p-5 border border-blue-100">
               <div className="flex items-center gap-2 mb-4">
                 <Package className="h-5 w-5 text-blue-600" />
-                <h3 className="font-semibold text-gray-900">Detalles del Pedido</h3>
+                <h3 className="font-semibold text-gray-900">{translate('orderDetails')}</h3>
               </div>
               <div className="space-y-3">
                 <div className="flex justify-between items-center">
-                  <span className="text-gray-600 text-sm">Vendedor:</span>
+                  <span className="text-gray-600 text-sm">{translate('sellerLabel')}:</span>
                   <span className="font-medium text-gray-900">{sellerNameDisplay || '—'}</span>
                 </div>
                 <div className="flex justify-between items-center">
-                  <span className="text-gray-600 text-sm">Tienda:</span>
+                  <span className="text-gray-600 text-sm">{translate('storeLabel')}:</span>
                   <span className="font-medium text-gray-900">{storeNameDisplay || order.storeName || '—'}</span>
                 </div>
                 <div className="flex justify-between items-center">
-                  <span className="text-gray-600 text-sm">Estado:</span>
+                  <span className="text-gray-600 text-sm">{translate('statusLabel')}:</span>
                   {getStatusBadge(order.status)}
                 </div>
                 {order.deliveredAt && (
                   <div className="flex justify-between items-center pt-2 border-t">
-                    <span className="text-gray-600 text-sm">Fecha Entrega:</span>
-                    <span className="font-medium text-green-600 text-sm">{new Date(order.deliveredAt).toLocaleDateString('es-ES')}</span>
+                    <span className="text-gray-600 text-sm">{translate('deliveryDateLabel')}:</span>
+                    <span className="font-medium text-green-600 text-sm">{new Date(order.deliveredAt).toLocaleDateString(locale)}</span>
                   </div>
                 )}
               </div>
@@ -350,19 +374,19 @@ export function OrderDetailView({ orderId, onClose, onOrderUpdated }: OrderDetai
             <div className="bg-green-50 rounded-lg p-5 border border-green-100">
               <div className="flex items-center gap-2 mb-4">
                 <FileText className="h-5 w-5 text-green-600" />
-                <h3 className="font-semibold text-gray-900">Resumen Financiero</h3>
+                <h3 className="font-semibold text-gray-900">{translate('financialSummary')}</h3>
               </div>
               <div className="space-y-3">
                 <div className="flex justify-between items-center">
-                  <span className="text-gray-600 text-sm">Productos:</span>
-                  <span className="font-medium text-gray-900">{(order.items || []).length} items</span>
+                  <span className="text-gray-600 text-sm">{translate('productsLabel')}:</span>
+                  <span className="font-medium text-gray-900">{(order.items || []).length} {translate('itemsCount')}</span>
                 </div>
                 <div className="flex justify-between items-center">
-                  <span className="text-gray-600 text-sm">Subtotal:</span>
+                  <span className="text-gray-600 text-sm">{translate('subtotal')}:</span>
                   <span className="font-medium text-gray-900">${displaySubtotal.toFixed(2)}</span>
                 </div>
                 <div className="flex justify-between items-center pt-3 border-t border-green-200">
-                  <span className="text-gray-900 font-semibold">TOTAL:</span>
+                  <span className="text-gray-900 font-semibold">{translate('totalLabel')}:</span>
                   <span className="text-xl font-bold text-green-600">${displayTotal.toFixed(2)}</span>
                 </div>
               </div>
@@ -370,12 +394,12 @@ export function OrderDetailView({ orderId, onClose, onOrderUpdated }: OrderDetai
           </div>
           {order.notes && (
             <div className="bg-amber-50 rounded-lg p-4 border border-amber-100 mt-4">
-              <h4 className="font-semibold text-gray-900 mb-2 text-sm">Notas del Pedido</h4>
+              <h4 className="font-semibold text-gray-900 mb-2 text-sm">{translate('orderNotes')}</h4>
               <p className="text-sm text-gray-700">{order.notes}</p>
             </div>
           )}
           <div className="mt-6">
-            <h3 className="font-semibold text-gray-900 mb-3">Líneas del pedido</h3>
+            <h3 className="font-semibold text-gray-900 mb-3">{translate('orderLines')}</h3>
             <div className="space-y-3">
               {order.items.map((item, index) => {
                 const quantity = item.quantity ?? item.toOrder ?? 0;
@@ -454,7 +478,7 @@ export function OrderDetailView({ orderId, onClose, onOrderUpdated }: OrderDetai
               return (
                 <Alert className="border-amber-200 bg-amber-50">
                   <AlertCircle className="h-4 w-4 text-amber-600" />
-                  <AlertDescription className="text-amber-900 ml-2">Este pedido no tiene líneas ni factura en la API.</AlertDescription>
+                  <AlertDescription className="text-amber-900 ml-2">{translate('noInvoiceOrLines')}</AlertDescription>
                 </Alert>
               );
             }
@@ -463,10 +487,10 @@ export function OrderDetailView({ orderId, onClose, onOrderUpdated }: OrderDetai
               <Card className="border-slate-200 shadow-sm overflow-hidden print:shadow-none print:border-0">
                 <CardHeader className="px-4 pt-4 pb-2 print:hidden">
                   <div className="flex items-center justify-between">
-                    <CardTitle className="text-sm">Factura</CardTitle>
+                    <CardTitle className="text-sm">{translate('invoiceLabel')}</CardTitle>
                     <Button variant="outline" size="sm" onClick={() => window.print()} className="gap-2">
                       <Download className="h-4 w-4" />
-                      Imprimir / Descargar
+                      {translate('printDownload')}
                     </Button>
                   </div>
                 </CardHeader>
@@ -495,14 +519,14 @@ export function OrderDetailView({ orderId, onClose, onOrderUpdated }: OrderDetai
         <TabsContent value="pod" className="p-6 mt-0">
           <Card className="border-slate-200 overflow-hidden">
             <CardHeader className="px-4 pt-4 pb-2">
-              <CardTitle className="text-sm">Comprobante de entrega (POD)</CardTitle>
+              <CardTitle className="text-sm">{translate('podTitle')}</CardTitle>
             </CardHeader>
             <CardContent className="px-4 pb-4 pt-0">
               {isPending && (
                 <Alert className="mb-4 border-amber-200 bg-amber-50">
                   <AlertCircle className="h-4 w-4 text-amber-600" />
                   <AlertDescription>
-                    Deberían ser los vendedores quienes carguen el POD. Use esta opción solo si es necesario (por ejemplo, apoyo administrativo).
+                    {translate('podAdminWarning')}
                   </AlertDescription>
                 </Alert>
               )}
@@ -510,22 +534,22 @@ export function OrderDetailView({ orderId, onClose, onOrderUpdated }: OrderDetai
                 <div className="flex flex-col gap-3">
                   <div className="flex items-center gap-2">
                     <CheckCircle className="h-5 w-5 text-green-600 shrink-0" />
-                    <p className="text-xs text-slate-500">Comprobante registrado</p>
+                    <p className="text-xs text-slate-500">{translate('receiptRegistered')}</p>
                   </div>
                   {isPodPath && <p className="text-xs text-slate-500 font-mono break-all">{displayPod}</p>}
                   {podImageUrl && (
                     <div className="relative w-full max-w-2xl mx-auto rounded-lg border border-slate-200 overflow-hidden bg-slate-50 min-h-[280px] flex items-center justify-center p-2">
                       {podImageError ? (
                         <div className="flex flex-col items-center justify-center py-8 px-4 text-center">
-                          <p className="text-sm text-amber-700 mb-1">No se pudo cargar la imagen</p>
-                          <p className="text-xs text-slate-500 mb-2">Ruta: {displayPod}</p>
-                          <a href={podImageUrl} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-600 underline break-all">Abrir enlace</a>
+                          <p className="text-sm text-amber-700 mb-1">{translate('imageLoadError')}</p>
+                          <p className="text-xs text-slate-500 mb-2">{translate('pathLabel')}: {displayPod}</p>
+                          <a href={podImageUrl} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-600 underline break-all">{translate('openLink')}</a>
                         </div>
                       ) : (
                         <img
                           key={podImageUrl}
                           src={podImageUrl}
-                          alt="Comprobante de entrega (POD)"
+                          alt={translate('podTitle')}
                           className="w-full max-w-full max-h-[520px] object-contain"
                           style={{ minHeight: '280px' }}
                           referrerPolicy="no-referrer"
@@ -549,7 +573,7 @@ export function OrderDetailView({ orderId, onClose, onOrderUpdated }: OrderDetai
                     disabled={uploadingPod}
                   >
                     <Upload className="h-4 w-4 mr-2" />
-                    {uploadingPod ? 'Subiendo…' : 'Reemplazar POD'}
+                    {uploadingPod ? translate('uploading') : translate('replacePOD')}
                   </Button>
                 </div>
               )}
@@ -564,11 +588,11 @@ export function OrderDetailView({ orderId, onClose, onOrderUpdated }: OrderDetai
                         disabled={uploadingPod}
                       >
                         <Upload className="h-4 w-4 mr-2" />
-                        {uploadingPod ? 'Subiendo…' : 'Cargar POD'}
+                        {uploadingPod ? translate('uploading') : translate('loadPOD')}
                       </Button>
                     </div>
                   ) : (
-                    <p className="text-xs text-slate-500">Este pedido no tiene un POD registrado en la factura del backend.</p>
+                    <p className="text-xs text-slate-500">{translate('noPODRegistered')}</p>
                   )}
                 </>
               )}

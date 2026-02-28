@@ -54,7 +54,7 @@ interface PlanogramManagementProps {
 
 export const PlanogramManagement: React.FC<PlanogramManagementProps> = ({ onBack }) => {
   const router = useRouter();
-  const { translate } = useLanguage();
+  const { translate, locale } = useLanguage();
   const [planograms, setPlanograms] = useState<Planogram[]>([]);
   const [filteredPlanograms, setFilteredPlanograms] = useState<Planogram[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
@@ -341,7 +341,7 @@ export const PlanogramManagement: React.FC<PlanogramManagementProps> = ({ onBack
                 </p>
                 <div className="flex items-center gap-2 mt-1">
                   <p className="text-sm text-green-700">
-                    {translate('activatedOn')} {new Date(getActivePlanogram()!.activatedAt || getActivePlanogram()!.updatedAt).toLocaleDateString('es-ES')}
+                    {translate('activatedOn')} {new Date(getActivePlanogram()!.activatedAt || getActivePlanogram()!.updatedAt).toLocaleDateString(locale)}
                   </p>
                   {canEditPlanogram(getActivePlanogram()!) && (
                     <Badge className="bg-blue-100 text-blue-800 text-xs">
@@ -500,7 +500,7 @@ export const PlanogramManagement: React.FC<PlanogramManagementProps> = ({ onBack
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                       <div className="flex items-center gap-1">
                         <Calendar className="h-3 w-3" />
-                        {new Date(planogram.createdAt).toLocaleDateString('es-ES')}
+                        {new Date(planogram.createdAt).toLocaleDateString(locale)}
                       </div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">

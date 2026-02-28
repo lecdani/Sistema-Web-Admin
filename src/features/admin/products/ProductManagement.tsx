@@ -81,7 +81,7 @@ interface PriceUpdateData {
 
 export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) => {
   const router = useRouter();
-  const { translate } = useLanguage();
+  const { translate, locale } = useLanguage();
   const [products, setProducts] = useState<Product[]>([]);
   const [filteredProducts, setFilteredProducts] = useState<Product[]>([]);
   const [brands, setBrands] = useState<Brand[]>([]);
@@ -831,7 +831,7 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
                         <div className="flex items-center">
                           <DollarSign className="h-4 w-4 text-green-600 mr-1" />
                           <span className="text-sm font-medium text-green-600">
-                            {(product.currentPrice || 0).toLocaleString('es-ES', { 
+                            {(product.currentPrice || 0).toLocaleString(locale, { 
                               minimumFractionDigits: 2, 
                               maximumFractionDigits: 2 
                             })}
@@ -1151,7 +1151,7 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
                       <span className="flex items-center gap-1">
                         <DollarSign className="h-4 w-4 text-green-600" />
                         <span className="font-medium text-green-600">
-                          {(selectedProduct.currentPrice || 0).toLocaleString('es-ES', { 
+                          {(selectedProduct.currentPrice || 0).toLocaleString(locale, { 
                             minimumFractionDigits: 2, 
                             maximumFractionDigits: 2 
                           })}
@@ -1220,7 +1220,7 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
               <div className="bg-gray-50 p-4 rounded-lg">
                 <p className="text-sm text-gray-600">{translate('currentPrice')}:</p>
                 <p className="text-lg font-semibold text-green-600">
-                  ${(selectedProduct.currentPrice || 0).toLocaleString('es-ES', { 
+                  ${(selectedProduct.currentPrice || 0).toLocaleString(locale, { 
                     minimumFractionDigits: 2, 
                     maximumFractionDigits: 2 
                   })}
@@ -1278,7 +1278,7 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
                   <div className="flex items-center gap-2">
                     <span className="text-sm font-medium">{translate('currentPrice')}:</span>
                     <span className="text-lg font-bold text-green-600">
-                      ${(selectedProduct.currentPrice || 0).toLocaleString('es-ES', { 
+                      ${(selectedProduct.currentPrice || 0).toLocaleString(locale, { 
                         minimumFractionDigits: 2, 
                         maximumFractionDigits: 2 
                       })}
@@ -1303,10 +1303,10 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
                   <div className="mt-3 p-3 bg-blue-50 rounded border-l-4 border-blue-400">
                     <span className="text-sm text-blue-700">{translate('priceOnDate').replace('{date}', queryDate)}</span>
                     <span className="ml-2 font-bold text-blue-900">
-                      ${queryResult.price.toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      ${queryResult.price.toLocaleString(locale, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </span>
                     <span className="ml-2 text-xs text-blue-600">
-                      (vigente desde {new Date(queryResult.startDate).toLocaleDateString('es-ES')})
+                      (vigente desde {new Date(queryResult.startDate).toLocaleDateString(locale)})
                     </span>
                   </div>
                 )}
@@ -1343,20 +1343,20 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
                           <div className="flex items-center justify-between">
                             <div className="flex items-center gap-3">
                               <span className="font-semibold text-gray-900">
-                                ${history.price.toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                ${history.price.toLocaleString(locale, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                               </span>
                               {index === 0 && (
                                 <Badge className="bg-green-100 text-green-800 text-xs">{translate('currentBadge')}</Badge>
                               )}
                             </div>
                             <span className="text-xs text-gray-500">
-                              {new Date(history.startDate).toLocaleDateString('es-ES', {
+                              {new Date(history.startDate).toLocaleDateString(locale, {
                                 day: '2-digit',
                                 month: '2-digit',
                                 year: 'numeric'
                               })}
                               {' – '}
-                              {new Date(history.endDate).toLocaleDateString('es-ES', {
+                              {new Date(history.endDate).toLocaleDateString(locale, {
                                 day: '2-digit',
                                 month: '2-digit',
                                 year: 'numeric'

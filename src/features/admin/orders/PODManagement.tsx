@@ -41,7 +41,7 @@ interface PODManagementProps {
 
 export function PODManagement({ onBack }: PODManagementProps) {
   const router = useRouter();
-  const { translate } = useLanguage();
+  const { translate, locale } = useLanguage();
   const [pods, setPods] = useState<POD[]>([]);
   const [filteredPods, setFilteredPods] = useState<POD[]>([]);
   const [stores, setStores] = useState<Store[]>([]);
@@ -552,7 +552,7 @@ export function PODManagement({ onBack }: PODManagementProps) {
                       </div>
                     </TableCell>
                     <TableCell>
-                      {new Date(pod.uploadedAt).toLocaleDateString('es-ES')}
+                      {new Date(pod.uploadedAt).toLocaleDateString(locale)}
                     </TableCell>
                     <TableCell>
                       <div className="flex items-center gap-2">
@@ -680,12 +680,12 @@ export function PODManagement({ onBack }: PODManagementProps) {
                     </div>
                     <div className="flex justify-between">
                       <span className="text-gray-600">{translate('uploadDateLabel')}:</span>
-                      <span>{new Date(selectedPod.uploadedAt).toLocaleString('es-ES')}</span>
+                      <span>{new Date(selectedPod.uploadedAt).toLocaleString(locale)}</span>
                     </div>
                     {selectedPod.validatedAt && (
                       <div className="flex justify-between">
                         <span className="text-gray-600">{translate('validationDate')}:</span>
-                        <span>{new Date(selectedPod.validatedAt).toLocaleString('es-ES')}</span>
+                        <span>{new Date(selectedPod.validatedAt).toLocaleString(locale)}</span>
                       </div>
                     )}
                   </CardContent>
@@ -791,7 +791,7 @@ export function PODManagement({ onBack }: PODManagementProps) {
                             {getSeverityBadge(issue.severity)}
                           </div>
                           <p className="text-sm text-gray-500">
-                            {translate('detectedOn')} {new Date(issue.createdAt).toLocaleString('es-ES')}
+                            {translate('detectedOn')} {new Date(issue.createdAt).toLocaleString(locale)}
                           </p>
                         </div>
                         <Button variant="outline" size="sm">

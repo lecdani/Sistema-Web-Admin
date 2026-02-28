@@ -7,18 +7,15 @@ import {
   LayoutDashboard, 
   Store as StoreIcon,
   Users, 
-  FileText,
   LogOut, 
   Menu, 
   X,
   User as UserIcon,
-  Bell,
   Package,
   BarChart3,
   Layout,
   MapPin,
-  ShoppingCart,
-  FileImage
+  ShoppingCart
 } from 'lucide-react';
 import { Button } from '@/shared/components/base/Button';
 import { Avatar, AvatarFallback, AvatarImage } from '@/shared/components/base/Avatar';
@@ -224,14 +221,6 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ children, currentPage,
             </div>
 
             <div className="flex items-center gap-4">
-              {/* Notifications */}
-              <Button variant="ghost" size="sm" className="relative">
-                <Bell className="h-5 w-5" />
-                <span className="absolute -top-1 -right-1 bg-red-500 text-white rounded-full text-xs w-5 h-5 flex items-center justify-center">
-                  3
-                </span>
-              </Button>
-
               {/* Language selector */}
               <LanguageSelector />
 

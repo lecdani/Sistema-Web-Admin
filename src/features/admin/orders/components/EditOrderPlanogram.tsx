@@ -2,7 +2,6 @@ import React, { useState, useEffect } from 'react';
 import { Loader2, Store as StoreIcon, Edit, Send, ArrowLeft } from 'lucide-react';
 import { Button } from '@/shared/components/base/Button';
 import { Badge } from '@/shared/components/base/Badge';
-import { Card, CardContent } from '@/shared/components/base/Card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/shared/components/base/Select';
 import { Order, Planogram, Distribution, Product } from '@/shared/types';
 import { planogramsApi } from '@/shared/services/planograms-api';
@@ -22,7 +21,7 @@ interface EditOrderPlanogramProps {
   onSaved: (orderId: string) => void;
 }
 
-const cellSize = 56;
+const cellSize = 64;
 const gap = 8;
 const gridTotal = 10 * cellSize + 9 * gap;
 
@@ -49,7 +48,7 @@ export function EditOrderPlanogram({ order, onClose, onSaved }: EditOrderPlanogr
       setLoading(true);
       setLoadError(null);
       if (!orderId) {
-        setLoadError('Pedido sin ID');
+        setLoadError(translate('orderWithoutId'));
         setLoading(false);
         return;
       }
@@ -63,12 +62,12 @@ export function EditOrderPlanogram({ order, onClose, onSaved }: EditOrderPlanogr
 
         if (!mounted) return;
         if (!apiOrder) {
-          setLoadError('Pedido no encontrado');
+          setLoadError(translate('orderNotFound'));
           setLoading(false);
           return;
         }
 
-        setStoreId(apiOrder.storeId || '');
+        setStoreId(String(apiOrder.storeId ?? ''));
         const store = storesList.find((s: any) => String(s.id) === String(apiOrder.storeId));
         setStoreInfo(store ? { id: store.id, name: store.name, address: store.address } : null);
         setStores(
@@ -84,7 +83,7 @@ export function EditOrderPlanogram({ order, onClose, onSaved }: EditOrderPlanogr
           (order.planogramId && (planogramsData as Planogram[]).find((p: Planogram) => p.id === order.planogramId)) ||
           (planogramsData as Planogram[])[0];
         if (!activePlan) {
-          setLoadError('No hay planograma activo. Activa uno en Planogramas.');
+          setLoadError(translate('noActivePlanogramActivate'));
           setLoading(false);
           return;
         }
@@ -158,9 +157,11 @@ export function EditOrderPlanogram({ order, onClose, onSaved }: EditOrderPlanogr
 
   const handleStoreChange = (newStoreId: string) => {
     setStoreId(newStoreId);
-    const store = stores.find((s) => s.id === newStoreId);
+    const store = stores.find((s) => String(s.id) === String(newStoreId));
     setStoreInfo(store ?? null);
   };
+
+  const selectedStoreName = storeInfo?.name ?? stores.find((s) => String(s.id) === String(storeId))?.name ?? '';
 
   const handleUpdateQuantity = (toOrder: number) => {
     if (!selectedPosition) return;
@@ -176,9 +177,9 @@ export function EditOrderPlanogram({ order, onClose, onSaved }: EditOrderPlanogr
   };
 
   const getCellStyle = (item: ProductPositionEdit): React.CSSProperties => {
-    if (!item.productId) return { backgroundColor: '#94a3b8', borderColor: '#64748b', borderWidth: 1, borderStyle: 'solid' };
-    if (item.toOrder > 0) return { backgroundColor: '#eff6ff', borderColor: '#93c5fd', borderWidth: 1, borderStyle: 'solid' };
-    return { backgroundColor: '#f1f5f9', borderColor: '#e2e8f0', borderWidth: 1, borderStyle: 'solid' };
+    if (!item.productId) return { backgroundColor: '#94a3b8', borderColor: '#64748b' };
+    if (item.toOrder > 0) return { backgroundColor: '#e0e7ff', borderColor: '#818cf8' };
+    return { backgroundColor: '#f8fafc', borderColor: '#e2e8f0' };
   };
 
   const orderItems = planogramData.filter((i) => i.productId && i.toOrder > 0);
@@ -211,11 +212,11 @@ export function EditOrderPlanogram({ order, onClose, onSaved }: EditOrderPlanogr
 
       const ok = await ordersApi.updateOrder(orderId, payload, invoiceIdHint ?? undefined);
       if (!ok) {
-        toast.error('No se pudo guardar el pedido. Revisa la conexión e inténtalo de nuevo.');
+        toast.error(translate('errorSavingOrder'));
         setSaving(false);
         return;
       }
-      toast.success('Pedido actualizado correctamente.');
+      toast.success(translate('orderUpdatedSuccess'));
       onSaved(orderId);
       onClose();
     } catch (e) {
@@ -250,83 +251,76 @@ export function EditOrderPlanogram({ order, onClose, onSaved }: EditOrderPlanogr
 
   if (step === 'review') {
     return (
-      <div className="flex flex-col h-full overflow-auto">
-        <div className="bg-white border-b border-slate-200 px-4 py-3 sticky top-0 z-10">
-          <div className="flex items-center justify-between mb-3">
-            <Button variant="ghost" size="sm" onClick={() => setStep('planogram')} className="gap-2">
-              <ArrowLeft className="h-4 w-4" />
-              {translate('editQuantities')}
-            </Button>
-            <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200">{translate('reviewOrderButton')}</Badge>
+      <div className="flex flex-col items-center min-h-0">
+        <header className="w-full bg-white border-b border-gray-200 rounded-t-lg px-4 py-3">
+          <div className="flex items-center justify-between gap-3 mb-3">
+            <div className="flex items-center gap-3">
+              <Button variant="ghost" size="sm" onClick={() => setStep('planogram')} className="p-2 h-auto text-gray-700 hover:bg-gray-100 rounded-lg">
+                <ArrowLeft className="h-5 w-5" />
+              </Button>
+              <div>
+                <h1 className="text-base font-semibold text-gray-900">{translate('reviewOrderButton')}</h1>
+                <p className="text-xs text-gray-500">{translate('orderNumber')} #{orderId}</p>
+              </div>
+            </div>
           </div>
           <div className="grid grid-cols-3 gap-2">
-            <div className="bg-slate-50 rounded-lg p-2 text-center">
-              <p className="text-xs text-slate-500 mb-0.5">Productos</p>
-              <p className="text-sm text-slate-900">{orderItems.length}</p>
+            <div className="bg-gray-50 rounded-lg p-2 text-center">
+              <p className="text-xs text-gray-500 mb-0.5">{translate('productsLabel')}</p>
+              <p className="text-sm font-medium text-gray-900">{orderItems.length}</p>
             </div>
             <div className="bg-blue-50 rounded-lg p-2 text-center">
-              <p className="text-xs text-blue-600 mb-0.5">Unidades</p>
-              <p className="text-sm text-blue-900">{totalToOrder}</p>
+              <p className="text-xs text-blue-600 mb-0.5">{translate('quantityUnits')}</p>
+              <p className="text-sm font-medium text-blue-900">{totalToOrder}</p>
             </div>
             <div className="bg-green-50 rounded-lg p-2 text-center">
-              <p className="text-xs text-green-600 mb-0.5">Total</p>
-              <p className="text-sm text-green-900">${totalValue.toFixed(2)}</p>
+              <p className="text-xs text-green-600 mb-0.5">{translate('totalLabel')}</p>
+              <p className="text-sm font-medium text-green-900">${totalValue.toFixed(2)}</p>
             </div>
           </div>
-        </div>
+        </header>
 
-        <div className="px-4 py-4 flex-1">
-          <Card className="border-slate-200 mb-4">
-            <div className="p-4 border-b border-slate-100">
-              <h3 className="text-slate-900 text-sm">{translate('orderItems')}</h3>
+        <div className="w-full p-6 space-y-4">
+          {orderItems.length === 0 ? (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 py-4 px-4 text-center text-amber-800 text-sm">
+              {translate('noUnitsToOrder')}
             </div>
-            <div className="divide-y divide-slate-100">
-              {orderItems.length === 0 ? (
-                <div className="p-4 text-center text-slate-500 text-sm">{translate('noUnitsToOrder')}</div>
-              ) : (
-                orderItems.map((item, index) => (
-                  <div key={`${item.row}-${item.col}-${index}`} className="p-4">
-                    <div className="flex justify-between items-start gap-3">
-                      <div>
-                        <p className="text-sm text-slate-900 font-medium">{item.productName || item.sku}</p>
-                        <p className="text-xs text-slate-500">{item.sku}</p>
-                        <p className="text-xs text-slate-500 mt-1">
-                          <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200">
-                            {item.toOrder} u
-                          </Badge>
-                          {' × $'}{item.price.toFixed(2)}
-                        </p>
-                      </div>
-                      <p className="text-slate-900 font-medium">${(item.toOrder * item.price).toFixed(2)}</p>
+          ) : (
+            <div className="space-y-2 max-h-[45vh] overflow-y-auto pr-1">
+              {orderItems.map((item, index) => (
+                <div key={`${item.row}-${item.col}-${index}`} className="flex items-center justify-between gap-3 py-2.5 px-4 rounded-lg border border-gray-200 bg-white text-sm shadow-sm">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <span className="bg-indigo-100 text-indigo-700 font-medium rounded-md w-6 h-6 flex items-center justify-center shrink-0 text-xs">{index + 1}</span>
+                    <div className="min-w-0">
+                      <span className="font-medium text-gray-900 truncate block">{item.productName || item.sku}</span>
+                      <span className="text-gray-500 text-xs">{item.toOrder} × ${item.price.toFixed(2)}</span>
                     </div>
                   </div>
-                ))
-              )}
+                  <span className="font-semibold text-gray-900 shrink-0">${(item.toOrder * item.price).toFixed(2)}</span>
+                </div>
+              ))}
             </div>
-          </Card>
+          )}
 
-          <Card className="border-green-200 bg-green-50 mb-4">
-            <CardContent className="p-4">
-              <div className="flex justify-between items-center">
-                <span className="text-slate-900 font-semibold">Total</span>
-                <span className="text-xl text-green-900">${totalValue.toFixed(2)}</span>
-              </div>
-            </CardContent>
-          </Card>
+          {orderItems.length > 0 && (
+            <div className="flex justify-between items-center py-3 px-4 rounded-lg border border-green-200 bg-green-50 text-sm">
+              <span className="font-semibold text-gray-900">{translate('totalLabel')}</span>
+              <span className="font-bold text-green-600 text-base">${totalValue.toFixed(2)}</span>
+            </div>
+          )}
 
-          <div className="flex gap-3">
-            <Button variant="outline" onClick={() => setStep('planogram')} className="flex-1">
+          <div className="flex gap-3 pt-2">
+            <Button variant="outline" size="sm" onClick={() => setStep('planogram')} className="h-8 px-4 text-sm">
               <Edit className="h-4 w-4 mr-2" />
               {translate('editQuantities')}
             </Button>
             <Button
+              size="sm"
               onClick={handleSaveOrder}
               disabled={saving || orderItems.length === 0}
-              className="flex-1 bg-blue-600 hover:bg-blue-700"
+              className="h-8 px-4 text-sm bg-indigo-600 hover:bg-indigo-700"
             >
-              {saving ? (
-                <span className="flex items-center gap-2">Guardando...</span>
-              ) : (
+              {saving ? translate('saving') : (
                 <>
                   <Send className="h-4 w-4 mr-2" />
                   {translate('saveChanges')}
@@ -349,63 +343,69 @@ export function EditOrderPlanogram({ order, onClose, onSaved }: EditOrderPlanogr
   }
 
   return (
-    <div className="flex flex-col h-full overflow-auto">
-      <div className="bg-white border-b border-slate-200 px-4 py-3 sticky top-0 z-10">
-        <div className="flex items-center justify-between mb-3">
-          <div>
-            <h2 className="text-slate-900 text-sm">{planogramName ?? 'Planograma'}</h2>
-            <p className="text-xs text-slate-500">Editar pedido · Pedido #{orderId}</p>
+    <div className="flex flex-col items-center min-h-0">
+      <header className="w-full bg-white border-b border-gray-200 rounded-t-lg px-4 py-3">
+        <div className="flex items-center gap-2 mb-3">
+          <div className="bg-gray-100 p-1.5 rounded-lg shrink-0" aria-hidden>
+            <Edit className="h-4 w-4 text-gray-700" />
           </div>
-          <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200">Edición</Badge>
+          <div className="min-w-0">
+            <h1 className="text-sm font-semibold text-gray-900 truncate">{translate('editOrderTitle')} #{orderId}</h1>
+            <p className="text-[11px] text-gray-500 truncate">{planogramName ?? translate('planogram')}</p>
+          </div>
         </div>
-
-        {stores.length > 0 && (
-          <div className="mb-3">
-            <label className="flex items-center gap-2 mb-2 text-sm font-medium text-slate-700">
-              <StoreIcon className="h-4 w-4 text-slate-500" />
-              Tienda
-            </label>
-            <Select value={storeId} onValueChange={handleStoreChange}>
-              <SelectTrigger className="w-full max-w-xs h-10 border-slate-200 bg-white">
-                <SelectValue placeholder="Seleccionar tienda" />
-              </SelectTrigger>
-              <SelectContent>
-                {stores.map((store) => (
-                  <SelectItem key={store.id} value={store.id}>
-                    {store.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-        )}
-
         <div className="grid grid-cols-3 gap-2">
-          <div className="bg-slate-50 rounded-lg p-2 text-center">
-            <p className="text-xs text-slate-500 mb-0.5">Productos</p>
-            <p className="text-sm text-slate-900">{orderItems.length}</p>
+          <div className="bg-gray-50 rounded-lg p-2 text-center">
+            <p className="text-xs text-gray-500 mb-0.5">{translate('productsLabel')}</p>
+            <p className="text-sm font-medium text-gray-900">{orderItems.length}</p>
           </div>
           <div className="bg-blue-50 rounded-lg p-2 text-center">
-            <p className="text-xs text-blue-600 mb-0.5">Unidades</p>
-            <p className="text-sm text-blue-900">{totalToOrder}</p>
+            <p className="text-xs text-blue-600 mb-0.5">{translate('quantityUnits')}</p>
+            <p className="text-sm font-medium text-blue-900">{totalToOrder}</p>
           </div>
           <div className="bg-green-50 rounded-lg p-2 text-center">
-            <p className="text-xs text-green-600 mb-0.5">Total</p>
-            <p className="text-sm text-green-900">${totalValue.toFixed(2)}</p>
+            <p className="text-xs text-green-600 mb-0.5">{translate('totalLabel')}</p>
+            <p className="text-sm font-medium text-green-900">${totalValue.toFixed(2)}</p>
           </div>
         </div>
-      </div>
+      </header>
 
-      <div className="px-4 py-4 flex-1">
-        <p className="text-sm text-slate-600 mb-3">Haz clic en una celda para editar la cantidad a pedir.</p>
-        <div className="bg-white rounded-xl p-3 shadow-sm border border-slate-200 overflow-x-auto">
+      <div className="w-full p-6 flex flex-col items-center">
+        <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-4 text-center max-w-xl">
+          {translate('editOnlyWhenNecessary')}
+        </p>
+        <p className="text-sm text-gray-500 mb-4">{translate('clickCellToEdit')}</p>
+        {stores.length > 0 && (
+          <div className="flex flex-col items-center mb-4">
+            <div className="inline-flex items-center gap-2 rounded-md bg-blue-50 border border-blue-200 px-3 py-2">
+              <StoreIcon className="h-4 w-4 text-blue-600 shrink-0" aria-hidden />
+              <div className="flex items-center gap-2">
+                <label className="text-xs font-medium text-blue-700 whitespace-nowrap">{translate('storeLabel')}</label>
+                <Select value={storeId} onValueChange={handleStoreChange}>
+                  <SelectTrigger className="h-7 min-w-[140px] border-blue-200 bg-white text-gray-900 text-sm [&>span]:truncate">
+                    <SelectValue placeholder={translate('selectStorePlaceholder')}>
+                      {selectedStoreName || translate('selectStorePlaceholder')}
+                    </SelectValue>
+                  </SelectTrigger>
+                  <SelectContent>
+                    {stores.map((store) => (
+                      <SelectItem key={store.id} value={String(store.id)}>
+                        {store.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+          </div>
+        )}
+        <div className="overflow-x-auto py-1">
           <div
+            className="rounded-lg border border-gray-200 bg-gray-50/80 p-3 shadow-sm inline-block"
             style={{
               display: 'grid',
               gridTemplateColumns: `repeat(10, ${cellSize}px)`,
               gap: `${gap}px`,
-              width: `${gridTotal}px`,
-              margin: '0 auto',
             }}
           >
             {planogramData.map((item) => (
@@ -416,43 +416,28 @@ export function EditOrderPlanogram({ order, onClose, onSaved }: EditOrderPlanogr
                   setSelectedPosition(item);
                   setModalOpen(true);
                 }}
+                className={`rounded-md border transition-colors min-w-0 ${item.productId ? 'hover:bg-indigo-50/70 cursor-pointer' : 'cursor-default'}`}
                 style={{
                   width: cellSize,
                   height: cellSize,
-                  borderRadius: 8,
                   ...getCellStyle(item),
                   display: 'flex',
                   flexDirection: 'column',
                   alignItems: 'center',
                   justifyContent: 'center',
-                  padding: 2,
+                  padding: 5,
                   textAlign: 'center',
-                  minHeight: 0,
                   overflow: 'hidden',
-                  cursor: item.productId ? 'pointer' : 'default',
                 }}
               >
                 {item.productId ? (
                   <>
-                    <span
-                      style={{
-                        fontSize: 10,
-                        lineHeight: 1.25,
-                        fontWeight: 500,
-                        color: '#1e293b',
-                        wordBreak: 'break-word',
-                        overflow: 'hidden',
-                        display: '-webkit-box',
-                        WebkitLineClamp: 2,
-                        WebkitBoxOrient: 'vertical' as any,
-                        width: '100%',
-                      }}
-                    >
+                    <span className="text-[10px] leading-snug font-medium text-gray-900 line-clamp-2 w-full break-words">
                       {item.productName || item.sku}
                     </span>
-                    <span style={{ fontSize: 10, color: '#64748b', marginTop: 2 }}>${(item.price || 0).toFixed(2)}</span>
+                    <span className="text-[9px] text-gray-600 mt-1">${(item.price || 0).toFixed(2)}</span>
                     {item.toOrder > 0 && (
-                      <span style={{ fontSize: 12, fontWeight: 600, color: '#1d4ed8', marginTop: 2 }}>{item.toOrder} u</span>
+                      <span className="text-[10px] font-semibold text-indigo-600 mt-0.5">{item.toOrder} u</span>
                     )}
                   </>
                 ) : null}
@@ -460,23 +445,24 @@ export function EditOrderPlanogram({ order, onClose, onSaved }: EditOrderPlanogr
             ))}
           </div>
         </div>
-        <div className="mt-4 flex flex-wrap gap-4 text-xs text-slate-500">
-          <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-slate-400" />Sin cantidad</span>
-          <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-blue-50 border border-blue-300" />Con cantidad</span>
-        </div>
-
-        <div className="mt-6">
+        <div className="mt-6 flex items-center justify-center gap-4 flex-wrap">
+          <span className="text-xs text-gray-500">
+            <span className="inline-block w-2 h-2 rounded bg-gray-400 align-middle mr-1.5" />{translate('emptyCell')}
+            <span className="mx-2">·</span>
+            <span className="inline-block w-2 h-2 rounded bg-indigo-200 border border-indigo-300 align-middle mr-1.5" />{translate('withQuantity')}
+          </span>
+          {orderItems.length === 0 && (
+            <span className="text-sm text-amber-600">{translate('addUnitsToContinue')}</span>
+          )}
           <Button
             onClick={() => setStep('review')}
             disabled={orderItems.length === 0}
-            className="w-full sm:max-w-xs bg-blue-600 hover:bg-blue-700"
+            size="sm"
+            className="h-8 px-4 text-sm bg-indigo-600 hover:bg-indigo-700 gap-2"
           >
-            <Send className="h-4 w-4 mr-2" />
+            <Send className="h-4 w-4" />
             {translate('reviewOrderButton')}
           </Button>
-          {orderItems.length === 0 && (
-            <p className="text-xs text-amber-600 mt-2">{translate('addUnitsToContinue')}</p>
-          )}
         </div>
       </div>
 

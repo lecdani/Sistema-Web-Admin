@@ -48,6 +48,7 @@ import { planogramsApi } from '@/shared/services/planograms-api';
 import { ordersApi } from '@/shared/services/orders-api';
 import { usersApi } from '@/shared/services/users-api';
 import { storesApi } from '@/shared/services/stores-api';
+import ExcelJS from 'exceljs';
 import { toast } from 'sonner';
 import { OrderDetailView } from './OrderDetailView';
 import { OrderPlanogramView } from './components/OrderPlanogramView';
@@ -59,7 +60,7 @@ interface OrderManagementProps {
 
 export function OrderManagement({ onBack }: OrderManagementProps) {
   const router = useRouter();
-  const { translate } = useLanguage();
+  const { translate, locale } = useLanguage();
   const [orders, setOrders] = useState<Order[]>([]);
   const [filteredOrders, setFilteredOrders] = useState<Order[]>([]);
   const [stores, setStores] = useState<StoreType[]>([]);
@@ -343,7 +344,7 @@ export function OrderManagement({ onBack }: OrderManagementProps) {
   const handleDeleteOrderClick = (order: Order, e: React.MouseEvent) => {
     e.stopPropagation();
     if ((order.status || '').toLowerCase() !== 'pending') {
-      toast.error('Solo se puede eliminar pedidos en estado pendiente.');
+      toast.error(translate('onlyDeletePendingOrders'));
       return;
     }
     setOrderToDelete(order);
@@ -356,50 +357,67 @@ export function OrderManagement({ onBack }: OrderManagementProps) {
     setDeletingOrderId(null);
     setOrderToDelete(null);
     if (ok) {
-      toast.success('Pedido eliminado.');
+      toast.success(translate('orderDeleted'));
       loadData();
     } else {
-      toast.error('No se pudo eliminar el pedido.');
+      toast.error(translate('orderDeleteFailed'));
     }
   };
 
-  const escapeCsv = (v: string | number | undefined | null): string => {
-    const s = v == null ? '' : String(v).trim();
-    if (s.includes(';') || s.includes('"') || s.includes('\n') || s.includes('\r')) {
-      return '"' + s.replace(/"/g, '""') + '"';
-    }
-    return s;
-  };
-
-  const exportOrders = () => {
+  const exportOrders = async () => {
     try {
-      const BOM = '\uFEFF';
-      const sep = ';';
-      const lines: string[] = [];
+      const sectionStyle = { font: { bold: true, size: 11 } };
+      const headerFill = { type: 'pattern' as const, pattern: 'solid' as const, fgColor: { argb: 'FF1E293B' } };
+      const headerFont = { color: { argb: 'FFFFFFFF' as const }, bold: true };
+
+      const wb = new ExcelJS.Workbook();
+      const ws = wb.addWorksheet(locale.startsWith('es') ? 'Pedidos' : 'Orders', { views: [{ state: 'frozen', ySplit: 1 }] });
       const now = new Date();
-      const dateStr = now.toLocaleDateString('es-ES', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
-      const timeStr = now.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
+      const genDate = now.toLocaleString(locale, { dateStyle: 'long', timeStyle: 'short' });
+      let row = 1;
 
-      // Bloque de cabecera profesional
-      lines.push('');
-      lines.push('ETERNAL COSMETICS, LLC');
-      lines.push('Informe de pedidos');
-      lines.push('');
-      lines.push(`Generado;${dateStr} a las ${timeStr}`);
+      ws.getCell(row, 1).value = translate('reportCompanyName');
+      ws.getCell(row, 1).font = { bold: true, size: 16 };
+      row += 1;
+      ws.getCell(row, 1).value = translate('reportConfidential');
+      ws.getCell(row, 1).font = { size: 9, color: { argb: 'FF64748B' } };
+      row += 1;
+      ws.getCell(row, 1).value = translate('ordersReportTitle');
+      ws.getCell(row, 1).font = { size: 10 };
+      row += 2;
+
+      ws.getCell(row, 1).value = `${translate('generatedLabel')}: ${genDate}`;
+      row += 1;
       const hasFilters = !!(filters.dateFrom || filters.dateTo || filters.sellerId !== 'all' || filters.storeId !== 'all' || filters.status !== 'all');
-      lines.push(`Filtros aplicados;${hasFilters ? 'Sí' : 'Todos'}`);
+      ws.getCell(row, 1).value = (locale.startsWith('es') ? 'Filtros' : 'Filters') + ': ' + (hasFilters ? (locale.startsWith('es') ? 'Sí' : 'Yes') : (locale.startsWith('es') ? 'Todos' : 'All'));
       if (filters.dateFrom || filters.dateTo) {
-        lines.push(`Rango fechas;${filters.dateFrom || '—'} a ${filters.dateTo || '—'}`);
+        ws.getCell(row, 2).value = `${filters.dateFrom || '—'} ${translate('to')} ${filters.dateTo || '—'}`;
       }
-      lines.push('');
-      lines.push('========================================');
-      lines.push('  DETALLE DE PEDIDOS');
-      lines.push('========================================');
-      lines.push('');
+      row += 2;
 
-      // Encabezados de datos
-      const headers = ['Nº Pedido', 'ID', 'Fecha', 'Estado', 'Tienda', 'Vendedor', 'Subtotal ($)', 'Total ($)', 'Notas'];
-      lines.push(headers.join(sep));
+      ws.getCell(row, 1).value = translate('ordersDetailSection');
+      ws.getCell(row, 1).font = sectionStyle;
+      row += 1;
+
+      const orderHeaders = [
+        translate('poNumber'),
+        'ID',
+        translate('date'),
+        translate('status'),
+        translate('storeHeader'),
+        translate('seller'),
+        translate('subtotal'),
+        translate('ordersTotalColumn'),
+        translate('orderNotes')
+      ];
+      orderHeaders.forEach((val, c) => {
+        const cell = ws.getCell(row, c + 1);
+        cell.value = val;
+        cell.fill = headerFill;
+        cell.font = headerFont;
+      });
+      row += 1;
+
       let sumSubtotal = 0;
       let sumTotal = 0;
       for (const o of filteredOrders) {
@@ -407,43 +425,54 @@ export function OrderManagement({ onBack }: OrderManagementProps) {
         const total = Number(o.total ?? 0);
         sumSubtotal += subtotal;
         sumTotal += total;
-        const row = [
-          escapeCsv(o.po ?? o.id),
-          escapeCsv(o.id),
-          new Date(o.createdAt).toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric' }),
-          (o.status === 'completed' ? 'Completado' : 'Pendiente'),
-          escapeCsv(o.storeName),
-          escapeCsv(o.sellerName),
-          subtotal.toFixed(2),
-          total.toFixed(2),
-          escapeCsv((o as any).notes),
-        ];
-        lines.push(row.join(sep));
+        const statusLabel = (o.status || '').toLowerCase() === 'completed' ? translate('statusCompleted') : translate('statusPending');
+        ws.getCell(row, 1).value = (o as any).po ?? o.id ?? '';
+        ws.getCell(row, 2).value = o.id ?? '';
+        ws.getCell(row, 3).value = new Date((o as any).createdAt ?? o.date).toLocaleDateString(locale, { day: '2-digit', month: '2-digit', year: 'numeric' });
+        ws.getCell(row, 4).value = statusLabel;
+        ws.getCell(row, 5).value = (o as any).storeName ?? '';
+        ws.getCell(row, 6).value = (o as any).sellerName ?? '';
+        ws.getCell(row, 7).value = Number(subtotal.toFixed(2));
+        ws.getCell(row, 8).value = Number(total.toFixed(2));
+        ws.getCell(row, 9).value = (o as any).notes ?? '';
+        row += 1;
       }
+      row += 1;
 
-      // Pie con resumen
-      lines.push('');
-      lines.push('========================================');
-      lines.push('  RESUMEN');
-      lines.push('========================================');
-      lines.push('');
-      lines.push(`Total pedidos exportados;${filteredOrders.length}`);
-      lines.push(`Pendientes;${filteredOrders.filter((o) => (o.status || '').toLowerCase() === 'pending').length}`);
-      lines.push(`Completados;${filteredOrders.filter((o) => (o.status || '').toLowerCase() === 'completed').length}`);
-      lines.push(`Suma subtotales ($);${sumSubtotal.toFixed(2)}`);
-      lines.push(`Suma totales ($);${sumTotal.toFixed(2)}`);
-      lines.push('');
-      lines.push('========================================');
-      lines.push('  Fin del informe');
-      lines.push('========================================');
-      lines.push('');
+      ws.getCell(row, 1).value = translate('ordersSummarySection');
+      ws.getCell(row, 1).font = sectionStyle;
+      row += 1;
+      ws.getCell(row, 1).value = translate('ordersTotalExported');
+      ws.getCell(row, 1).font = { bold: true };
+      ws.getCell(row, 2).value = filteredOrders.length;
+      row += 1;
+      ws.getCell(row, 1).value = translate('statusPending');
+      ws.getCell(row, 2).value = filteredOrders.filter((o) => (o.status || '').toLowerCase() === 'pending').length;
+      row += 1;
+      ws.getCell(row, 1).value = translate('statusCompleted');
+      ws.getCell(row, 2).value = filteredOrders.filter((o) => (o.status || '').toLowerCase() === 'completed').length;
+      row += 1;
+      ws.getCell(row, 1).value = translate('ordersSumSubtotals');
+      ws.getCell(row, 2).value = Number(sumSubtotal.toFixed(2));
+      row += 1;
+      ws.getCell(row, 1).value = translate('ordersSumTotals');
+      ws.getCell(row, 2).value = Number(sumTotal.toFixed(2));
+      row += 2;
 
-      const csv = BOM + lines.join('\r\n');
-      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+      ws.getCell(row, 1).value = translate('ordersReportEnd') + ' — ' + translate('reportPreparedBy');
+      ws.getCell(row, 1).font = { size: 9, color: { argb: 'FF64748B' } };
+
+      ws.columns = [
+        { width: 14 }, { width: 28 }, { width: 12 }, { width: 12 }, { width: 22 },
+        { width: 20 }, { width: 12 }, { width: 12 }, { width: 28 }
+      ];
+
+      const buffer = await wb.xlsx.writeBuffer();
+      const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
-      link.download = `Informe_Pedidos_${now.toISOString().slice(0, 10)}.csv`;
+      link.download = `Informe_Pedidos_${now.toISOString().slice(0, 10)}.xlsx`;
       link.click();
       URL.revokeObjectURL(url);
       toast.success(translate('ordersExportedSuccess'));
@@ -664,7 +693,7 @@ export function OrderManagement({ onBack }: OrderManagementProps) {
                   >
                     <TableCell className="font-medium">{order.po}</TableCell>
                     <TableCell>
-                      {new Date(order.createdAt).toLocaleDateString('es-ES')}
+                      {new Date(order.createdAt).toLocaleDateString(locale)}
                     </TableCell>
                     <TableCell>
                       <div className="flex items-center gap-2">
@@ -703,7 +732,7 @@ export function OrderManagement({ onBack }: OrderManagementProps) {
                                 className="h-9 gap-1.5 rounded-lg border-slate-200 bg-white px-3 text-slate-600 shadow-sm hover:bg-slate-50 hover:text-slate-900"
                               >
                                 <MoreHorizontal className="h-4 w-4" />
-                                <span className="hidden sm:inline">Acciones</span>
+                                <span className="hidden sm:inline">{translate('actions')}</span>
                               </Button>
                             </DropdownMenuTrigger>
                             <DropdownMenuContent align="center" usePortal className="min-w-[14rem] py-1.5">
@@ -721,7 +750,7 @@ export function OrderManagement({ onBack }: OrderManagementProps) {
                                   className="gap-3 py-3 px-4 text-base text-red-600 hover:bg-red-50 cursor-pointer"
                                 >
                                   <Trash2 className="h-4 w-4 shrink-0" />
-                                  <span>Eliminar pedido</span>
+                                  <span>{translate('deleteOrder')}</span>
                                 </DropdownMenuItem>
                               )}
                             </DropdownMenuContent>
@@ -773,25 +802,25 @@ export function OrderManagement({ onBack }: OrderManagementProps) {
       <Dialog open={!!orderToDelete} onOpenChange={(open) => !open && setOrderToDelete(null)}>
         <DialogContent className="max-w-sm rounded-xl">
           <DialogHeader className="pb-2">
-            <DialogTitle>Eliminar pedido</DialogTitle>
+            <DialogTitle>{translate('deleteOrder')}</DialogTitle>
             <DialogDescription>
-              ¿Eliminar este pedido? No podrás deshacer esta acción.
+              {translate('deleteOrderConfirmMessage')}
             </DialogDescription>
           </DialogHeader>
           <div className="flex gap-3 justify-end px-6 pb-6 pt-2">
             <Button variant="outline" onClick={() => setOrderToDelete(null)} disabled={!!deletingOrderId}>
-              Cancelar
+              {translate('cancel')}
             </Button>
             <Button variant="destructive" onClick={handleConfirmDeleteOrder} disabled={!!deletingOrderId}>
-              {deletingOrderId ? 'Eliminando…' : 'Eliminar'}
+              {deletingOrderId ? translate('deleting') : translate('delete')}
             </Button>
           </div>
         </DialogContent>
       </Dialog>
 
-      {/* Planogram Dialog (ver solo lectura o editar como en PWA) */}
+      {/* Planogram Dialog (ver solo lectura o editar) */}
       <Dialog open={showPlanogramDialog} onOpenChange={setShowPlanogramDialog}>
-        <DialogContent className="!w-[98vw] !max-w-[98vw] !h-[98vh] max-h-[98vh] overflow-hidden p-6">
+        <DialogContent className="!w-[65vw] !max-w-[1200px] max-h-[90vh] overflow-y-auto p-0">
           {selectedOrder && planogramDialogMode === 'edit' && (
             <EditOrderPlanogram
               order={selectedOrder}

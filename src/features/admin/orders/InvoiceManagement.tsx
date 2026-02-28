@@ -40,7 +40,7 @@ interface InvoiceManagementProps {
 
 export function InvoiceManagement({ onBack }: InvoiceManagementProps) {
   const router = useRouter();
-  const { translate } = useLanguage();
+  const { translate, locale } = useLanguage();
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [filteredInvoices, setFilteredInvoices] = useState<Invoice[]>([]);
   const [stores, setStores] = useState<StoreType[]>([]);
@@ -468,7 +468,7 @@ export function InvoiceManagement({ onBack }: InvoiceManagementProps) {
                     <TableCell className="font-medium">{invoice.invoiceNumber}</TableCell>
                     <TableCell>{invoice.orderNumber}</TableCell>
                     <TableCell>
-                      {new Date(invoice.issueDate).toLocaleDateString('es-ES')}
+                      {new Date(invoice.issueDate).toLocaleDateString(locale)}
                     </TableCell>
                     <TableCell>
                       <div className="flex items-center gap-2">
@@ -573,16 +573,16 @@ export function InvoiceManagement({ onBack }: InvoiceManagementProps) {
                     </div>
                     <div className="flex justify-between">
                       <span className="text-gray-600">{translate('issueDateCol')}:</span>
-                      <span>{new Date(selectedInvoice.issueDate).toLocaleDateString('es-ES')}</span>
+                      <span>{new Date(selectedInvoice.issueDate).toLocaleDateString(locale)}</span>
                     </div>
                     <div className="flex justify-between">
                       <span className="text-gray-600">{translate('dueDate')}:</span>
-                      <span>{new Date(selectedInvoice.dueDate).toLocaleDateString('es-ES')}</span>
+                      <span>{new Date(selectedInvoice.dueDate).toLocaleDateString(locale)}</span>
                     </div>
                     {selectedInvoice.paidDate && (
                       <div className="flex justify-between">
                         <span className="text-gray-600">{translate('paidDate')}:</span>
-                        <span>{new Date(selectedInvoice.paidDate).toLocaleDateString('es-ES')}</span>
+                        <span>{new Date(selectedInvoice.paidDate).toLocaleDateString(locale)}</span>
                       </div>
                     )}
                   </CardContent>

@@ -85,25 +85,10 @@ test.describe('Dashboard - Módulos de Gestión', () => {
     await expect(page.locator('text=Reportes')).toBeVisible();
   });
 
-  test('debe mostrar métricas del sistema mejoradas', async ({ page }) => {
-    // Verificar sección de estado del sistema
-    await expect(page.locator('text=Estado del Sistema')).toBeVisible();
-    await expect(page.locator('text=Métricas en tiempo real')).toBeVisible();
-    
-    // Verificar métricas específicas
-    await expect(page.locator('text=Estado General')).toBeVisible();
-    await expect(page.locator('text=Operativo')).toBeVisible();
-    await expect(page.locator('text=Tiempo de Actividad')).toBeVisible();
-    await expect(page.locator('text=99.9%')).toBeVisible();
-    
-    // Verificar nuevas métricas
-    await expect(page.locator('text=Pedidos Hoy')).toBeVisible();
-    await expect(page.locator('text=127')).toBeVisible();
-    await expect(page.locator('text=Reportes Generados')).toBeVisible();
-    await expect(page.locator('text=45')).toBeVisible();
-    
-    // Verificar botón de métricas detalladas
-    await expect(page.locator('text=Ver Métricas Detalladas')).toBeVisible();
+  test('debe mostrar el dashboard con módulos y estadísticas', async ({ page }) => {
+    await expect(page.locator('text=Ciudades').or(page.locator('text=Cities'))).toBeVisible();
+    await expect(page.locator('text=Tiendas').or(page.locator('text=Stores'))).toBeVisible();
+    await expect(page.locator('text=Ver calendario').or(page.locator('text=View Calendar'))).toBeVisible();
   });
 
   test('debe ser responsive en diferentes tamaños de pantalla', async ({ page }) => {

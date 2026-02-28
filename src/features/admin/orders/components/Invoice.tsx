@@ -1,5 +1,7 @@
 'use client';
 
+import { useLanguage } from '@/shared/hooks/useLanguage';
+
 /**
  * Factura idéntica a la PWA: colores y espaciado con valores fijos (hex + px)
  * para que no dependa del tema del Admin y se vea igual que en la PWA.
@@ -45,6 +47,7 @@ export function Invoice({
   items,
   comments,
 }: InvoiceProps) {
+  const { translate } = useLanguage();
   const totalPcs = items.reduce((sum, item) => sum + item.qty, 0);
   const totalAmount = items.reduce((sum, item) => sum + item.amount, 0);
   const addressOnly = (storeAddress || '').replace(/,?\s*[0-9a-f-]{36}\s*$/i, '').replace(/,?\s*\d+\s*$/, '').trim();
@@ -120,10 +123,10 @@ export function Invoice({
                   borderRadius: '2px',
                 }}
               >
-                Factura
+                {translate('invoiceLabel')}
               </div>
               <p style={{ fontSize: '0.875rem', fontWeight: 500, color: s.slate900, marginTop: '0.75rem' }}>{invoiceNumber || '—'}</p>
-              <p style={{ fontSize: '0.875rem', color: s.slate600 }}>Fecha: {date}</p>
+              <p style={{ fontSize: '0.875rem', color: s.slate600 }}>{translate('dateLabel')}: {date}</p>
             </div>
           </div>
         </div>
@@ -140,7 +143,7 @@ export function Invoice({
                 textTransform: 'uppercase',
               }}
             >
-              Cliente / Tienda
+              {translate('clientStore')}
             </p>
             <p style={{ fontSize: '0.875rem', fontWeight: 600, color: s.slate900 }}>{storeName || '—'}</p>
             <p style={{ fontSize: '0.875rem', color: s.slate600, marginTop: '0.25rem', lineHeight: 1.625 }}>{addressOnly || '—'}</p>
@@ -156,7 +159,7 @@ export function Invoice({
                 textTransform: 'uppercase',
               }}
             >
-              Vendedor
+              {translate('sellerLabel')}
             </p>
             <p style={{ fontSize: '0.875rem', fontWeight: 600, color: s.slate900 }}>{vendorName || '—'}</p>
           </div>
@@ -166,10 +169,10 @@ export function Invoice({
           <table style={{ width: '100%', fontSize: '0.875rem', borderCollapse: 'collapse' }}>
             <thead>
               <tr style={{ backgroundColor: s.slate800, color: s.white }}>
-                <th style={{ padding: '1rem 2rem', fontWeight: 600, textAlign: 'center', width: '3.5rem' }}>Cant</th>
-                <th style={{ padding: '1rem 2rem', fontWeight: 600, textAlign: 'left' }}>Descripción</th>
-                <th style={{ padding: '1rem 2rem', fontWeight: 600, textAlign: 'right', width: '6rem' }}>P. unit.</th>
-                <th style={{ padding: '1rem 2rem', fontWeight: 600, textAlign: 'right', width: '7rem' }}>Importe</th>
+                <th style={{ padding: '1rem 2rem', fontWeight: 600, textAlign: 'center', width: '3.5rem' }}>{translate('qtyCol')}</th>
+                <th style={{ padding: '1rem 2rem', fontWeight: 600, textAlign: 'left' }}>{translate('descriptionCol')}</th>
+                <th style={{ padding: '1rem 2rem', fontWeight: 600, textAlign: 'right', width: '6rem' }}>{translate('unitPriceCol')}</th>
+                <th style={{ padding: '1rem 2rem', fontWeight: 600, textAlign: 'right', width: '7rem' }}>{translate('amountCol')}</th>
               </tr>
             </thead>
             <tbody>
@@ -188,7 +191,7 @@ export function Invoice({
               ))}
               {items.length === 0 && (
                 <tr>
-                  <td colSpan={4} style={{ padding: '2rem 1rem', textAlign: 'center', color: s.slate400, fontSize: '0.875rem' }}>Sin ítems</td>
+                  <td colSpan={4} style={{ padding: '2rem 1rem', textAlign: 'center', color: s.slate400, fontSize: '0.875rem' }}>{translate('noItems')}</td>
                 </tr>
               )}
             </tbody>
@@ -206,7 +209,7 @@ export function Invoice({
             }}
           >
             <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.875rem', marginBottom: '0.25rem' }}>
-              <span style={{ color: s.slate600 }}>Total unidades</span>
+              <span style={{ color: s.slate600 }}>{translate('totalUnitsLabel')}</span>
               <span style={{ fontWeight: 500, color: s.slate800 }}>{totalPcs}</span>
             </div>
             <div
@@ -221,7 +224,7 @@ export function Invoice({
                 borderTop: `1px solid ${s.slate100}`,
               }}
             >
-              <span>Total</span>
+              <span>{translate('totalLabel')}</span>
               <span>${totalAmount.toFixed(2)}</span>
             </div>
           </div>
@@ -245,7 +248,7 @@ export function Invoice({
                 textTransform: 'uppercase',
               }}
             >
-              Observaciones
+              {translate('observations')}
             </p>
             <p style={{ fontSize: '0.875rem', color: s.slate700 }}>{comments}</p>
           </div>

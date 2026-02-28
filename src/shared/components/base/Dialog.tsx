@@ -71,10 +71,11 @@ DialogTrigger.displayName = 'DialogTrigger';
 
 export interface DialogContentProps extends React.HTMLAttributes<HTMLDivElement> {
   showClose?: boolean;
+  closeAriaLabel?: string;
 }
 
 export const DialogContent = React.forwardRef<HTMLDivElement, DialogContentProps>(
-  ({ className = '', children, showClose = true, ...props }, ref) => {
+  ({ className = '', children, showClose = true, closeAriaLabel, ...props }, ref) => {
     const context = useContext(DialogContext);
     if (!context) throw new Error('DialogContent must be used within Dialog');
 
@@ -100,7 +101,7 @@ export const DialogContent = React.forwardRef<HTMLDivElement, DialogContentProps
               className="absolute right-4 top-4 z-10 rounded-lg p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors focus:outline-none focus:ring-2 focus:ring-gray-400"
             >
               <X className="h-4 w-4" />
-              <span className="sr-only">Close</span>
+              <span className="sr-only">{closeAriaLabel ?? 'Close'}</span>
             </button>
           )}
           {children}

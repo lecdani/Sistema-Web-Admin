@@ -117,8 +117,8 @@ export function UnifiedSalesFlow({ onBack }: UnifiedSalesFlowProps) {
             <Workflow className="h-5 w-5 text-white" />
           </div>
           <div>
-            <h1 className="text-2xl font-bold text-gray-900">Flujo Unificado de Ventas</h1>
-            <p className="text-gray-500">Gestión completa: Pedidos → Facturas → PODs</p>
+            <h1 className="text-2xl font-bold text-gray-900">{translate('unifiedSalesFlowTitle')}</h1>
+            <p className="text-gray-500">{translate('fullManagementFlow')}</p>
           </div>
         </div>
         
@@ -128,7 +128,7 @@ export function UnifiedSalesFlow({ onBack }: UnifiedSalesFlowProps) {
           disabled={isCheckingIntegrity}
         >
           <RefreshCw className={`h-4 w-4 mr-2 ${isCheckingIntegrity ? 'animate-spin' : ''}`} />
-          Verificar Integridad
+          {translate('verifyIntegrity')}
         </Button>
       </div>
 
@@ -139,11 +139,11 @@ export function UnifiedSalesFlow({ onBack }: UnifiedSalesFlowProps) {
           <AlertDescription className="flex items-center justify-between">
             <div>
               <p className="font-medium text-yellow-900">
-                Se encontraron {integrityIssues.length} problema(s) de integridad
+                {translate('integrityIssuesFound').replace('{count}', String(integrityIssues.length))}
               </p>
               <p className="text-sm text-yellow-700 mt-1">
-                {integrityIssues.filter(i => i.severity === 'high').length} críticos, {' '}
-                {integrityIssues.filter(i => i.severity === 'medium').length} medios
+                {integrityIssues.filter(i => i.severity === 'high').length} {translate('criticalCount')}, {' '}
+                {integrityIssues.filter(i => i.severity === 'medium').length} {translate('mediumCount')}
               </p>
             </div>
             <Button 
@@ -151,7 +151,7 @@ export function UnifiedSalesFlow({ onBack }: UnifiedSalesFlowProps) {
               onClick={handleAutoFix}
               className="bg-yellow-600 hover:bg-yellow-700"
             >
-              Reparar Automáticamente
+              {translate('repairAutomatically')}
             </Button>
           </AlertDescription>
         </Alert>
@@ -163,10 +163,10 @@ export function UnifiedSalesFlow({ onBack }: UnifiedSalesFlowProps) {
           <div className="p-4">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-xs font-medium text-gray-500">Total Pedidos</p>
+                <p className="text-xs font-medium text-gray-500">{translate('totalOrders')}</p>
                 <p className="text-2xl font-bold text-gray-900 mt-1">{orders.length}</p>
                 <p className="text-xs text-gray-500 mt-1">
-                  {orderStats.pendingOrders} pendientes
+                  {orderStats.pendingOrders} {translate('pendingCount')}
                 </p>
               </div>
               <div className="p-2.5 bg-blue-100 rounded-lg">
@@ -180,7 +180,7 @@ export function UnifiedSalesFlow({ onBack }: UnifiedSalesFlowProps) {
           <div className="p-4">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-xs font-medium text-gray-500">Total Facturas</p>
+                <p className="text-xs font-medium text-gray-500">{translate('totalInvoices')}</p>
                 <p className="text-2xl font-bold text-gray-900 mt-1">{invoices.length}</p>
                 <p className="text-xs text-gray-500 mt-1">
                   ${invoiceStats.totalAmount.toFixed(2)}
@@ -197,10 +197,10 @@ export function UnifiedSalesFlow({ onBack }: UnifiedSalesFlowProps) {
           <div className="p-4">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-xs font-medium text-gray-500">Total PODs</p>
+                <p className="text-xs font-medium text-gray-500">{translate('totalPODs')}</p>
                 <p className="text-2xl font-bold text-gray-900 mt-1">{pods.length}</p>
                 <p className="text-xs text-gray-500 mt-1">
-                  {unvalidatedPods.length} sin validar
+                  {unvalidatedPods.length} {translate('unvalidatedCount')}
                 </p>
               </div>
               <div className="p-2.5 bg-purple-100 rounded-lg">
@@ -214,10 +214,10 @@ export function UnifiedSalesFlow({ onBack }: UnifiedSalesFlowProps) {
           <div className="p-4">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-xs font-medium text-gray-500">Tasa Completado</p>
+                <p className="text-xs font-medium text-gray-500">{translate('completionRateLabel')}</p>
                 <p className="text-2xl font-bold text-gray-900 mt-1">{completionRate}%</p>
                 <p className="text-xs text-gray-500 mt-1">
-                  Flujo completo
+                  {translate('flowComplete')}
                 </p>
               </div>
               <div className="p-2.5 bg-indigo-100 rounded-lg">
@@ -231,9 +231,9 @@ export function UnifiedSalesFlow({ onBack }: UnifiedSalesFlowProps) {
       {/* Visualización del Flujo */}
       <Card>
         <CardHeader>
-          <CardTitle>Flujo del Proceso de Ventas</CardTitle>
-          <CardDescription>
-            Visualización del estado actual del flujo completo
+<CardTitle>{translate('salesFlowTitle')}</CardTitle>
+        <CardDescription>
+            {translate('salesFlowDesc')}
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -243,16 +243,16 @@ export function UnifiedSalesFlow({ onBack }: UnifiedSalesFlowProps) {
               <div className="w-20 h-20 mx-auto bg-blue-100 rounded-full flex items-center justify-center mb-3">
                 <ShoppingCart className="h-10 w-10 text-blue-600" />
               </div>
-              <h3 className="font-semibold text-gray-900">Pedidos</h3>
+              <h3 className="font-semibold text-gray-900">{translate('ordersLabel')}</h3>
               <p className="text-2xl font-bold text-blue-600 my-2">{orders.length}</p>
               <div className="space-y-1 text-sm">
                 <div className="flex items-center justify-center gap-2">
                   <CheckCircle2 className="h-3 w-3 text-green-600" />
-                  <span>{orderStats.deliveredOrders} entregados</span>
+                  <span>{orderStats.deliveredOrders} {translate('deliveredCount')}</span>
                 </div>
                 <div className="flex items-center justify-center gap-2">
                   <AlertTriangle className="h-3 w-3 text-yellow-600" />
-                  <span>{orderStats.pendingOrders} pendientes</span>
+                  <span>{orderStats.pendingOrders} {translate('pendingCount')}</span>
                 </div>
               </div>
             </div>
@@ -264,16 +264,16 @@ export function UnifiedSalesFlow({ onBack }: UnifiedSalesFlowProps) {
               <div className="w-20 h-20 mx-auto bg-green-100 rounded-full flex items-center justify-center mb-3">
                 <FileText className="h-10 w-10 text-green-600" />
               </div>
-              <h3 className="font-semibold text-gray-900">Facturas</h3>
+              <h3 className="font-semibold text-gray-900">{translate('invoices')}</h3>
               <p className="text-2xl font-bold text-green-600 my-2">{invoices.length}</p>
               <div className="space-y-1 text-sm">
                 <div className="flex items-center justify-center gap-2">
                   <CheckCircle2 className="h-3 w-3 text-green-600" />
-                  <span>{ordersWithInvoice.length} con factura</span>
+                  <span>{ordersWithInvoice.length} {translate('withInvoice')}</span>
                 </div>
                 <div className="flex items-center justify-center gap-2">
                   <XCircle className="h-3 w-3 text-red-600" />
-                  <span>{orders.length - ordersWithInvoice.length} sin factura</span>
+                  <span>{orders.length - ordersWithInvoice.length} {translate('withoutInvoice')}</span>
                 </div>
               </div>
             </div>
@@ -290,11 +290,11 @@ export function UnifiedSalesFlow({ onBack }: UnifiedSalesFlowProps) {
               <div className="space-y-1 text-sm">
                 <div className="flex items-center justify-center gap-2">
                   <CheckCircle2 className="h-3 w-3 text-green-600" />
-                  <span>{invoicesWithPOD.length} con POD</span>
+                  <span>{invoicesWithPOD.length} {translate('withPOD')}</span>
                 </div>
                 <div className="flex items-center justify-center gap-2">
                   <XCircle className="h-3 w-3 text-red-600" />
-                  <span>{invoices.length - invoicesWithPOD.length} sin POD</span>
+                  <span>{invoices.length - invoicesWithPOD.length} {translate('withoutPOD')}</span>
                 </div>
               </div>
             </div>
@@ -303,7 +303,7 @@ export function UnifiedSalesFlow({ onBack }: UnifiedSalesFlowProps) {
           {/* Indicador de Progreso */}
           <div className="mt-8">
             <div className="flex items-center justify-between text-sm text-gray-600 mb-2">
-              <span>Completado</span>
+              <span>{translate('completedLabel')}</span>
               <span>{completionRate}%</span>
             </div>
             <div className="w-full bg-gray-200 rounded-full h-3">
@@ -322,10 +322,10 @@ export function UnifiedSalesFlow({ onBack }: UnifiedSalesFlowProps) {
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <AlertTriangle className="h-5 w-5 text-yellow-600" />
-              Problemas de Integridad Detectados
+              {translate('integrityProblemsTitle')}
             </CardTitle>
             <CardDescription>
-              Inconsistencias que requieren atención
+              {translate('inconsistenciesAttention')}
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -342,10 +342,10 @@ export function UnifiedSalesFlow({ onBack }: UnifiedSalesFlowProps) {
                   <div className="flex items-start justify-between">
                     <div>
                       <p className="font-medium">
-                        {issue.type === 'order_without_invoice' && 'Pedido sin Factura'}
-                        {issue.type === 'invoice_without_pod' && 'Factura sin POD'}
-                        {issue.type === 'orphan_pod' && 'POD Huérfano'}
-                        {issue.type === 'data_mismatch' && 'Inconsistencia de Datos'}
+                        {issue.type === 'order_without_invoice' && translate('orderWithoutInvoice')}
+                        {issue.type === 'invoice_without_pod' && translate('invoiceWithoutPOD')}
+                        {issue.type === 'orphan_pod' && translate('orphanPOD')}
+                        {issue.type === 'data_mismatch' && translate('dataMismatch')}
                       </p>
                       <p className="text-sm mt-1">{issue.description}</p>
                     </div>
@@ -356,9 +356,9 @@ export function UnifiedSalesFlow({ onBack }: UnifiedSalesFlowProps) {
                         ${issue.severity === 'low' ? 'bg-blue-100 text-blue-800' : ''}
                       `}
                     >
-                      {issue.severity === 'high' && 'Crítico'}
-                      {issue.severity === 'medium' && 'Medio'}
-                      {issue.severity === 'low' && 'Bajo'}
+                      {issue.severity === 'high' && translate('severityCritical')}
+                      {issue.severity === 'medium' && translate('severityMedium')}
+                      {issue.severity === 'low' && translate('severityLow')}
                     </Badge>
                   </div>
                 </Alert>

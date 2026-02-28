@@ -14,6 +14,7 @@ export interface AdminOrderSummary {
   storeName: string;
   storeAddress?: string;
   salespersonId?: string;
+  salespersonName?: string;
   date: string; // ISO string
   deliveryDate?: string;
   status: string;
@@ -83,19 +84,20 @@ function mapRawOrderToAdmin(raw: any): AdminOrderSummary | null {
     raw?.userId ??
     raw?.UserId;
 
+  const storeNameVal =
+    raw?.storeName ?? raw?.StoreName ?? raw?.store?.name ?? raw?.Store?.Name ?? '';
+  const salespersonNameVal =
+    typeof (raw?.salespersonName ?? raw?.SalespersonName ?? raw?.sellerName ?? raw?.SellerName ?? raw?.user?.name) === 'string'
+      ? (raw?.salespersonName ?? raw?.SalespersonName ?? raw?.sellerName ?? raw?.SellerName ?? raw?.user?.name as string).trim()
+      : (raw?.user?.firstName != null || raw?.user?.lastName != null)
+        ? `${raw?.user?.firstName ?? ''} ${raw?.user?.lastName ?? ''}`.trim()
+        : '';
+
   return {
     id: String(id),
     backendOrderId: raw?.orderId ?? raw?.OrderId ?? raw?.id ?? raw?.Id,
     storeId: String(raw?.storeId ?? raw?.StoreId ?? ''),
-    storeName: String(
-      raw?.storeName ??
-        raw?.StoreName ??
-        raw?.store?.name ??
-        raw?.Store?.Name ??
-        raw?.storeId ??
-        raw?.StoreId ??
-        ''
-    ).trim() || '—',
+    storeName: (typeof storeNameVal === 'string' ? storeNameVal : '').trim() || '—',
     storeAddress:
       raw?.storeAddress ??
       raw?.StoreAddress ??
@@ -105,6 +107,7 @@ function mapRawOrderToAdmin(raw: any): AdminOrderSummary | null {
       salespersonIdRaw != null && salespersonIdRaw !== ''
         ? String(salespersonIdRaw)
         : undefined,
+    salespersonName: salespersonNameVal || undefined,
     date:
       typeof createdAt === 'string'
         ? createdAt
@@ -666,8 +669,6 @@ function mapRawOrderToUI(raw: any, details: any[] = []): OrderForUI {
         raw?.StoreName ??
         raw?.store?.name ??
         raw?.Store?.Name ??
-        raw?.storeId ??
-        raw?.StoreId ??
         ''
     ).trim() || '—',
     storeAddress:
@@ -1640,6 +1641,133 @@ export const ordersApi = {
     if (podBase64) body.podBase64 = podBase64;
     const res = await safePatch<any>(`/invoice/invoices/${encodeURIComponent(id)}/pod`, body);
     return res !== null && res !== undefined;
+  },
+
+  /**
+   * Obtiene todas las facturas con sus detalles para reportes de ventas (admin).
+   * Usa GET /invoice/invoices y GET /invoicedetails/invoicedetails/invoice/{id}.
+   */
+  async getInvoicesForSalesReport(): Promise<
+    Array<{
+      invoiceId: string;
+      orderId: string;
+      storeId: string;
+      storeName?: string;
+      sellerId: string;
+      sellerName?: string;
+      issueDate: string;
+      invoiceNumber: string;
+      details: Array<{
+        productId: string;
+        productName?: string;
+        sku?: string;
+        quantity: number;
+        unitPrice: number;
+        subtotal: number;
+      }>;
+    }>
+  > {
+    const list = await safeGet<any>('/invoice/invoices');
+    const invoicesList = normalizeInvoiceList(list ?? null);
+    const result: Array<{
+      invoiceId: string;
+      orderId: string;
+      storeId: string;
+      storeName?: string;
+      sellerId: string;
+      sellerName?: string;
+      issueDate: string;
+      invoiceNumber: string;
+      details: Array<{
+        productId: string;
+        productName?: string;
+        sku?: string;
+        quantity: number;
+        unitPrice: number;
+        subtotal: number;
+      }>;
+    }> = [];
+
+    for (const rawInv of invoicesList) {
+      const inv = rawInv?.data ?? rawInv?.value ?? rawInv?.invoice ?? rawInv;
+      const invoiceId = String(inv?.id ?? inv?.Id ?? rawInv?.id ?? rawInv?.Id ?? inv?.invoiceId ?? inv?.InvoiceId ?? '').trim();
+      if (!invoiceId) continue;
+
+      const orderId = String(inv?.orderId ?? inv?.OrderId ?? rawInv?.orderId ?? rawInv?.OrderId ?? '').trim();
+      const storeId = String(inv?.storeId ?? inv?.StoreId ?? inv?.store?.id ?? inv?.Store?.Id ?? '').trim();
+      const sellerId = String(inv?.salespersonId ?? inv?.SalespersonId ?? inv?.sellerId ?? inv?.SellerId ?? inv?.salesperson?.id ?? inv?.user?.id ?? '').trim();
+      const storeName =
+        inv?.storeName ?? inv?.StoreName ?? inv?.store?.name ?? inv?.Store?.Name ?? rawInv?.storeName ?? rawInv?.StoreName ?? undefined;
+      const rawSellerName =
+        inv?.sellerName ?? inv?.SellerName ?? inv?.salespersonName ?? inv?.SalespersonName ?? inv?.salesperson?.name ?? inv?.user?.name;
+      let sellerName: string | undefined;
+      if (typeof rawSellerName === 'string') sellerName = rawSellerName.trim();
+      else if (rawSellerName && typeof rawSellerName === 'object') {
+        const first = (rawSellerName as any)?.firstName ?? (rawSellerName as any)?.FirstName ?? '';
+        const last = (rawSellerName as any)?.lastName ?? (rawSellerName as any)?.LastName ?? '';
+        sellerName = `${first} ${last}`.trim() || undefined;
+      }
+      const issueDate =
+        inv?.issueDate ?? inv?.IssueDate ?? inv?.date ?? inv?.Date ?? inv?.createdAt ?? inv?.CreatedAt ?? new Date().toISOString();
+      const invoiceNumber = String(inv?.invoiceNumber ?? inv?.InvoiceNumber ?? inv?.number ?? inv?.Number ?? invoiceId).trim();
+
+      let details = normalizeDetailList(inv);
+      if (details.length === 0) details = await this.getInvoiceDetailsByInvoiceId(invoiceId);
+
+      const detailRows: Array<{
+        productId: string;
+        productName?: string;
+        sku?: string;
+        quantity: number;
+        unitPrice: number;
+        subtotal: number;
+      }> = [];
+
+      for (const d of details) {
+        const qty = Number(d?.quantity ?? d?.Quantity ?? d?.QuantitySold ?? 0) || 0;
+        let unitPrice = Number(
+          d?.unitPrice ?? d?.UnitPrice ?? d?.price ?? d?.Price ?? d?.unitPriceUsd ?? d?.UnitPriceUsd ?? d?.priceUsd ?? d?.PriceUsd ?? 0
+        );
+        let subtotal = Number(
+          d?.subtotal ?? d?.Subtotal ?? d?.SubTotal ?? d?.total ?? d?.Total ?? d?.amount ?? d?.Amount ?? d?.lineTotal ?? d?.LineTotal ?? 0
+        );
+        if (unitPrice <= 0 && subtotal > 0 && qty > 0) unitPrice = subtotal / qty;
+        if (subtotal <= 0 && unitPrice > 0 && qty > 0) subtotal = qty * unitPrice;
+        if (unitPrice <= 0 && subtotal <= 0 && qty > 0) {
+          const pid = String(d?.productId ?? d?.ProductId ?? '').trim();
+          if (pid) {
+            const latest = await histpricesApi.getLatest(pid);
+            const p = latest?.price ?? 0;
+            if (p > 0) {
+              unitPrice = p;
+              subtotal = qty * unitPrice;
+            }
+          }
+        }
+        detailRows.push({
+          productId: String(d?.productId ?? d?.ProductId ?? ''),
+          productName: d?.productName ?? d?.ProductName ?? d?.description ?? d?.Description,
+          sku: d?.sku ?? d?.Sku ?? d?.code ?? d?.Code,
+          quantity: qty,
+          unitPrice,
+          subtotal
+        });
+      }
+
+      result.push({
+        invoiceId,
+        orderId,
+        storeId,
+        storeName: storeName || undefined,
+        sellerId,
+        sellerName: sellerName || undefined,
+        issueDate: typeof issueDate === 'string' ? issueDate : new Date(issueDate).toISOString(),
+        invoiceNumber,
+        details: detailRows
+      });
+    }
+
+    return result;
   },
 };
 

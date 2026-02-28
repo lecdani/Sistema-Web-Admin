@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Loader2 } from 'lucide-react';
 import { Badge } from '@/shared/components/base/Badge';
+import { useLanguage } from '@/shared/hooks/useLanguage';
 import { Order, Planogram, Distribution, Product } from '@/shared/types';
 import { planogramsApi } from '@/shared/services/planograms-api';
 import { distributionsApi } from '@/shared/services/distributions-api';
@@ -25,6 +26,7 @@ interface ProductPosition {
 }
 
 export const OrderPlanogramView: React.FC<OrderPlanogramViewProps> = ({ order }) => {
+  const { translate } = useLanguage();
   const [grid, setGrid] = useState<ProductPosition[]>([]);
   const [planogramName, setPlanogramName] = useState<string | null>(null);
   const [planogramDescription, setPlanogramDescription] = useState<string | null>(null);
@@ -39,7 +41,7 @@ export const OrderPlanogramView: React.FC<OrderPlanogramViewProps> = ({ order })
       setLoadError(null);
       const orderId = String(order.id ?? (order as any).backendOrderId ?? '');
       if (!orderId) {
-        setLoadError('Pedido sin ID');
+        setLoadError(translate('orderWithoutId'));
         setLoading(false);
         return;
       }
@@ -58,7 +60,7 @@ export const OrderPlanogramView: React.FC<OrderPlanogramViewProps> = ({ order })
         if (!mounted) return;
 
         if (!apiOrder) {
-          setLoadError('Pedido no encontrado');
+          setLoadError(translate('orderNotFound'));
           setLoading(false);
           return;
         }
@@ -77,7 +79,7 @@ export const OrderPlanogramView: React.FC<OrderPlanogramViewProps> = ({ order })
           (order.planogramId && planogramsData.find((p: Planogram) => p.id === order.planogramId)) ||
           planogramsData[0];
         if (!activePlan) {
-          setLoadError('No hay planograma activo. Activa uno en Planogramas.');
+          setLoadError(translate('noActivePlanogramActivate'));
           setLoading(false);
           return;
         }
@@ -173,7 +175,7 @@ export const OrderPlanogramView: React.FC<OrderPlanogramViewProps> = ({ order })
       <div className="min-h-[280px] bg-slate-50 flex items-center justify-center rounded-lg">
         <div className="flex flex-col items-center gap-3">
           <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
-          <p className="text-sm text-slate-600">Cargando planograma...</p>
+          <p className="text-sm text-slate-600">{translate('loadingPlanogram')}</p>
         </div>
       </div>
     );
@@ -184,7 +186,7 @@ export const OrderPlanogramView: React.FC<OrderPlanogramViewProps> = ({ order })
       <div className="min-h-[280px] bg-slate-50 flex items-center justify-center rounded-lg">
         <div className="text-center px-4">
           <p className="text-slate-600 mb-2">{loadError}</p>
-          <p className="text-xs text-slate-500">Activa un planograma en la sección Planogramas para ver el pedido en la grilla.</p>
+          <p className="text-xs text-slate-500">{translate('activatePlanogramInSection')}</p>
         </div>
       </div>
     );
@@ -205,32 +207,32 @@ export const OrderPlanogramView: React.FC<OrderPlanogramViewProps> = ({ order })
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-3">
             <div>
-              <h2 className="text-slate-900 text-sm">{planogramName ?? 'Planograma'}</h2>
+              <h2 className="text-slate-900 text-sm">{planogramName ?? translate('planogram')}</h2>
               {planogramDescription && (
                 <p className="text-xs text-slate-500 mt-0.5">{planogramDescription}</p>
               )}
             </div>
           </div>
-          <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200">Solo lectura</Badge>
+          <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200">{translate('readOnly')}</Badge>
         </div>
         <div className="grid grid-cols-3 gap-2">
           <div className="bg-slate-50 rounded-lg p-2 text-center">
-            <p className="text-xs text-slate-500 mb-0.5">Productos</p>
+            <p className="text-xs text-slate-500 mb-0.5">{translate('productsLabel')}</p>
             <p className="text-sm text-slate-900">{productsWithQty}</p>
           </div>
           <div className="bg-blue-50 rounded-lg p-2 text-center">
-            <p className="text-xs text-blue-600 mb-0.5">Unidades</p>
+            <p className="text-xs text-blue-600 mb-0.5">{translate('quantityUnits')}</p>
             <p className="text-sm text-blue-900">{totalToOrder}</p>
           </div>
           <div className="bg-green-50 rounded-lg p-2 text-center">
-            <p className="text-xs text-green-600 mb-0.5">Total</p>
+            <p className="text-xs text-green-600 mb-0.5">{translate('totalLabel')}</p>
             <p className="text-sm text-green-900">${totalValue.toFixed(2)}</p>
           </div>
         </div>
       </div>
 
       <div className="px-4 py-4">
-        <p className="text-sm text-slate-600 mb-3">Vista del planograma según el pedido (solo lectura).</p>
+        <p className="text-sm text-slate-600 mb-3">{translate('planogramViewReadOnly')}</p>
         <div className="bg-white rounded-xl p-3 shadow-sm border border-slate-200 overflow-x-auto">
           <div
             style={{
@@ -289,8 +291,8 @@ export const OrderPlanogramView: React.FC<OrderPlanogramViewProps> = ({ order })
           </div>
         </div>
         <div className="mt-4 flex flex-wrap gap-4 text-xs text-slate-500">
-          <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-slate-400" />Sin cantidad</span>
-          <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-blue-50 border border-blue-300" />Con cantidad</span>
+          <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-slate-400" />{translate('noQuantity')}</span>
+          <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-blue-50 border border-blue-300" />{translate('withQuantity')}</span>
         </div>
       </div>
     </div>

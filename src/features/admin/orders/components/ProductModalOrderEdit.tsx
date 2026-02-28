@@ -1,8 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { X, Package, Minus, Plus } from 'lucide-react';
+import { X, Minus, Plus } from 'lucide-react';
 import { Button } from '@/shared/components/base/Button';
 import { Input } from '@/shared/components/base/Input';
-import { Label } from '@/shared/components/base/Label';
 
 export interface ProductPositionEdit {
   row: number;
@@ -36,88 +35,74 @@ export function ProductModalOrderEdit({ open, onClose, position, onUpdate }: Pro
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 bg-black/50 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4">
-      <div className="bg-white rounded-t-2xl sm:rounded-2xl w-full sm:max-w-md max-h-[90vh] overflow-y-auto">
-        <div className="sticky top-0 bg-white border-b border-slate-200 px-4 py-4 flex items-center justify-between rounded-t-2xl">
-          <div>
-            <h3 className="text-slate-900">Cantidad a pedir</h3>
-            <p className="text-xs text-slate-500">
-              Posición: {position.row + 1},{position.col + 1}
-            </p>
-          </div>
-          <Button variant="ghost" size="sm" onClick={onClose} className="p-2 h-auto">
-            <X className="h-5 w-5" />
-          </Button>
+    <div className="fixed inset-0 bg-black/30 z-50 flex items-center justify-center p-4">
+      <div className="bg-white rounded-xl shadow-xl border border-gray-200 w-[260px] overflow-hidden">
+        <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
+          <span className="text-sm font-semibold text-gray-800">Cantidad a pedir</span>
+          <button type="button" onClick={onClose} className="h-8 w-8 flex items-center justify-center rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition-colors">
+            <X className="h-4 w-4" />
+          </button>
         </div>
 
         <div className="p-4 space-y-4">
-          <div className="bg-blue-50 rounded-lg p-4 border border-blue-100">
-            <div className="flex items-start gap-3">
-              <div className="p-2 bg-blue-100 rounded-lg">
-                <Package className="h-5 w-5 text-blue-600" />
-              </div>
-              <div className="flex-1">
-                {position.productId ? (
-                  <>
-                    <p className="text-sm text-slate-900 mb-1">{position.productName || position.sku}</p>
-                    <p className="text-xs text-slate-600 mb-2">{position.sku}</p>
-                    <p className="text-xs text-slate-500">Precio: ${(position.price || 0).toFixed(2)}</p>
-                  </>
-                ) : (
-                  <p className="text-sm text-amber-800">Esta posición no tiene producto asignado.</p>
-                )}
-              </div>
-            </div>
+          <div className="bg-gray-50 rounded-lg px-3 py-2.5 border border-gray-100">
+            {position.productId ? (
+              <>
+                <p className="text-sm font-medium text-gray-900 truncate leading-snug">{position.productName || position.sku}</p>
+                <p className="text-xs text-gray-500 mt-1">${(position.price || 0).toFixed(2)} unidad</p>
+              </>
+            ) : (
+              <p className="text-sm text-amber-700">Sin producto</p>
+            )}
           </div>
 
           {position.productId && (
             <>
               <div>
-                <Label className="text-sm text-slate-700 mb-2 block">Cantidad a pedir</Label>
+                <label className="block text-xs font-medium text-gray-600 mb-2">Cantidad</label>
                 <div className="flex items-center gap-2">
                   <Button
                     variant="outline"
                     size="sm"
                     onClick={() => setToOrder(Math.max(0, toOrder - 1))}
-                    className="h-10 w-10 p-0"
+                    className="h-10 w-10 p-0 shrink-0 rounded-lg border-gray-300"
                   >
-                    <Minus className="h-4 w-4" />
+                    <Minus className="h-5 w-5" />
                   </Button>
                   <Input
                     type="number"
+                    inputMode="numeric"
                     value={toOrder}
                     onChange={(e) => {
                       const val = parseInt(e.target.value, 10) || 0;
                       setToOrder(Math.max(0, val));
                     }}
-                    className="text-center h-10 bg-blue-50 border-blue-200"
+                    className="text-center h-10 text-lg font-semibold border-gray-300 w-20"
                     min={0}
                   />
                   <Button
                     variant="outline"
                     size="sm"
                     onClick={() => setToOrder(toOrder + 1)}
-                    className="h-10 w-10 p-0"
+                    className="h-10 w-10 p-0 shrink-0 rounded-lg border-gray-300"
                   >
-                    <Plus className="h-4 w-4" />
+                    <Plus className="h-5 w-5" />
                   </Button>
                 </div>
               </div>
-              <div className="bg-green-50 rounded-lg p-3 border border-green-200">
-                <div className="flex items-center justify-between">
-                  <span className="text-sm text-green-700">Subtotal</span>
-                  <span className="text-lg text-green-900">${(toOrder * position.price).toFixed(2)}</span>
-                </div>
+              <div className="flex justify-between items-center text-sm text-gray-600 pt-1 border-t border-gray-100">
+                <span>Total</span>
+                <span className="font-bold text-gray-900">${(toOrder * position.price).toFixed(2)}</span>
               </div>
             </>
           )}
 
-          <div className="flex gap-3 pt-2">
-            <Button variant="outline" onClick={onClose} className="flex-1">
+          <div className="flex gap-2 pt-2">
+            <Button variant="outline" onClick={onClose} className="flex-1 h-9 text-sm rounded-lg">
               Cancelar
             </Button>
             {position.productId && (
-              <Button onClick={handleSave} className="flex-1 bg-blue-600 hover:bg-blue-700">
+              <Button onClick={handleSave} className="flex-1 h-9 text-sm rounded-lg bg-indigo-600 hover:bg-indigo-700">
                 Guardar
               </Button>
             )}

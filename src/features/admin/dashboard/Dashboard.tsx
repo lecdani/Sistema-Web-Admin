@@ -4,22 +4,27 @@ import React, { useState, useEffect } from 'react';
 import { 
   Store as StoreIcon, 
   Users, 
-  TrendingUp,
   ArrowUpRight,
   ArrowDownRight,
   Package,
   BarChart3,
   Layout,
   Calendar,
-  CheckCircle,
-  Clock,
   MapPin,
   Workflow
 } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/shared/components/base/Card';
 import { Button } from '@/shared/components/base/Button';
-import { Badge } from '@/shared/components/base/Badge';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+  DialogClose,
+} from '@/shared/components/base/Dialog';
 import { useLanguage } from '@/shared/hooks/useLanguage';
+import { CalendarView } from './components/CalendarView';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { DashboardStats } from '@/shared/types';
 import { getFromLocalStorage } from '@/shared/services/database';
@@ -79,6 +84,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
     systemHealth: 'healthy'
   });
   const [isLoading, setIsLoading] = useState(true);
+  const [showCalendar, setShowCalendar] = useState(false);
 
   useEffect(() => {
     if (isVisible) loadDashboardData();
@@ -222,11 +228,11 @@ export const Dashboard: React.FC<DashboardProps> = ({
           </p>
         </div>
         <div className="flex items-center gap-3">
-          <Badge className="bg-green-100 text-green-800 flex items-center gap-1">
-            <CheckCircle className="h-3 w-3" />
-            {translate('systemOperational')}
-          </Badge>
-          <Button variant="outline" size="sm">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setShowCalendar(true)}
+          >
             <Calendar className="h-4 w-4 mr-2" />
             {translate('viewCalendar')}
           </Button>
@@ -316,55 +322,21 @@ export const Dashboard: React.FC<DashboardProps> = ({
         </div>
       </div>
 
-      {/* System Status */}
-      <div className="grid grid-cols-1 lg:grid-cols-1 gap-6">
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <TrendingUp className="h-5 w-5 text-blue-600" />
-              {translate('systemStatus')}
-            </CardTitle>
-            <CardDescription>
-              {translate('systemStatusDesc')}
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-2.5">
-            <div className="flex items-center justify-between">
-              <span className="text-sm text-gray-600">{translate('generalStatus')}</span>
-              <Badge className="bg-green-100 text-green-800">{translate('operational')}</Badge>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-sm text-gray-600">{translate('registeredStores')}</span>
-              <span className="text-sm font-semibold text-gray-900">{stats.totalStores}</span>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-sm text-gray-600">{translate('registeredProducts')}</span>
-              <span className="text-sm font-semibold text-gray-900">{stats.totalProducts}</span>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-sm text-gray-600">{translate('totalPlanograms')}</span>
-              <span className="text-sm font-semibold text-gray-900">{stats.totalPlanograms}</span>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-sm text-gray-600">{translate('registeredUsers')}</span>
-              <span className="text-sm font-semibold text-gray-900">{stats.totalUsers}</span>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-sm text-gray-600">{translate('lastSync')}</span>
-              <div className="flex items-center gap-1.5">
-                <Clock className="h-3 w-3 text-gray-400" />
-                <span className="text-sm font-semibold text-gray-900">{translate('realTime')}</span>
-              </div>
-            </div>
-            <div className="pt-2.5 border-t border-gray-100">
-              <Button className="w-full" size="sm" variant="outline">
-                <BarChart3 className="h-4 w-4 mr-2" />
-                {translate('viewDetailedMetrics')}
+      <Dialog open={showCalendar} onOpenChange={setShowCalendar}>
+        <DialogContent className="max-w-md" showClose={true} closeAriaLabel={translate('close')}>
+          <DialogHeader>
+            <DialogTitle>{translate('calendarTitle')}</DialogTitle>
+          </DialogHeader>
+          <CalendarView />
+          <DialogFooter>
+            <DialogClose asChild>
+              <Button variant="outline" size="sm">
+                {translate('close')}
               </Button>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
+            </DialogClose>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };
