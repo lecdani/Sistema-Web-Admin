@@ -226,6 +226,12 @@ export interface DashboardStats {
   activePlanogram: number;
   totalCities: number;
   systemHealth: 'healthy' | 'warning' | 'critical';
+  /** Pedidos con status completed/invoiced/delivered */
+  totalCompletedOrders: number;
+  /** Pedidos pendientes (no completados) */
+  totalPendingOrders: number;
+  /** Total de pedidos (transacciones) */
+  totalTransactions: number;
 }
 
 export interface OrderFilters {

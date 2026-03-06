@@ -310,6 +310,7 @@ export function ReportsManagement({ onBack }: ReportsManagementProps) {
             const productName = item.productName ?? product?.name ?? item.productId;
             const productSku = item.sku ?? product?.sku ?? '';
 
+            const poDisplay = orderIdToPo.get(inv.orderId) ?? inv.orderId;
             salesReports.push({
               id: `${inv.invoiceId}-${item.productId}-${item.quantity}`,
               orderId: inv.orderId,
@@ -327,8 +328,8 @@ export function ReportsManagement({ onBack }: ReportsManagementProps) {
               unitPrice: item.unitPrice,
               totalAmount: item.subtotal,
               date: new Date(inv.issueDate),
-              invoiceNumber: inv.invoiceNumber,
-              orderNumber: orderIdToPo.get(inv.orderId) ?? inv.orderId
+              invoiceNumber: poDisplay,
+              orderNumber: poDisplay
             });
           }
         }
@@ -358,6 +359,7 @@ export function ReportsManagement({ onBack }: ReportsManagementProps) {
               let totalAmount = Number(item?.subtotal ?? item?.Subtotal ?? item?.total ?? item?.Total ?? item?.amount ?? item?.Amount ?? 0);
               if (unitPrice <= 0 && totalAmount > 0 && qty > 0) unitPrice = totalAmount / qty;
               if (totalAmount <= 0 && unitPrice > 0 && qty > 0) totalAmount = qty * unitPrice;
+              const poDisplay = (order as any).po ?? order.id;
               salesReports.push({
                 id: `${invoice.id}-${item.id ?? item.productId}`,
                 orderId: order.id,
@@ -375,8 +377,8 @@ export function ReportsManagement({ onBack }: ReportsManagementProps) {
                 unitPrice,
                 totalAmount,
                 date: new Date(invoice.issueDate),
-                invoiceNumber: invoice.invoiceNumber,
-                orderNumber: (order as any).po ?? order.id
+                invoiceNumber: poDisplay,
+                orderNumber: poDisplay
               });
             });
           }
@@ -701,7 +703,7 @@ export function ReportsManagement({ onBack }: ReportsManagementProps) {
       const detailRows = filteredSalesDataSorted.slice(0, 2000);
       detailRows.forEach((sale) => {
         ws.getCell(row, 1).value = new Date(sale.date).toLocaleDateString(locale);
-        ws.getCell(row, 2).value = sale.invoiceNumber ?? '';
+        ws.getCell(row, 2).value = sale.invoiceNumber ? `PO - ${sale.invoiceNumber}` : '';
         ws.getCell(row, 3).value = (sale.productName ?? '').substring(0, 40);
         ws.getCell(row, 4).value = (sale.storeName ?? '').substring(0, 30);
         ws.getCell(row, 5).value = (sale.sellerName ?? '').substring(0, 25);
@@ -1110,7 +1112,7 @@ ${salesMetrics.topSellers.map((s, i) =>
                   <TableHeader>
                     <TableRow>
                       <TableHead>{translate('dateCol')}</TableHead>
-                      <TableHead>{translate('invoiceCol')}</TableHead>
+                      <TableHead className="min-w-[230px] w-[230px]">{translate('poNumber')}</TableHead>
                       <TableHead>{translate('productLabel')}</TableHead>
                       <TableHead>{translate('storeLabel')}</TableHead>
                       <TableHead>{translate('sellerLabel')}</TableHead>
@@ -1139,8 +1141,8 @@ ${salesMetrics.topSellers.map((s, i) =>
                             {isNewInvoice && (
                               <TableRow key={`inv-header-${sale.invoiceId}`} className="bg-muted/60 hover:bg-muted/60">
                                 <TableCell colSpan={8} className="py-2 font-medium text-sm">
-                                  <span className="text-primary">
-                                    {translate('invoiceCol')} {sale.invoiceNumber}
+                                  <span className="text-primary inline-block min-w-[230px]">
+                                    {sale.invoiceNumber ? `PO - ${sale.invoiceNumber}` : '—'}
                                   </span>
                                   {' · '}
                                   {new Date(sale.date).toLocaleDateString(locale, {
@@ -1164,7 +1166,7 @@ ${salesMetrics.topSellers.map((s, i) =>
                               <TableCell className="text-muted-foreground">
                                 {new Date(sale.date).toLocaleDateString(locale)}
                               </TableCell>
-                              <TableCell className="font-medium">{sale.invoiceNumber}</TableCell>
+                              <TableCell className="font-medium min-w-[230px] w-[230px]">{sale.invoiceNumber ? `PO - ${sale.invoiceNumber}` : '—'}</TableCell>
                               <TableCell>
                                 <div className="flex items-center gap-3">
                                   {(() => {

@@ -22,6 +22,8 @@ export interface AdminOrderSummary {
   tax: number;
   total: number;
   invoiceId?: string | number;
+  /** Código PO (Purchase Order), único. */
+  po?: string;
 }
 
 // Igual que PWA: list?.data ?? list?.items ?? []
@@ -124,6 +126,7 @@ function mapRawOrderToAdmin(raw: any): AdminOrderSummary | null {
       raw?.InvoiceId ??
       raw?.invoice?.id ??
       raw?.Invoice?.Id,
+    po: raw?.po ?? raw?.Po ?? raw?.purchaseOrder ?? raw?.PurchaseOrder ?? raw?.PO ?? undefined,
   };
 }
 
@@ -269,6 +272,27 @@ export async function fetchAllOrderSummaries(): Promise<AdminOrderSummary[]> {
   }
 }
 
+/**
+ * Indica si un código PO ya está en uso por otro pedido (para validación al editar PO).
+ * excludeOrderId: al editar, ese pedido se ignora (mismo PO del mismo pedido permitido).
+ */
+export async function isPoAlreadyUsed(
+  po: string,
+  options?: { excludeOrderId?: string }
+): Promise<boolean> {
+  const poNorm = (po ?? '').trim().toLowerCase();
+  if (!poNorm) return false;
+  const all = await fetchAllOrderSummaries();
+  const excludeId = options?.excludeOrderId ? String(options.excludeOrderId).trim() : '';
+  return all.some((o) => {
+    const oid = String(o.id ?? o.backendOrderId ?? '').trim();
+    if (excludeId && (oid === excludeId || String(o.backendOrderId ?? '').trim() === excludeId))
+      return false;
+    const opo = (o.po ?? '').trim().toLowerCase();
+    return opo === poNorm;
+  });
+}
+
 // ============================
 // Tipos y helpers para CRUD de pedidos (API real, compartido con la PWA)
 // ============================
@@ -287,6 +311,8 @@ export interface CreateOrderInput {
   storeAddress?: string;
   salespersonId?: string;
   vendorNumber?: string;
+  /** Código PO (Purchase Order), único en el sistema. */
+  po?: string;
   items: OrderItemInput[];
   subtotal: number;
   tax: number;
@@ -471,6 +497,8 @@ export interface OrderForUI {
   comments?: string;
   invoiceId?: number | string;
   salespersonId?: string;
+  /** Código PO (Purchase Order), único. */
+  po?: string;
 }
 
 function detailQuantity(d: any): number {
@@ -696,6 +724,7 @@ function mapRawOrderToUI(raw: any, details: any[] = []): OrderForUI {
     podFileName: raw?.podFileName ?? raw?.PodFileName,
     vendorNumber: raw?.vendorNumber ?? raw?.VendorNumber,
     comments: raw?.comments ?? raw?.Comments,
+    po: raw?.po ?? raw?.Po ?? raw?.purchaseOrder ?? raw?.PurchaseOrder ?? raw?.PO ?? undefined,
     invoiceId:
       raw?.invoiceId ??
       raw?.InvoiceId ??
@@ -794,6 +823,7 @@ export const ordersApi = {
         total,
         salespersonId: summary.salespersonId,
         invoiceId: summary.invoiceId,
+        po: summary.po,
       });
     }
     return result;
@@ -1433,6 +1463,11 @@ export const ordersApi = {
     if (salespersonId) {
       headerBody.salespersonId = salespersonId;
       headerBody.SalespersonId = salespersonId;
+    }
+    const poTrimmed = (input.po ?? '').trim();
+    if (poTrimmed) {
+      headerBody.po = poTrimmed;
+      headerBody.Po = poTrimmed;
     }
     const putOrderRes = await safePut<any>(`/orders/order/${encodeURIComponent(id)}`, headerBody);
     if (putOrderRes === null) return false;

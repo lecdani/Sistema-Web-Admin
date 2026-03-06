@@ -11,7 +11,9 @@ import {
   Layout,
   Calendar,
   MapPin,
-  Workflow
+  Workflow,
+  CheckCircle2,
+  Clock
 } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/shared/components/base/Card';
 import { Button } from '@/shared/components/base/Button';
@@ -33,6 +35,7 @@ import { usersApi } from '@/shared/services/users-api';
 import { storesApi } from '@/shared/services/stores-api';
 import { productsApi } from '@/shared/services/products-api';
 import { planogramsApi } from '@/shared/services/planograms-api';
+import { ordersApi } from '@/shared/services/orders-api';
 import { useRouter } from 'next/navigation';
 
 interface DashboardModule {
@@ -81,13 +84,23 @@ export const Dashboard: React.FC<DashboardProps> = ({
     totalPlanograms: 0,
     activePlanogram: 0,
     totalCities: 0,
-    systemHealth: 'healthy'
+    systemHealth: 'healthy',
+    totalCompletedOrders: 0,
+    totalPendingOrders: 0,
+    totalTransactions: 0
   });
   const [isLoading, setIsLoading] = useState(true);
   const [showCalendar, setShowCalendar] = useState(false);
 
   useEffect(() => {
     if (isVisible) loadDashboardData();
+  }, [isVisible]);
+
+  // Actualizar métricas periódicamente para reflejar cambios (pedidos, facturas, etc.)
+  useEffect(() => {
+    if (!isVisible) return;
+    const interval = setInterval(loadDashboardData, 30000);
+    return () => clearInterval(interval);
   }, [isVisible]);
 
   const loadDashboardData = async () => {
@@ -151,6 +164,21 @@ export const Dashboard: React.FC<DashboardProps> = ({
         activePlanogram = planograms.filter((p: any) => p.isActive === true).length;
       }
 
+      let totalCompletedOrders = 0;
+      let totalPendingOrders = 0;
+      let totalTransactions = 0;
+      try {
+        const ordersList = await ordersApi.getAllOrders();
+        totalTransactions = ordersList.length;
+        const completedStatuses = ['completed', 'invoiced', 'delivered'];
+        totalCompletedOrders = ordersList.filter(
+          (o: any) => completedStatuses.includes((o.status || '').toLowerCase())
+        ).length;
+        totalPendingOrders = totalTransactions - totalCompletedOrders;
+      } catch {
+        // Sin API de pedidos o sin auth
+      }
+
       setStats({
         totalUsers,
         activeUsers,
@@ -162,7 +190,10 @@ export const Dashboard: React.FC<DashboardProps> = ({
         totalPlanograms,
         activePlanogram,
         totalCities,
-        systemHealth: totalUsers > 10 ? 'healthy' : totalUsers > 5 ? 'warning' : 'critical'
+        systemHealth: totalUsers > 10 ? 'healthy' : totalUsers > 5 ? 'warning' : 'critical',
+        totalCompletedOrders,
+        totalPendingOrders,
+        totalTransactions
       });
     } catch (error) {
       console.error('Error cargando datos del dashboard:', error);
@@ -177,7 +208,10 @@ export const Dashboard: React.FC<DashboardProps> = ({
         totalPlanograms: 0,
         activePlanogram: 0,
         totalCities: 0,
-        systemHealth: 'healthy'
+        systemHealth: 'healthy',
+        totalCompletedOrders: 0,
+        totalPendingOrders: 0,
+        totalTransactions: 0
       });
     } finally {
       setIsLoading(false);
@@ -189,7 +223,10 @@ export const Dashboard: React.FC<DashboardProps> = ({
     { titleKey: 'statActiveStores', value: stats.activeStores.toString(), change: 0, icon: StoreIcon, color: 'text-blue-600', bgColor: 'bg-blue-50' },
     { titleKey: 'statActiveProducts', value: stats.activeProducts.toString(), change: 0, icon: Package, color: 'text-green-600', bgColor: 'bg-green-50' },
     { titleKey: 'statActivePlanogram', value: stats.activePlanogram.toString(), change: 0, icon: Layout, color: 'text-purple-600', bgColor: 'bg-purple-50' },
-    { titleKey: 'statActiveUsers', value: stats.activeUsers.toString(), change: 0, icon: Users, color: 'text-orange-600', bgColor: 'bg-orange-50' }
+    { titleKey: 'statActiveUsers', value: stats.activeUsers.toString(), change: 0, icon: Users, color: 'text-orange-600', bgColor: 'bg-orange-50' },
+    { titleKey: 'statCompletedOrders', value: stats.totalCompletedOrders.toString(), change: 0, icon: CheckCircle2, color: 'text-emerald-600', bgColor: 'bg-emerald-50' },
+    { titleKey: 'statPendingOrders', value: stats.totalPendingOrders.toString(), change: 0, icon: Clock, color: 'text-amber-600', bgColor: 'bg-amber-50' },
+    { titleKey: 'statTotalTransactions', value: stats.totalTransactions.toString(), change: 0, icon: BarChart3, color: 'text-slate-700', bgColor: 'bg-slate-100' }
   ];
 
   const modules: DashboardModule[] = [

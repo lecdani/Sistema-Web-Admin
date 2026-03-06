@@ -81,8 +81,8 @@ export function Invoice({
             marginBottom: '2.5rem',
           }}
         >
-          <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between" style={{ gap: '9rem' }}>
-            <div>
+          <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between" style={{ gap: '2rem' }}>
+            <div style={{ flexShrink: 0 }}>
               <p
                 style={{
                   fontSize: '10px',
@@ -109,7 +109,18 @@ export function Invoice({
               <p style={{ fontSize: '0.875rem', color: s.slate600, marginTop: '0.5rem' }}>7NW 84TH ST, MIAMI, FL 33166</p>
               <p style={{ fontSize: '0.875rem', color: s.slate600 }}>TEL: (305) 12345678</p>
             </div>
-            <div style={{ textAlign: 'right' }} className="sm:text-right">
+            <div
+              style={{
+                flex: 1,
+                minWidth: 0,
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'flex-end',
+                paddingRight: '1rem',
+                marginLeft: 'auto',
+              }}
+              className="sm:text-right"
+            >
               <div
                 style={{
                   display: 'inline-block',

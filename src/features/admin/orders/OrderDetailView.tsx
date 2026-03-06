@@ -1,9 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { Button } from '@/shared/components/base/Button';
+import { Input } from '@/shared/components/base/Input';
 import { Badge } from '@/shared/components/base/Badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/shared/components/base/Tabs';
 import { Alert, AlertDescription } from '@/shared/components/base/Alert';
 import { Card, CardContent, CardHeader, CardTitle } from '@/shared/components/base/Card';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/shared/components/base/Select';
 import {
   ShoppingCart,
   FileText,
@@ -16,13 +18,14 @@ import {
   Layout,
 } from 'lucide-react';
 import { useLanguage } from '@/shared/hooks/useLanguage';
-import { ordersApi, OrderForUI } from '@/shared/services/orders-api';
+import { ordersApi, OrderForUI, isPoAlreadyUsed } from '@/shared/services/orders-api';
 import { uploadImage } from '@/shared/services/images-api';
 import { getBackendAssetUrl } from '@/shared/config/api';
 import { toast } from 'sonner';
 import { histpricesApi } from '@/shared/services/histprices-api';
 import { productsApi } from '@/shared/services/products-api';
 import { storesApi } from '@/shared/services/stores-api';
+import { citiesApi } from '@/shared/services/cities-api';
 import { usersApi } from '@/shared/services/users-api';
 import { Invoice } from './components/Invoice';
 import { OrderPlanogramView } from './components/OrderPlanogramView';
@@ -55,8 +58,18 @@ export function OrderDetailView({ orderId, onClose, onOrderUpdated }: OrderDetai
   const [podImageError, setPodImageError] = useState(false);
   const [storeNameDisplay, setStoreNameDisplay] = useState<string>('');
   const [storeAddressDisplay, setStoreAddressDisplay] = useState<string>('');
+  const [storeCityDisplay, setStoreCityDisplay] = useState<string>('');
   const [sellerNameDisplay, setSellerNameDisplay] = useState<string>('');
   const [activeTab, setActiveTab] = useState('info');
+  const [editingPo, setEditingPo] = useState(false);
+  const [poEditValue, setPoEditValue] = useState('');
+  const [poSaveLoading, setPoSaveLoading] = useState(false);
+  const [poError, setPoError] = useState<string | null>(null);
+  const [editingStore, setEditingStore] = useState(false);
+  const [storesList, setStoresList] = useState<{ id: string; name: string; address: string; cityId: string }[]>([]);
+  const [storeEditValue, setStoreEditValue] = useState('');
+  const [storeSaveLoading, setStoreSaveLoading] = useState(false);
+  const [storeError, setStoreError] = useState<string | null>(null);
 
   useEffect(() => {
     const load = async () => {
@@ -117,20 +130,33 @@ export function OrderDetailView({ orderId, onClose, onOrderUpdated }: OrderDetai
             resolvedStoreAddress = store.address || '';
             setStoreNameDisplay(store.name);
             setStoreAddressDisplay(store.address || '');
+            if (store.cityId) {
+              try {
+                const city = await citiesApi.getById(store.cityId);
+                setStoreCityDisplay(city?.name ?? '');
+              } catch {
+                setStoreCityDisplay('');
+              }
+            } else {
+              setStoreCityDisplay('');
+            }
           } else {
             resolvedStoreName = name || orderToSet.storeName || '—';
             setStoreNameDisplay(resolvedStoreName);
             setStoreAddressDisplay(orderToSet.storeAddress || '');
+            setStoreCityDisplay('');
           }
         } catch {
           setStoreNameDisplay(name || orderToSet.storeName || '—');
           setStoreAddressDisplay(orderToSet.storeAddress || '');
+          setStoreCityDisplay('');
         }
       } else {
         resolvedStoreName = name || orderToSet.storeName || '—';
         resolvedStoreAddress = orderToSet.storeAddress || '';
         setStoreNameDisplay(resolvedStoreName);
         setStoreAddressDisplay(resolvedStoreAddress);
+        setStoreCityDisplay('');
       }
 
       // Nombre del vendedor desde API
@@ -169,6 +195,16 @@ export function OrderDetailView({ orderId, onClose, onOrderUpdated }: OrderDetai
     };
     load();
   }, [orderId]);
+
+  useEffect(() => {
+    if (!order || (order.status || '').toLowerCase() !== 'pending') return;
+    let mounted = true;
+    (async () => {
+      const list = await storesApi.fetchAll();
+      if (mounted) setStoresList(list.map((s) => ({ id: s.id, name: s.name, address: s.address || '', cityId: s.cityId || '' })));
+    })();
+    return () => { mounted = false; };
+  }, [order?.id, order?.status]);
 
   useEffect(() => {
     setPodImageError(false);
@@ -300,6 +336,132 @@ export function OrderDetailView({ orderId, onClose, onOrderUpdated }: OrderDetai
     return d.includes(',') ? d : new Date(d).toLocaleDateString(locale);
   };
 
+  const isPendingOrder = (order?.status || '').toLowerCase() === 'pending';
+  const handleStartEditPo = () => {
+    setPoEditValue((order?.po ?? '').trim());
+    setPoError(null);
+    setEditingPo(true);
+  };
+  const handleCancelEditPo = () => {
+    setEditingPo(false);
+    setPoEditValue('');
+    setPoError(null);
+  };
+  const handleStartEditStore = () => {
+    setStoreEditValue((order as any)?.storeId ?? '');
+    setStoreError(null);
+    setEditingStore(true);
+  };
+  const handleCancelEditStore = () => {
+    setEditingStore(false);
+    setStoreEditValue('');
+    setStoreError(null);
+  };
+  const handleSaveStore = async () => {
+    const storeIdTrimmed = (storeEditValue ?? '').trim();
+    if (!storeIdTrimmed) {
+      setStoreError(translate('storeNotFound'));
+      return;
+    }
+    const selectedStore = storesList.find((s) => s.id === storeIdTrimmed);
+    if (!selectedStore) {
+      setStoreError(translate('storeNotFound'));
+      return;
+    }
+    setStoreSaveLoading(true);
+    setStoreError(null);
+    try {
+      const items = (order?.items || []).map((i: any) => ({
+        productId: String(i.productId ?? ''),
+        sku: (i.sku ?? '').trim(),
+        productName: (i.productName ?? '').trim(),
+        quantity: Number(i.quantity ?? i.toOrder ?? 0),
+        price: Number(i.price ?? 0),
+      }));
+      const subtotal = items.reduce((s, i) => s + i.quantity * i.price, 0);
+      const payload = {
+        storeId: selectedStore.id,
+        storeName: selectedStore.name,
+        storeAddress: selectedStore.address,
+        salespersonId: (order as any)?.salespersonId,
+        po: (order?.po ?? '').trim(),
+        items,
+        subtotal,
+        tax: Number(order?.tax ?? 0),
+        total: Number(order?.total ?? displayTotal) || subtotal,
+      };
+      const ok = await ordersApi.updateOrder(orderId, payload as any, order?.invoiceId ?? undefined);
+      if (!ok) {
+        setStoreError(translate('errorSavingOrder'));
+        return;
+      }
+      toast.success(translate('orderUpdatedSuccess'));
+      setStoreNameDisplay(selectedStore.name);
+      setStoreAddressDisplay(selectedStore.address);
+      const city = selectedStore.cityId ? await citiesApi.getById(selectedStore.cityId) : null;
+      setStoreCityDisplay(city?.name ?? '');
+      setOrder((prev) => prev ? { ...prev, storeId: selectedStore.id, storeName: selectedStore.name, storeAddress: selectedStore.address } : prev);
+      onOrderUpdated?.();
+      setEditingStore(false);
+      setStoreEditValue('');
+    } catch {
+      setStoreError(translate('errorSavingOrder'));
+    } finally {
+      setStoreSaveLoading(false);
+    }
+  };
+
+  const handleSavePo = async () => {
+    const poTrimmed = (poEditValue ?? '').trim();
+    if (!poTrimmed) {
+      setPoError(translate('poRequired'));
+      return;
+    }
+    setPoError(null);
+    setPoSaveLoading(true);
+    try {
+      const taken = await isPoAlreadyUsed(poTrimmed, { excludeOrderId: orderId });
+      if (taken) {
+        setPoError(translate('duplicatePo'));
+        setPoSaveLoading(false);
+        return;
+      }
+      const items = (order?.items || []).map((i: any) => ({
+        productId: String(i.productId ?? ''),
+        sku: (i.sku ?? '').trim(),
+        productName: (i.productName ?? '').trim(),
+        quantity: Number(i.quantity ?? i.toOrder ?? 0),
+        price: Number(i.price ?? 0),
+      }));
+      const subtotal = items.reduce((s, i) => s + i.quantity * i.price, 0);
+      const payload = {
+        storeId: (order as any)?.storeId ?? '',
+        storeName: order?.storeName,
+        storeAddress: (order as any)?.storeAddress,
+        salespersonId: (order as any)?.salespersonId,
+        po: poTrimmed,
+        items,
+        subtotal,
+        tax: Number(order?.tax ?? 0),
+        total: Number(order?.total ?? displayTotal) || subtotal,
+      };
+      const ok = await ordersApi.updateOrder(orderId, payload as any, order?.invoiceId ?? undefined);
+      if (!ok) {
+        setPoError(translate('errorSavingOrder'));
+        return;
+      }
+      toast.success(translate('poUpdatedSuccess'));
+      setOrder((prev) => (prev ? { ...prev, po: poTrimmed } : prev));
+      onOrderUpdated?.();
+      setEditingPo(false);
+      setPoEditValue('');
+    } catch {
+      setPoError(translate('errorSavingOrder'));
+    } finally {
+      setPoSaveLoading(false);
+    }
+  };
+
   return (
     <div className="space-y-0">
       <div className="bg-gradient-to-r from-indigo-600 to-blue-600 rounded-t-lg p-6 text-white">
@@ -309,7 +471,7 @@ export function OrderDetailView({ orderId, onClose, onOrderUpdated }: OrderDetai
               <ShoppingCart className="h-6 w-6" />
             </div>
             <div>
-              <h2 className="text-2xl font-bold">{translate('orderNumber')} #{(order as any).po ?? order.id ?? order.backendOrderId ?? '—'}</h2>
+              <h2 className="text-2xl font-bold">{order.po ? `PO - ${order.po}` : `${translate('orderNumber')} #${order.id ?? order.backendOrderId ?? '—'}`}</h2>
               <p className="text-blue-100 text-sm mt-1">
                 {translate('createdOn')} {new Date(order.date || (order as any).createdAt).toLocaleDateString(locale, {
                   day: 'numeric',
@@ -361,17 +523,114 @@ export function OrderDetailView({ orderId, onClose, onOrderUpdated }: OrderDetai
                 <h3 className="font-semibold text-gray-900">{translate('orderDetails')}</h3>
               </div>
               <div className="space-y-3">
-                <div className="flex justify-between items-center">
-                  <span className="text-gray-600 text-sm">{translate('sellerLabel')}:</span>
-                  <span className="font-medium text-gray-900">{sellerNameDisplay || '—'}</span>
+                {/* 1. Pedido (PO) */}
+                <div className="flex justify-between items-start gap-2">
+                  <span className="text-gray-600 text-sm pt-0.5">{translate('poNumber')}:</span>
+                  <div className="flex-1 min-w-0 text-right">
+                    {!editingPo ? (
+                      <div className="flex items-center justify-end gap-2 flex-wrap">
+                        <span className="font-medium text-gray-900">
+                          {order.po ? `PO - ${order.po}` : '—'}
+                        </span>
+                        {isPendingOrder && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="h-8 text-xs"
+                            onClick={handleStartEditPo}
+                          >
+                            {translate('editPo')}
+                          </Button>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="space-y-2">
+                        <Input
+                          value={poEditValue}
+                          onChange={(e) => {
+                            setPoEditValue(e.target.value);
+                            setPoError(null);
+                          }}
+                          placeholder="PO"
+                          className="h-9 text-sm"
+                          maxLength={255}
+                        />
+                        {poError && (
+                          <p className="text-xs text-red-600">{poError}</p>
+                        )}
+                        <div className="flex gap-2 justify-end">
+                          <Button variant="outline" size="sm" onClick={handleCancelEditPo} disabled={poSaveLoading}>
+                            {translate('cancel')}
+                          </Button>
+                          <Button size="sm" onClick={handleSavePo} disabled={poSaveLoading}>
+                            {poSaveLoading ? translate('loading') + '...' : translate('saveChanges')}
+                          </Button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-gray-600 text-sm">{translate('storeLabel')}:</span>
-                  <span className="font-medium text-gray-900">{storeNameDisplay || order.storeName || '—'}</span>
-                </div>
+                {/* 2. Estado */}
                 <div className="flex justify-between items-center">
                   <span className="text-gray-600 text-sm">{translate('statusLabel')}:</span>
                   {getStatusBadge(order.status)}
+                </div>
+                {/* 3. Tienda con ciudad */}
+                <div className="flex justify-between items-start gap-2">
+                  <span className="text-gray-600 text-sm pt-0.5">{translate('storeLabel')}:</span>
+                  <div className="flex-1 min-w-0 text-right">
+                    {!editingStore ? (
+                      <div className="flex items-center justify-end gap-2 flex-wrap">
+                        <div>
+                          <span className="font-medium text-gray-900 block">{storeNameDisplay || order.storeName || '—'}</span>
+                          {storeCityDisplay && (
+                            <span className="text-xs text-gray-500">{storeCityDisplay}</span>
+                          )}
+                        </div>
+                        {isPendingOrder && storesList.length > 0 && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="h-8 text-xs"
+                            onClick={handleStartEditStore}
+                          >
+                            {translate('editStoreTitle')}
+                          </Button>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="space-y-2">
+                        <Select value={storeEditValue} onValueChange={(v) => { setStoreEditValue(v); setStoreError(null); }}>
+                          <SelectTrigger className="h-9 text-sm w-full">
+                            <SelectValue placeholder={translate('storeLabel')}>
+                              {storeEditValue ? (storesList.find((s) => s.id === storeEditValue)?.name ?? storeEditValue) : null}
+                            </SelectValue>
+                          </SelectTrigger>
+                          <SelectContent>
+                            {storesList.map((s) => (
+                              <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        {storeError && (
+                          <p className="text-xs text-red-600">{storeError}</p>
+                        )}
+                        <div className="flex gap-2 justify-end">
+                          <Button variant="outline" size="sm" onClick={handleCancelEditStore} disabled={storeSaveLoading}>
+                            {translate('cancel')}
+                          </Button>
+                          <Button size="sm" onClick={handleSaveStore} disabled={storeSaveLoading}>
+                            {storeSaveLoading ? translate('loading') + '...' : translate('saveChanges')}
+                          </Button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+                {/* 4. Vendedor */}
+                <div className="flex justify-between items-center">
+                  <span className="text-gray-600 text-sm">{translate('sellerLabel')}:</span>
+                  <span className="font-medium text-gray-900">{sellerNameDisplay || '—'}</span>
                 </div>
                 {order.deliveredAt && (
                   <div className="flex justify-between items-center pt-2 border-t">
@@ -472,7 +731,7 @@ export function OrderDetailView({ orderId, onClose, onOrderUpdated }: OrderDetai
             const invFromOrder =
               order.items?.length && !invFromApi
                 ? {
-                    invoiceNumber: order.id,
+                    invoiceNumber: order.po ? `PO - ${order.po}` : (order.id ?? '—'),
                     date: order.date,
                     total: displayTotal,
                     subtotal: displaySubtotal,
@@ -506,7 +765,7 @@ export function OrderDetailView({ orderId, onClose, onOrderUpdated }: OrderDetai
                 </CardHeader>
                 <CardContent className="p-0">
                   <Invoice
-                    invoiceNumber={String(inv.invoiceNumber)}
+                    invoiceNumber={order.po ? `PO - ${order.po}` : String(inv.invoiceNumber)}
                     date={formatInvoiceDate(invoiceDateStr)}
                     vendorName={sellerNameDisplay}
                     storeName={storeNameDisplay || order.storeName || '—'}

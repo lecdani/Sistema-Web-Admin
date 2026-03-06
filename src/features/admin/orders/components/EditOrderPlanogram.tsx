@@ -1,8 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { Loader2, Store as StoreIcon, Edit, Send, ArrowLeft, Package } from 'lucide-react';
+import { Loader2, Edit, Send, ArrowLeft, Package } from 'lucide-react';
 import { Button } from '@/shared/components/base/Button';
 import { Badge } from '@/shared/components/base/Badge';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/shared/components/base/Select';
 import { Order, Planogram, Distribution, Product } from '@/shared/types';
 import { planogramsApi } from '@/shared/services/planograms-api';
 import { distributionsApi } from '@/shared/services/distributions-api';
@@ -269,7 +268,7 @@ export function EditOrderPlanogram({ order, onClose, onSaved }: EditOrderPlanogr
               </Button>
               <div>
                 <h1 className="text-base font-semibold text-gray-900">{translate('reviewOrderButton')}</h1>
-                <p className="text-xs text-gray-500">{translate('orderNumber')} #{orderId}</p>
+                <p className="text-xs text-gray-500">{(order as any).po ? `PO - ${(order as any).po}` : `${translate('orderNumber')} #${orderId}`}</p>
               </div>
             </div>
           </div>
@@ -366,7 +365,7 @@ export function EditOrderPlanogram({ order, onClose, onSaved }: EditOrderPlanogr
             <Edit className="h-4 w-4 text-gray-700" />
           </div>
           <div className="min-w-0">
-            <h1 className="text-sm font-semibold text-gray-900 truncate">{translate('editOrderTitle')} #{orderId}</h1>
+            <h1 className="text-sm font-semibold text-gray-900 truncate">{(order as any).po ? `PO - ${(order as any).po}` : `${translate('editOrderTitle')} #${orderId}`}</h1>
             <p className="text-[11px] text-gray-500 truncate">{planogramName ?? translate('planogram')}</p>
           </div>
         </div>
@@ -391,30 +390,6 @@ export function EditOrderPlanogram({ order, onClose, onSaved }: EditOrderPlanogr
           {translate('editOnlyWhenNecessary')}
         </p>
         <p className="text-sm text-gray-500 mb-4">{translate('clickCellToEdit')}</p>
-        {stores.length > 0 && (
-          <div className="flex flex-col items-center mb-4">
-            <div className="inline-flex items-center gap-2 rounded-md bg-blue-50 border border-blue-200 px-3 py-2">
-              <StoreIcon className="h-4 w-4 text-blue-600 shrink-0" aria-hidden />
-              <div className="flex items-center gap-2">
-                <label className="text-xs font-medium text-blue-700 whitespace-nowrap">{translate('storeLabel')}</label>
-                <Select value={storeId} onValueChange={handleStoreChange}>
-                  <SelectTrigger className="h-7 min-w-[140px] border-blue-200 bg-white text-gray-900 text-sm [&>span]:truncate">
-                    <SelectValue placeholder={translate('selectStorePlaceholder')}>
-                      {selectedStoreName || translate('selectStorePlaceholder')}
-                    </SelectValue>
-                  </SelectTrigger>
-                  <SelectContent>
-                    {stores.map((store) => (
-                      <SelectItem key={store.id} value={String(store.id)}>
-                        {store.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-          </div>
-        )}
         <div className="overflow-x-auto py-1">
           <div
             className="rounded-lg border border-gray-200 bg-gray-50/80 p-3 shadow-sm inline-block"

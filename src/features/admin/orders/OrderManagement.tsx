@@ -131,7 +131,7 @@ export function OrderManagement({ onBack }: OrderManagementProps) {
           salespersonId: o.salespersonId || '',
           storeId: o.storeId,
           createdAt: new Date(o.date),
-          po: o.id,
+          po: ((o as import('@/shared/services/orders-api').OrderForUI).po ?? '').trim(),
           status: normalizedStatus,
           storeName: o.storeName,
           sellerName: undefined,
@@ -324,7 +324,7 @@ export function OrderManagement({ onBack }: OrderManagementProps) {
       id: orderId,
       storeId: '',
       createdAt: new Date(),
-      po: orderId,
+      po: orderId as string,
       status: 'pending',
       storeName: '',
       sellerName: undefined,
@@ -691,7 +691,7 @@ export function OrderManagement({ onBack }: OrderManagementProps) {
                     className="cursor-pointer hover:bg-gray-50"
                     onClick={() => handleViewDetail(order)}
                   >
-                    <TableCell className="font-medium">{order.po}</TableCell>
+                    <TableCell className="font-medium">{order.po ? `PO - ${order.po}` : '—'}</TableCell>
                     <TableCell>
                       {new Date(order.createdAt).toLocaleDateString(locale)}
                     </TableCell>

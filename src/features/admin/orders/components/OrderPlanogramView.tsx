@@ -300,11 +300,10 @@ export const OrderPlanogramView: React.FC<OrderPlanogramViewProps> = ({ order })
                         width: '100%',
                         marginTop: 2,
                       }}
-                      title={item.productName || item.sku}
+                      title={`${item.productName || item.sku} · $${(item.price || 0).toFixed(2)}`}
                     >
                       {item.productName || item.sku}
                     </span>
-                    <span style={{ fontSize: 9, color: '#64748b' }}>${(item.price || 0).toFixed(2)}</span>
                     {item.toOrder > 0 && (
                       <span style={{ fontSize: 10, fontWeight: 600, color: '#1d4ed8', marginTop: 1 }}>{item.toOrder} u</span>
                     )}
