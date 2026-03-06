@@ -9,11 +9,11 @@ export const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || DEFAULT_API_URL;
 
 const USE_PROXY = process.env.NEXT_PUBLIC_USE_API_PROXY !== 'false'; // Por defecto true
 
-/** URL para mostrar imágenes del backend (POD, etc.). Si usas proxy, carga por proxy para evitar CORS. */
-export function getBackendAssetUrl(path: string): string {
-  if (!path || path.startsWith('data:') || path.startsWith('http')) return path;
+/** URL para mostrar imágenes del backend (POD, etc.). Si usas proxy, carga por proxy para evitar CORS. Acepta null/undefined (la API puede devolver null si la imagen falló). */
+export function getBackendAssetUrl(path: string | null | undefined): string {
+  if (!path || path.startsWith('data:') || path.startsWith('http')) return path ?? '';
   const base = USE_PROXY ? '/api/proxy' : API_BASE_URL.replace(/\/$/, '');
-  const clean = (path as string).replace(/^\//, '');
+  const clean = path.replace(/^\//, '');
   return `${base}/${clean}`;
 }
 
@@ -108,6 +108,10 @@ export const API_CONFIG = {
       UPDATE: '/distributions/distribution/{id}',
       DELETE: '/distributions/distributions/{id}',
       DEACTIVATE: '/distributions/distributions/desactivate/{id}'
+    },
+    IMAGES: {
+      UPLOAD: '/images/upload',
+      URL: '/images/url/{fileName}'
     }
   },
 
@@ -286,6 +290,40 @@ export class ApiClient {
       method: 'POST',
       body: data ? JSON.stringify(data) : undefined
     });
+  }
+
+  /** POST con FormData (para upload de archivos). No envía Content-Type para que el navegador ponga multipart/form-data con boundary. */
+  async postFormData<T = any>(endpoint: string, formData: FormData): Promise<T> {
+    const headers: Record<string, string> = {};
+    if (this.token) headers['Authorization'] = `Bearer ${this.token}`;
+    let url: string;
+    if (API_CONFIG.USE_PROXY) {
+      url = `/api/proxy${endpoint}`;
+    } else {
+      url = `${this.baseURL}${endpoint}`;
+    }
+    const response = await fetch(url, {
+      method: 'POST',
+      headers,
+      body: formData
+    });
+    const text = await response.text();
+    let data: any = text || {};
+    const ct = response.headers.get('content-type') || '';
+    if (text && (ct.includes('application/json') || (text.trim().startsWith('{') && text.trim().endsWith('}')))) {
+      try {
+        data = JSON.parse(text);
+      } catch {
+        data = text;
+      }
+    }
+    if (!response.ok) {
+      const err: any = new Error(data?.message || `HTTP ${response.status}`);
+      err.data = data;
+      err.status = response.status;
+      throw err;
+    }
+    return data as T;
   }
 
   async put<T = any>(endpoint: string, data?: any): Promise<T> {

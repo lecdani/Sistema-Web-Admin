@@ -5,7 +5,7 @@ import { Input } from '@/shared/components/base/Input';
 import { Label } from '@/shared/components/base/Label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/shared/components/base/Card';
 import { Badge } from '@/shared/components/base/Badge';
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/shared/components/base/Dialog';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/shared/components/base/Dialog';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/shared/components/base/Table';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/shared/components/base/Select';
 import { Textarea } from '@/shared/components/base/Textarea';
@@ -33,7 +33,18 @@ import {
 import { getFromLocalStorage, setToLocalStorage } from '@/shared/services/database';
 import { useLanguage } from '@/shared/hooks/useLanguage';
 import { POD, Store, User, Order, Invoice, PODFilters, IntegrityIssue } from '@/shared/types';
+import { getBackendAssetUrl } from '@/shared/config/api';
+import { uploadImage, getImageUrl } from '@/shared/services/images-api';
+import { createManualPOD } from '@/features/admin/orders/services/pod.service';
+import { useAuth } from '@/features/auth/hooks/useAuth';
 import { toast } from 'sonner';
+
+/** URL para mostrar la imagen del POD (imageUrl o images/url/{imageFileName}). */
+function getPodImageUrl(pod: POD): string {
+  if (pod.imageUrl) return getBackendAssetUrl(pod.imageUrl);
+  if (pod.imageFileName) return getBackendAssetUrl('images/url/' + pod.imageFileName);
+  return '';
+}
 
 interface PODManagementProps {
   onBack?: () => void;
@@ -42,6 +53,7 @@ interface PODManagementProps {
 export function PODManagement({ onBack }: PODManagementProps) {
   const router = useRouter();
   const { translate, locale } = useLanguage();
+  const { user } = useAuth();
   const [pods, setPods] = useState<POD[]>([]);
   const [filteredPods, setFilteredPods] = useState<POD[]>([]);
   const [stores, setStores] = useState<Store[]>([]);
@@ -53,6 +65,13 @@ export function PODManagement({ onBack }: PODManagementProps) {
   const [selectedPod, setSelectedPod] = useState<POD | null>(null);
   const [showPodDetail, setShowPodDetail] = useState(false);
   const [showIntegrityIssues, setShowIntegrityIssues] = useState(false);
+  const [showUploadPod, setShowUploadPod] = useState(false);
+  const [uploadPodForm, setUploadPodForm] = useState({ storeId: '', salespersonId: '', po: '', notes: '' });
+  const [podImageFile, setPodImageFile] = useState<File | null>(null);
+  const [podImagePreviewUrl, setPodImagePreviewUrl] = useState<string | null>(null);
+  const [podImageFileName, setPodImageFileName] = useState<string | null>(null);
+  const [isUploadingPodImage, setIsUploadingPodImage] = useState(false);
+  const [isSubmittingPod, setIsSubmittingPod] = useState(false);
 
   const [filters, setFilters] = useState<PODFilters>({
     sellerId: 'all',
@@ -328,6 +347,83 @@ export function PODManagement({ onBack }: PODManagementProps) {
     }
   };
 
+  const resetUploadPodForm = () => {
+    setUploadPodForm({ storeId: '', salespersonId: '', po: '', notes: '' });
+    setPodImageFile(null);
+    setPodImagePreviewUrl((prev) => {
+      if (prev) URL.revokeObjectURL(prev);
+      return null;
+    });
+    setPodImageFileName(null);
+  };
+
+  const handlePodImageChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setPodImageFile(file);
+    setPodImagePreviewUrl((prev) => {
+      if (prev) URL.revokeObjectURL(prev);
+      return URL.createObjectURL(file);
+    });
+    setPodImageFileName(null);
+    setIsUploadingPodImage(true);
+    try {
+      const { fileName } = await uploadImage(file);
+      setPodImageFileName(fileName);
+      toast.success(translate('imageUploaded') || 'Imagen subida');
+    } catch (err) {
+      console.error(err);
+      toast.error(translate('errorUploadImage') || 'Error al subir la imagen');
+    } finally {
+      setIsUploadingPodImage(false);
+    }
+  };
+
+  const handleSubmitUploadPod = async () => {
+    const { storeId, salespersonId, po } = uploadPodForm;
+    if (!storeId || !salespersonId || !po?.trim()) {
+      toast.error(translate('fillRequiredFields') || 'Completa tienda, vendedor y PO');
+      return;
+    }
+    const fileName = podImageFileName;
+    if (!fileName) {
+      toast.error(translate('uploadPodImageFirst') || 'Sube la imagen del POD primero');
+      return;
+    }
+    const uploadedBy = user?.id || (getFromLocalStorage('current-user') as { id?: string } | null)?.id || '';
+    if (!uploadedBy) {
+      toast.error(translate('sessionRequired') || 'Inicia sesión para subir un POD');
+      return;
+    }
+    setIsSubmittingPod(true);
+    try {
+      let imageUrl: string;
+      try {
+        imageUrl = await getImageUrl(fileName);
+      } catch {
+        imageUrl = getBackendAssetUrl('images/url/' + fileName);
+      }
+      createManualPOD({
+        salespersonId,
+        storeId,
+        po: po.trim(),
+        imageUrl,
+        imageFileName: fileName,
+        uploadedBy,
+        notes: uploadPodForm.notes?.trim() || undefined
+      });
+      toast.success(translate('podCreatedSuccess') || 'POD creado correctamente');
+      resetUploadPodForm();
+      setShowUploadPod(false);
+      loadData();
+    } catch (err) {
+      console.error(err);
+      toast.error(translate('errorCreatePod') || 'Error al crear el POD');
+    } finally {
+      setIsSubmittingPod(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -355,7 +451,7 @@ export function PODManagement({ onBack }: PODManagementProps) {
             <AlertCircle className="h-3.5 w-3.5 mr-1" />
             <span className="whitespace-nowrap">{translate('integrity')} ({integrityIssues.length})</span>
           </Button>
-          <Button size="sm" className="bg-indigo-600 hover:bg-indigo-700">
+          <Button size="sm" className="bg-indigo-600 hover:bg-indigo-700" onClick={() => setShowUploadPod(true)}>
             <Upload className="h-3.5 w-3.5 mr-1" />
             <span className="whitespace-nowrap">{translate('uploadPod')}</span>
           </Button>
@@ -531,9 +627,17 @@ export function PODManagement({ onBack }: PODManagementProps) {
                 {filteredPods.map((pod) => (
                   <TableRow key={pod.id}>
                     <TableCell>
-                      <div className="flex items-center justify-center w-12 h-12 bg-gray-100 rounded-lg">
-                        <ImageIcon className="h-6 w-6 text-gray-400" />
-                      </div>
+                      {getPodImageUrl(pod) ? (
+                        <img
+                          src={getPodImageUrl(pod)}
+                          alt="POD"
+                          className="w-12 h-12 object-cover rounded-lg border border-gray-200"
+                        />
+                      ) : (
+                        <div className="flex items-center justify-center w-12 h-12 bg-gray-100 rounded-lg">
+                          <ImageIcon className="h-6 w-6 text-gray-400" />
+                        </div>
+                      )}
                     </TableCell>
                     <TableCell>
                       <div className="space-y-1">
@@ -696,16 +800,30 @@ export function PODManagement({ onBack }: PODManagementProps) {
                     <CardTitle className="text-lg">{translate('podImageTitle')}</CardTitle>
                   </CardHeader>
                   <CardContent>
-                    <div className="flex items-center justify-center h-48 bg-gray-100 rounded-lg border-2 border-dashed border-gray-300">
-                      <div className="text-center">
-                        <ImageIcon className="h-12 w-12 text-gray-400 mx-auto mb-2" />
-                        <p className="text-sm text-gray-500">{translate('previewNotAvailable')}</p>
-                        <Button variant="outline" size="sm" className="mt-2">
+                    {getPodImageUrl(selectedPod) ? (
+                      <div className="space-y-2">
+                        <img
+                          src={getPodImageUrl(selectedPod)}
+                          alt="POD"
+                          className="w-full max-h-64 object-contain rounded-lg border border-gray-200 bg-gray-50"
+                        />
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => window.open(getPodImageUrl(selectedPod), '_blank')}
+                        >
                           <ExternalLink className="h-4 w-4 mr-2" />
                           {translate('viewImage')}
                         </Button>
                       </div>
-                    </div>
+                    ) : (
+                      <div className="flex items-center justify-center h-48 bg-gray-100 rounded-lg border-2 border-dashed border-gray-300">
+                        <div className="text-center">
+                          <ImageIcon className="h-12 w-12 text-gray-400 mx-auto mb-2" />
+                          <p className="text-sm text-gray-500">{translate('previewNotAvailable')}</p>
+                        </div>
+                      </div>
+                    )}
                   </CardContent>
                 </Card>
               </div>
@@ -754,6 +872,95 @@ export function PODManagement({ onBack }: PODManagementProps) {
               </div>
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Upload POD Dialog */}
+      <Dialog open={showUploadPod} onOpenChange={(open) => { setShowUploadPod(open); if (!open) resetUploadPodForm(); }}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>{translate('uploadPod')}</DialogTitle>
+            <DialogDescription>
+              {translate('uploadPodDesc') || 'Completa los datos y sube la imagen del comprobante de entrega (POD).'}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div>
+              <Label>{translate('storeLabel')} *</Label>
+              <Select
+                value={uploadPodForm.storeId}
+                onValueChange={(v) => setUploadPodForm((f) => ({ ...f, storeId: v }))}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder={translate('selectStore') || 'Seleccionar tienda'} />
+                </SelectTrigger>
+                <SelectContent>
+                  {stores.map((s) => (
+                    <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label>{translate('sellerLabel')} *</Label>
+              <Select
+                value={uploadPodForm.salespersonId}
+                onValueChange={(v) => setUploadPodForm((f) => ({ ...f, salespersonId: v }))}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder={translate('selectSeller') || 'Seleccionar vendedor'} />
+                </SelectTrigger>
+                <SelectContent>
+                  {users.filter((u) => u.role === 'user').map((u) => (
+                    <SelectItem key={u.id} value={u.id}>{u.firstName} {u.lastName}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label>PO *</Label>
+              <Input
+                value={uploadPodForm.po}
+                onChange={(e) => setUploadPodForm((f) => ({ ...f, po: e.target.value }))}
+                placeholder="Número de pedido"
+              />
+            </div>
+            <div>
+              <Label>{translate('podImageTitle')} *</Label>
+              <div className="mt-1 flex flex-col gap-2">
+                <Input
+                  type="file"
+                  accept="image/*"
+                  onChange={handlePodImageChange}
+                  disabled={isUploadingPodImage}
+                />
+                {isUploadingPodImage && <p className="text-sm text-gray-500">{translate('uploading') || 'Subiendo...'}</p>}
+                {podImagePreviewUrl && (
+                  <div className="mt-2">
+                    <img src={podImagePreviewUrl} alt="Preview" className="max-h-40 w-auto rounded border object-contain" />
+                    {podImageFileName && <p className="text-xs text-green-600 mt-1">{translate('imageUploaded') || 'Imagen lista'}</p>}
+                  </div>
+                )}
+              </div>
+            </div>
+            <div>
+              <Label>{translate('notes')}</Label>
+              <Textarea
+                value={uploadPodForm.notes}
+                onChange={(e) => setUploadPodForm((f) => ({ ...f, notes: e.target.value }))}
+                placeholder={translate('optional') || 'Opcional'}
+                rows={2}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => { setShowUploadPod(false); resetUploadPodForm(); }}>
+              {translate('cancel') || 'Cancelar'}
+            </Button>
+            <Button onClick={handleSubmitUploadPod} disabled={isSubmittingPod || !podImageFileName}>
+              {isSubmittingPod ? (translate('saving') || 'Guardando...') : (translate('createPod') || 'Crear POD')}
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 

@@ -87,36 +87,49 @@ async function handleProxyRequest(
     console.log(`[API Proxy] API_BASE_URL:`, API_BASE_URL);
     console.log(`[API Proxy] URL construida: ${fullUrl}`);
 
-    // Obtener el body si existe
-    let body: string | undefined;
-    if (method !== 'GET' && method !== 'DELETE') {
-      try {
-        body = await request.text();
-      } catch {
-        // Si no hay body, está bien
-      }
-    }
+    // Para multipart/form-data (upload de archivos) reenviar body y Content-Type tal cual
+    const contentType = request.headers.get('content-type') ?? '';
+    const isMultipart = contentType.toLowerCase().startsWith('multipart/form-data');
 
-    // Obtener headers relevantes
+    let body: string | ArrayBufferView | Blob | FormData | ReadableStream | null | undefined;
     const headers: HeadersInit = {
-      'Content-Type': 'application/json',
       'Accept': 'application/json',
     };
 
-    // Copiar el header de autorización si existe
+    if (method !== 'GET' && method !== 'DELETE') {
+      if (isMultipart) {
+        body = request.body;
+        headers['Content-Type'] = contentType;
+      } else {
+        try {
+          const textBody = await request.text();
+          body = textBody || undefined;
+          if (textBody) headers['Content-Type'] = 'application/json';
+        } catch {
+          body = undefined;
+        }
+      }
+    } else {
+      body = undefined;
+    }
+
+    if (!isMultipart) {
+      headers['Content-Type'] = headers['Content-Type'] ?? 'application/json';
+    }
+
     const authHeader = request.headers.get('authorization');
     if (authHeader) {
       headers['Authorization'] = authHeader;
     }
 
-    console.log(`[API Proxy] ${method} ${fullUrl}`);
+    console.log(`[API Proxy] ${method} ${fullUrl}${isMultipart ? ' (multipart)' : ''}`);
 
-    // Hacer la petición al servidor real
     const response = await fetch(fullUrl, {
       method,
       headers,
-      body: body || undefined,
-    });
+      body: body ?? undefined,
+      duplex: isMultipart ? 'half' : undefined,
+    } as RequestInit);
 
     // Si es 204 No Content, retornar inmediatamente sin leer body
     if (response.status === 204) {
@@ -131,13 +144,13 @@ async function handleProxyRequest(
     }
 
     // Obtener la respuesta
-    const contentType = response.headers.get('content-type');
+    const responseContentType = response.headers.get('content-type');
     let data: any;
 
     // Leemos como texto primero para evitar errores
     const text = await response.text();
 
-    if (contentType && contentType.includes('application/json')) {
+    if (responseContentType && responseContentType.includes('application/json')) {
       try {
         data = text ? JSON.parse(text) : {};
       } catch {
@@ -153,7 +166,7 @@ async function handleProxyRequest(
       return new NextResponse(data, {
         status: response.status,
         headers: {
-          'Content-Type': contentType || 'text/plain',
+          'Content-Type': responseContentType || 'text/plain',
           'Access-Control-Allow-Origin': '*',
           'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, PATCH, OPTIONS',
           'Access-Control-Allow-Headers': 'Content-Type, Authorization',

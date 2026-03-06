@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { X, Minus, Plus } from 'lucide-react';
+import { X, Minus, Plus, Package } from 'lucide-react';
 import { Button } from '@/shared/components/base/Button';
 import { Input } from '@/shared/components/base/Input';
 
@@ -11,6 +11,7 @@ export interface ProductPositionEdit {
   sku: string;
   toOrder: number;
   price: number;
+  imageUrl?: string;
 }
 
 interface ProductModalOrderEditProps {
@@ -45,11 +46,20 @@ export function ProductModalOrderEdit({ open, onClose, position, onUpdate }: Pro
         </div>
 
         <div className="p-4 space-y-4">
-          <div className="bg-gray-50 rounded-lg px-3 py-2.5 border border-gray-100">
+          <div className="bg-gray-50 rounded-lg px-3 py-2.5 border border-gray-100 flex items-center gap-3">
             {position.productId ? (
               <>
-                <p className="text-sm font-medium text-gray-900 truncate leading-snug">{position.productName || position.sku}</p>
-                <p className="text-xs text-gray-500 mt-1">${(position.price || 0).toFixed(2)} unidad</p>
+                {position.imageUrl ? (
+                  <img src={position.imageUrl} alt="" className="w-10 h-10 rounded object-cover flex-shrink-0" />
+                ) : (
+                  <div className="w-10 h-10 rounded bg-gray-200 flex items-center justify-center flex-shrink-0">
+                    <Package className="h-5 w-5 text-gray-500" />
+                  </div>
+                )}
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-medium text-gray-900 truncate leading-snug">{position.productName || position.sku}</p>
+                  <p className="text-xs text-gray-500 mt-1">${(position.price || 0).toFixed(2)} unidad</p>
+                </div>
               </>
             ) : (
               <p className="text-sm text-amber-700">Sin producto</p>

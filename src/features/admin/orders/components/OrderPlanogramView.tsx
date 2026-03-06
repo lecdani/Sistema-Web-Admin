@@ -9,6 +9,15 @@ import { productsApi } from '@/shared/services/products-api';
 import { ordersApi } from '@/shared/services/orders-api';
 import { histpricesApi } from '@/shared/services/histprices-api';
 import { getFromLocalStorage } from '@/shared/services/database';
+import { getBackendAssetUrl } from '@/shared/config/api';
+import { Package } from 'lucide-react';
+
+function getProductImageUrl(product: Product | null | undefined): string {
+  if (!product) return '';
+  if (product.image) return getBackendAssetUrl(product.image);
+  if (product.imageFileName) return getBackendAssetUrl('images/url/' + product.imageFileName);
+  return '';
+}
 
 interface OrderPlanogramViewProps {
   order: Order;
@@ -23,6 +32,7 @@ interface ProductPosition {
   sku: string;
   toOrder: number;
   price: number;
+  imageUrl?: string;
 }
 
 export const OrderPlanogramView: React.FC<OrderPlanogramViewProps> = ({ order }) => {
@@ -150,6 +160,7 @@ export const OrderPlanogramView: React.FC<OrderPlanogramViewProps> = ({ order })
               sku: orderItem?.sku ?? product?.sku ?? '',
               toOrder: orderItem?.quantity ?? 0,
               price: orderItem?.price ?? product?.currentPrice ?? 0,
+              imageUrl: product ? getProductImageUrl(product) : undefined,
             });
           }
         }
@@ -263,10 +274,22 @@ export const OrderPlanogramView: React.FC<OrderPlanogramViewProps> = ({ order })
               >
                 {item.productId ? (
                   <>
+                    {item.imageUrl ? (
+                      <img
+                        src={item.imageUrl}
+                        alt=""
+                        className="w-6 h-6 rounded object-cover flex-shrink-0 mx-auto"
+                        style={{ minWidth: 20, minHeight: 20 }}
+                      />
+                    ) : (
+                      <div className="w-6 h-6 rounded bg-slate-200 flex items-center justify-center flex-shrink-0 mx-auto">
+                        <Package className="h-3 w-3 text-slate-500" />
+                      </div>
+                    )}
                     <span
                       style={{
-                        fontSize: 10,
-                        lineHeight: 1.25,
+                        fontSize: 9,
+                        lineHeight: 1.2,
                         fontWeight: 500,
                         color: '#1e293b',
                         wordBreak: 'break-word',
@@ -275,14 +298,15 @@ export const OrderPlanogramView: React.FC<OrderPlanogramViewProps> = ({ order })
                         WebkitLineClamp: 2,
                         WebkitBoxOrient: 'vertical' as any,
                         width: '100%',
+                        marginTop: 2,
                       }}
                       title={item.productName || item.sku}
                     >
                       {item.productName || item.sku}
                     </span>
-                    <span style={{ fontSize: 10, color: '#64748b', marginTop: 2 }}>${(item.price || 0).toFixed(2)}</span>
+                    <span style={{ fontSize: 9, color: '#64748b' }}>${(item.price || 0).toFixed(2)}</span>
                     {item.toOrder > 0 && (
-                      <span style={{ fontSize: 12, fontWeight: 600, color: '#1d4ed8', marginTop: 2 }}>{item.toOrder} u</span>
+                      <span style={{ fontSize: 10, fontWeight: 600, color: '#1d4ed8', marginTop: 1 }}>{item.toOrder} u</span>
                     )}
                   </>
                 ) : null}

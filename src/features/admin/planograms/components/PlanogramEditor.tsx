@@ -22,6 +22,7 @@ import { useLanguage } from '@/shared/hooks/useLanguage';
 import { toast } from '@/shared/components/base/Toast';
 import { planogramsApi } from '@/shared/services/planograms-api';
 import { distributionsApi } from '@/shared/services/distributions-api';
+import { getBackendAssetUrl } from '@/shared/config/api';
 
 interface PlanogramEditorProps {
   products: Product[];
@@ -412,11 +413,22 @@ export const PlanogramEditor: React.FC<PlanogramEditorProps> = ({
                         title={cell.product ? `${cell.product.name} (${cell.product.sku}) - Celda ${cellRef}` : translate('dragCellHere').replace('{ref}', cellRef)}
                       >
                         {cell.product ? (
-                          <div className="text-center w-full h-full flex flex-col justify-center p-2 relative">
-                            <div className="font-bold text-blue-800 truncate text-sm leading-tight mb-1">
+                          <div className="text-center w-full h-full flex flex-col justify-center p-1 relative">
+                            {cell.product.image ? (
+                              <img
+                                src={getBackendAssetUrl(cell.product.image)}
+                                alt=""
+                                className="w-8 h-8 mx-auto rounded object-cover flex-shrink-0 mb-0.5"
+                              />
+                            ) : (
+                              <div className="w-8 h-8 mx-auto rounded bg-blue-100 flex items-center justify-center flex-shrink-0 mb-0.5">
+                                <Package className="h-4 w-4 text-blue-600" />
+                              </div>
+                            )}
+                            <div className="font-bold text-blue-800 truncate text-[10px] leading-tight">
                               {cell.product.sku}
                             </div>
-                            <div className="text-xs text-blue-700 truncate leading-tight">
+                            <div className="text-[9px] text-blue-700 truncate leading-tight">
                               {cell.product.name.split(' ').slice(0, 2).join(' ')}
                             </div>
                             <button
@@ -480,10 +492,18 @@ export const PlanogramEditor: React.FC<PlanogramEditorProps> = ({
                         } ${selectedProduct?.id === product.id ? 'border-blue-500 bg-blue-50 shadow-md' : ''}`}
                         onClick={() => !isInGrid && setSelectedProduct(product)}
                       >
-                        <div className="space-y-0.5">
-                          <p className="font-medium truncate text-gray-900 text-xs leading-tight">{product.name}</p>
-                          <p className="text-gray-500 leading-tight">{product.sku}</p>
-                          <div className="flex items-center justify-between gap-1">
+                        <div className="flex gap-2 items-start">
+                          <div className="flex-shrink-0 w-9 h-9 rounded overflow-hidden bg-gray-100 flex items-center justify-center">
+                            {product.image ? (
+                              <img src={getBackendAssetUrl(product.image)} alt="" className="w-full h-full object-cover" />
+                            ) : (
+                              <Package className="h-4 w-4 text-gray-400" />
+                            )}
+                          </div>
+                          <div className="flex-1 min-w-0 space-y-0.5">
+                            <p className="font-medium truncate text-gray-900 text-xs leading-tight">{product.name}</p>
+                            <p className="text-gray-500 leading-tight text-[10px]">{product.sku}</p>
+                            <div className="flex items-center justify-between gap-1">
                             <Badge variant="outline" className="text-[9px] py-0 px-1">
                               {product.category}
                             </Badge>
@@ -492,6 +512,7 @@ export const PlanogramEditor: React.FC<PlanogramEditorProps> = ({
                                 {translate('inUse')}
                               </Badge>
                             )}
+                            </div>
                           </div>
                         </div>
                       </div>

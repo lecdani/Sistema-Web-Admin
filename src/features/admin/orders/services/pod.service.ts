@@ -10,6 +10,7 @@ import { getFromLocalStorage, setToLocalStorage } from '@/shared/services/databa
 export const createPODFromInvoice = (data: {
   invoiceId: string;
   imageUrl: string;
+  imageFileName?: string;
   uploadedBy: string;
   notes?: string;
 }): POD => {
@@ -40,6 +41,7 @@ export const createPODFromInvoice = (data: {
     orderId: invoice.orderId,
     invoiceId: data.invoiceId,
     imageUrl: data.imageUrl,
+    imageFileName: data.imageFileName,
     uploadedAt: new Date(),
     uploadedBy: data.uploadedBy,
     notes: data.notes,
@@ -65,6 +67,7 @@ export const createManualPOD = (data: {
   storeId: string;
   po: string;
   imageUrl: string;
+  imageFileName?: string;
   uploadedBy: string;
   notes?: string;
 }): POD => {
@@ -78,6 +81,7 @@ export const createManualPOD = (data: {
     po: data.po,
     status: 'completed',
     imageUrl: data.imageUrl,
+    imageFileName: data.imageFileName,
     uploadedAt: new Date(),
     uploadedBy: data.uploadedBy,
     notes: data.notes,

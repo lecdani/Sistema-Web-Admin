@@ -17,6 +17,8 @@ import {
 } from 'lucide-react';
 import { useLanguage } from '@/shared/hooks/useLanguage';
 import { ordersApi, OrderForUI } from '@/shared/services/orders-api';
+import { uploadImage } from '@/shared/services/images-api';
+import { getBackendAssetUrl } from '@/shared/config/api';
 import { toast } from 'sonner';
 import { histpricesApi } from '@/shared/services/histprices-api';
 import { productsApi } from '@/shared/services/products-api';
@@ -217,13 +219,13 @@ export function OrderDetailView({ orderId, onClose, onOrderUpdated }: OrderDetai
       ? (invoiceDisplay?.total ?? order.total ?? 0)
       : computedFromItems;
 
-  // POD: igual que PWA — orden, factura o vacío
+  // POD: igual que PWA — orden, factura o vacío. Imagen desde S3 vía images/url (mismo que productos).
   const displayPod = (order.podImageUrl || order.podFileName || (invoiceDisplay?.pod ?? '') || '').trim();
   const buildPodImageUrl = (podPath: string): string => {
     const raw = (podPath || '').trim();
     if (!raw) return '';
     if (raw.startsWith('data:') || raw.startsWith('http://') || raw.startsWith('https://')) return raw;
-    return `/api/pod-image?path=${encodeURIComponent(raw)}`;
+    return getBackendAssetUrl('images/url/' + raw.replace(/^\/+/, ''));
   };
   const podImageUrl = displayPod ? buildPodImageUrl(displayPod) : '';
   const isPodPath = displayPod && !displayPod.startsWith('data:') && !displayPod.startsWith('http');
@@ -251,35 +253,43 @@ export function OrderDetailView({ orderId, onClose, onOrderUpdated }: OrderDetai
         return;
       }
       setUploadingPod(true);
-      const reader = new FileReader();
-      reader.onload = async () => {
-        const dataUrl = reader.result as string;
+      try {
+        const { fileName } = await uploadImage(file);
         const podOk = await ordersApi.uploadPODForInvoice({
           invoiceId: invId,
-          fileName: file.name || 'POD.png',
-          imageDataUrl: dataUrl,
+          fileName,
         });
         if (!podOk) {
-          setUploadingPod(false);
           toast.error(translate('podUploadFailed'));
           return;
         }
-        // Actualizar estado del pedido a facturado/entregado (como en la PWA)
-        const backendId = (order as any)?.backendOrderId ?? order?.id ?? orderId;
-        const statusOk = await ordersApi.updateOrderStatus(backendId, true);
         setUploadingPod(false);
-        if (!statusOk) {
-          toast.warning(translate('podSavedStatusNotUpdated'));
-        } else {
-          toast.success(translate('podUploadedSuccess'));
-        }
+        toast.success(translate('podUploadedSuccess'));
         onOrderUpdated?.();
-        const ord = await ordersApi.getOrderById(orderId);
-        if (ord) setOrder(ord);
-        const inv = await ordersApi.getInvoiceDisplayForOrder(orderId, invId);
-        if (inv) setInvoiceDisplay(inv);
-      };
-      reader.readAsDataURL(file);
+        setOrder((prev) =>
+          prev ? { ...prev, podFileName: fileName, podImageUrl: fileName, podUploaded: true } : prev
+        );
+        setInvoiceDisplay((prev) => (prev ? { ...prev, pod: fileName } : prev));
+        const backendId = (order as any)?.backendOrderId ?? order?.id ?? orderId;
+        try {
+          await ordersApi.updateOrderStatus(backendId, true);
+        } catch {
+          toast.warning(translate('podSavedStatusNotUpdated'));
+        }
+        try {
+          const ord = await ordersApi.getOrderById(orderId);
+          if (ord) setOrder(ord);
+          const inv = await ordersApi.getInvoiceDisplayForOrder(orderId, invId);
+          if (inv) setInvoiceDisplay(inv);
+        } catch (_) {
+          // Refresco en segundo plano; la UI ya se actualizó con el fileName
+        }
+      } catch (err) {
+        console.error(err);
+        toast.error(translate('podUploadFailed'));
+      } finally {
+        setUploadingPod(false);
+      }
     };
     input.click();
   };

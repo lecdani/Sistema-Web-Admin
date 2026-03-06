@@ -22,7 +22,8 @@ import {
   History,
   Calendar,
   Award,
-  FolderTree
+  FolderTree,
+  ImagePlus
 } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/shared/components/base/Card';
 import { Button } from '@/shared/components/base/Button';
@@ -59,6 +60,8 @@ import { productsApi } from '@/shared/services/products-api';
 import { brandsApi } from '@/shared/services/brands-api';
 import { categoriesApi } from '@/shared/services/categories-api';
 import { histpricesApi, type HistPrice } from '@/shared/services/histprices-api';
+import { uploadImage } from '@/shared/services/images-api';
+import { getBackendAssetUrl } from '@/shared/config/api';
 import { toast } from '@/shared/components/base/Toast';
 
 interface ProductManagementProps {
@@ -73,6 +76,10 @@ interface ProductFormData {
   categoryId: string;
   isActive: boolean;
   initialPrice?: number;
+  /** Nombre del archivo en S3 (tras subir). Se envía en create/update. */
+  imageFileName?: string;
+  /** URL para mostrar preview (object URL del archivo seleccionado o product.image al editar) */
+  imagePreviewUrl?: string;
 }
 
 interface PriceUpdateData {
@@ -118,6 +125,25 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
     categoryId: '',
     isActive: true
   });
+  const PENDING_IMAGE_KEY = 'product-create-pending-imageFileName';
+  const [uploadingImage, setUploadingImage] = useState(false);
+  const imageInputRef = React.useRef<HTMLInputElement | null>(null);
+  const lastUploadedFileNameRef = React.useRef<string | undefined>(undefined);
+  const isUploadingRef = React.useRef(false);
+  const getPendingImageFileName = (): string | undefined => {
+    const fromRef = lastUploadedFileNameRef.current?.trim();
+    if (fromRef) return fromRef;
+    const fromStorage = typeof sessionStorage !== 'undefined' ? sessionStorage.getItem(PENDING_IMAGE_KEY) : null;
+    return fromStorage ? String(fromStorage).trim() || undefined : undefined;
+  };
+  const clearPendingImageFileName = () => {
+    lastUploadedFileNameRef.current = undefined;
+    if (typeof sessionStorage !== 'undefined') sessionStorage.removeItem(PENDING_IMAGE_KEY);
+  };
+  const setPendingImageFileName = (fileName: string) => {
+    lastUploadedFileNameRef.current = fileName;
+    if (typeof sessionStorage !== 'undefined') sessionStorage.setItem(PENDING_IMAGE_KEY, fileName);
+  };
 
   const [priceUpdateData, setPriceUpdateData] = useState<PriceUpdateData>({
     price: 0
@@ -225,6 +251,10 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
   };
 
   const resetForm = () => {
+    if (formData.imagePreviewUrl && formData.imagePreviewUrl.startsWith('blob:')) {
+      URL.revokeObjectURL(formData.imagePreviewUrl);
+    }
+    clearPendingImageFileName();
     setFormData({
       sku: '',
       name: '',
@@ -235,6 +265,7 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
     });
     setFormErrors({});
     setEditingProduct(null);
+    if (imageInputRef.current) imageInputRef.current.value = '';
   };
 
   const resetPriceForm = () => {
@@ -263,19 +294,30 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
     if (!validateForm()) return;
     try {
       const cat = categories.find(c => c.id === formData.categoryId);
-      const payload = {
+      const payload: Record<string, unknown> = {
         name: formData.name.trim(),
         category: cat?.name ?? formData.category.trim(),
         sku: formData.sku.trim(),
         brandId: formData.brandId || undefined,
         categoryId: formData.categoryId || undefined,
-        isActive: editingProduct ? editingProduct.isActive : true
+        isActive: editingProduct ? editingProduct.isActive : true,
       };
       if (editingProduct) {
-        await productsApi.update(editingProduct.id, payload);
+        const imageForUpdate = formData.imageFileName?.trim() || lastUploadedFileNameRef.current?.trim() || undefined;
+        if (imageForUpdate) payload.imageFileName = imageForUpdate;
+        await productsApi.update(editingProduct.id, payload as any);
         toast.success(translate('productSaved'));
       } else {
-        const created = await productsApi.create(payload);
+        const imageFileNameForCreate = getPendingImageFileName() || formData.imageFileName?.trim() || undefined;
+        if (imageFileNameForCreate) {
+          payload.imageFileName = imageFileNameForCreate;
+          payload.ImageFileName = imageFileNameForCreate;
+        }
+        const created = await productsApi.create(
+          { ...payload } as any,
+          imageFileNameForCreate
+        );
+        clearPendingImageFileName();
         const initialPrice = Number(formData.initialPrice) || 0;
         if (initialPrice > 0) {
           const now = new Date();
@@ -354,11 +396,14 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
       category: product.category,
       brandId: product.brandId ?? '',
       categoryId,
-      isActive: product.isActive
+      isActive: product.isActive,
+      imageFileName: undefined,
+      imagePreviewUrl: product.image ? getBackendAssetUrl(product.image) : undefined
     });
     setFormErrors({});
     setEditingProduct(product);
     setShowAddDialog(true);
+    if (imageInputRef.current) imageInputRef.current.value = '';
   };
 
   const handleToggleStatus = async (product: Product) => {
@@ -602,6 +647,95 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
                   <p className="text-xs text-amber-600">{translate('addCategoriesFirst')}</p>
                 )}
               </div>
+              <div className="space-y-2">
+                <Label>{translate('productImage')}</Label>
+                <input
+                  ref={imageInputRef}
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={async (e) => {
+                    const file = e.target.files?.[0];
+                    if (!file) return;
+                    if (isUploadingRef.current) return;
+                    isUploadingRef.current = true;
+                    setUploadingImage(true);
+                    const objectUrl = URL.createObjectURL(file);
+                    setFormData(prev => ({ ...prev, imagePreviewUrl: objectUrl }));
+                    try {
+                      const { fileName } = await uploadImage(file);
+                      setPendingImageFileName(fileName);
+                      setFormData(prev => ({
+                        ...prev,
+                        imageFileName: fileName,
+                        imagePreviewUrl: objectUrl
+                      }));
+                      toast.success(translate('imageUploaded'));
+                    } catch (err: any) {
+                      clearPendingImageFileName();
+                      setFormData(prev => ({ ...prev, imageFileName: undefined }));
+                      const msg = err?.data?.message ?? err?.message ?? translate('errorUploadImage');
+                      toast.error(msg);
+                    } finally {
+                      isUploadingRef.current = false;
+                      setUploadingImage(false);
+                    }
+                  }}
+                />
+                <div className="flex items-start gap-4">
+                  <div className="flex-shrink-0 size-28 rounded-lg border-2 border-dashed border-gray-200 bg-gray-50 overflow-hidden">
+                    {(formData.imagePreviewUrl || formData.imageFileName) ? (
+                      <div className="relative size-full">
+                        <img
+                          src={formData.imagePreviewUrl ?? (editingProduct?.image ? getBackendAssetUrl(editingProduct.image) : '')}
+                          alt=""
+                          className="absolute inset-0 size-full object-cover"
+                        />
+                        {uploadingImage && (
+                          <div className="absolute inset-0 bg-black/40 flex items-center justify-center">
+                            <span className="text-white text-sm font-medium">{translate('uploading')}</span>
+                          </div>
+                        )}
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="icon"
+                          className="absolute top-1 right-1 h-7 w-7 rounded-full bg-white shadow border-gray-300 hover:bg-gray-100"
+                          onClick={() => {
+                            if (formData.imagePreviewUrl?.startsWith('blob:')) URL.revokeObjectURL(formData.imagePreviewUrl);
+                            clearPendingImageFileName();
+                            setFormData(prev => ({ ...prev, imageFileName: undefined, imagePreviewUrl: undefined }));
+                            if (imageInputRef.current) imageInputRef.current.value = '';
+                          }}
+                        >
+                          <X className="h-3.5 w-3.5" />
+                        </Button>
+                      </div>
+                    ) : (
+                      <div className="text-center p-2 text-gray-400">
+                        <ImagePlus className="h-10 w-10 mx-auto mb-1 opacity-60" />
+                        <span className="text-xs block">{translate('noImageSelected')}</span>
+                      </div>
+                    )}
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => imageInputRef.current?.click()}
+                      disabled={uploadingImage}
+                    >
+                      <ImagePlus className="h-4 w-4 mr-2" />
+                      {uploadingImage ? translate('uploading') : (formData.imagePreviewUrl || formData.imageFileName) ? translate('changeImage') : translate('selectImage')}
+                    </Button>
+                    <p className="text-xs text-gray-500">{translate('productImageHint')}</p>
+                    {(formData.imageFileName && !uploadingImage) && (
+                      <p className="text-xs text-green-600 font-medium">{translate('imageReadyToSave')}</p>
+                    )}
+                  </div>
+                </div>
+              </div>
               {!editingProduct && (
                 <div className="space-y-2">
                   <Label htmlFor="initialPrice">{translate('initialPriceLabel')}</Label>
@@ -631,9 +765,13 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
                   {translate('cancel')}
                 </Button>
               </DialogClose>
-              <Button onClick={handleSaveProduct} className="bg-indigo-600 hover:bg-indigo-700">
+              <Button
+                onClick={handleSaveProduct}
+                disabled={uploadingImage}
+                className="bg-indigo-600 hover:bg-indigo-700"
+              >
                 <Save className="h-4 w-4 mr-2" />
-                {editingProduct ? translate('update') : translate('create')}
+                {uploadingImage ? translate('uploading') : (editingProduct ? translate('update') : translate('create'))}
               </Button>
             </DialogFooter>
           </DialogContent>
@@ -802,10 +940,12 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
                   <tr key={product.id} className="hover:bg-gray-50">
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div className="flex items-center">
-                        <div className="flex-shrink-0 h-10 w-10">
-                          <div className="h-10 w-10 rounded-full bg-indigo-100 flex items-center justify-center">
-                            <Package className="h-5 w-5 text-indigo-600" />
-                          </div>
+                        <div className="flex-shrink-0 w-12 h-12 rounded-lg overflow-hidden bg-gray-100 flex items-center justify-center border border-gray-200">
+                          {product.image ? (
+                            <img src={getBackendAssetUrl(product.image)} alt="" className="w-12 h-12 object-cover" />
+                          ) : (
+                            <Package className="h-6 w-6 text-indigo-600" />
+                          )}
                         </div>
                         <div className="ml-4">
                           <div className="text-sm font-medium text-gray-900">
@@ -1118,8 +1258,8 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
 
       {/* Product Detail Dialog */}
       <Dialog open={showDetailDialog} onOpenChange={setShowDetailDialog}>
-        <DialogContent className="sm:max-w-xl">
-          <DialogHeader>
+        <DialogContent className="sm:max-w-md rounded-xl overflow-hidden p-0 gap-0">
+          <DialogHeader className="px-6 pt-6 pb-4">
             <DialogTitle>{translate('productDetails')}</DialogTitle>
             <DialogDescription>
               {translate('productInfoDescription')}
@@ -1127,80 +1267,78 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
           </DialogHeader>
           
           {selectedProduct && (
-            <div className="space-y-6 px-6 py-4">
-              <div className="flex items-start gap-6">
-                <div className="h-20 w-20 bg-indigo-100 rounded-lg flex items-center justify-center flex-shrink-0">
-                  <Package className="h-10 w-10 text-indigo-600" />
-                </div>
-                
-                <div className="flex-1 space-y-3">
-                  <div>
-                    <div className="flex items-center gap-3 mb-2">
-                      <h3 className="text-xl font-semibold text-gray-900">
-                        {selectedProduct.name}
-                      </h3>
-                      <Badge className={getStatusBadgeColor(selectedProduct.isActive)}>
-                        {selectedProduct.isActive ? translate('active') : translate('inactive')}
-                      </Badge>
-                    </div>
-                    <div className="flex items-center gap-4 text-sm text-gray-500">
-                      <span className="flex items-center gap-1">
-                        <Hash className="h-3 w-3" />
-                        SKU: {selectedProduct.sku}
-                      </span>
-                      <span className="flex items-center gap-1">
-                        <DollarSign className="h-4 w-4 text-green-600" />
-                        <span className="font-medium text-green-600">
-                          {(selectedProduct.currentPrice || 0).toLocaleString(locale, { 
-                            minimumFractionDigits: 2, 
-                            maximumFractionDigits: 2 
-                          })}
-                        </span>
-                      </span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-              
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div className="space-y-4">
-                  <div>
-                    <Label className="text-sm font-medium text-gray-500">{translate('categoryHeader')}</Label>
-                    <p className="flex items-center gap-1">
-                      <Tag className="h-4 w-4 text-gray-400" />
-                      {getCategoryName(selectedProduct)}
-                    </p>
-                  </div>
-                  {selectedProduct.brandId && (
-                    <div>
-                      <Label className="text-sm font-medium text-gray-500">{translate('brandHeader')}</Label>
-                      <p className="flex items-center gap-1">
-                        {brands.find(b => b.id === selectedProduct.brandId)?.name ?? '-'}
-                      </p>
-                    </div>
+            <div className="px-6 pb-6 space-y-5">
+              <div className="flex gap-4 p-4 rounded-xl bg-gray-50/80 border border-gray-100">
+                <div className="flex-shrink-0 w-20 h-20 rounded-lg overflow-hidden bg-white border border-gray-200 flex items-center justify-center">
+                  {selectedProduct.image ? (
+                    <img
+                      src={getBackendAssetUrl(selectedProduct.image)}
+                      alt=""
+                      className="w-full h-full object-cover"
+                    />
+                  ) : (
+                    <Package className="h-9 w-9 text-indigo-600" />
                   )}
                 </div>
+                <div className="flex-1 min-w-0 flex flex-col justify-center">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h3 className="text-lg font-semibold text-gray-900 truncate">
+                      {selectedProduct.name}
+                    </h3>
+                    <Badge className={getStatusBadgeColor(selectedProduct.isActive)}>
+                      {selectedProduct.isActive ? translate('active') : translate('inactive')}
+                    </Badge>
+                  </div>
+                  <div className="flex items-center gap-3 text-sm text-gray-600 mt-0.5 flex-wrap">
+                    <span className="flex items-center gap-1">
+                      <Hash className="h-3.5 w-3.5" />
+                      {selectedProduct.sku}
+                    </span>
+                    <span className="flex items-center gap-1 text-green-600 font-medium">
+                      <DollarSign className="h-4 w-4" />
+                      {(selectedProduct.currentPrice || 0).toLocaleString(locale, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </span>
+                  </div>
+                </div>
               </div>
-              
+
+              <div className="flex gap-4 rounded-xl bg-gray-50/80 border border-gray-100 p-4">
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">{translate('categoryHeader')}</p>
+                  <p className="flex items-center gap-1.5 mt-1 text-sm font-medium text-gray-900 truncate">
+                    <Tag className="h-4 w-4 text-gray-400 shrink-0" />
+                    {getCategoryName(selectedProduct)}
+                  </p>
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">{translate('brandHeader')}</p>
+                  <p className="flex items-center gap-1.5 mt-1 text-sm font-medium text-gray-900 truncate">
+                    <Award className="h-4 w-4 text-gray-400 shrink-0" />
+                    {brands.find(b => b.id === selectedProduct.brandId)?.name ?? '-'}
+                  </p>
+                </div>
+              </div>
             </div>
           )}
           
-          <DialogFooter>
-            <DialogClose asChild>
-              <Button variant="outline">{translate('close')}</Button>
-            </DialogClose>
-            {selectedProduct && (
-              <Button 
-                onClick={() => {
-                  handleEditProduct(selectedProduct);
-                  setShowDetailDialog(false);
-                }}
-                className="bg-indigo-600 hover:bg-indigo-700"
-              >
-                <Edit3 className="h-4 w-4 mr-2" />
-                {translate('edit')}
-              </Button>
-            )}
+          <DialogFooter className="border-t border-gray-200 bg-gray-50/50 px-6 py-4 mt-0 rounded-b-xl">
+            <div className="flex justify-between items-center w-full gap-3">
+              <DialogClose asChild>
+                <Button variant="outline">{translate('close')}</Button>
+              </DialogClose>
+              {selectedProduct && (
+                <Button 
+                  onClick={() => {
+                    handleEditProduct(selectedProduct);
+                    setShowDetailDialog(false);
+                  }}
+                  className="bg-indigo-600 hover:bg-indigo-700"
+                >
+                  <Edit3 className="h-4 w-4 mr-2" />
+                  {translate('edit')}
+                </Button>
+              )}
+            </div>
           </DialogFooter>
         </DialogContent>
       </Dialog>

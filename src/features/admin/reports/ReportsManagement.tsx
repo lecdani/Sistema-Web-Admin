@@ -19,6 +19,7 @@ import {
   ChevronLeft,
   ChevronRight
 } from 'lucide-react';
+import { getBackendAssetUrl } from '@/shared/config/api';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/shared/components/base/Card';
 import { Button } from '@/shared/components/base/Button';
 import { Badge } from '@/shared/components/base/Badge';
@@ -88,6 +89,13 @@ interface FilterState {
 }
 
 const COLORS = ['#4f46e5', '#7c3aed', '#06b6d4', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899'];
+
+function getProductImageUrl(product: Product | null | undefined): string {
+  if (!product) return '';
+  if (product.image) return getBackendAssetUrl(product.image);
+  if (product.imageFileName) return getBackendAssetUrl('images/url/' + product.imageFileName);
+  return '';
+}
 
 export function ReportsManagement({ onBack }: ReportsManagementProps) {
   const router = useRouter();
@@ -1158,9 +1166,22 @@ ${salesMetrics.topSellers.map((s, i) =>
                               </TableCell>
                               <TableCell className="font-medium">{sale.invoiceNumber}</TableCell>
                               <TableCell>
-                                <div>
-                                  <p className="font-medium">{sale.productName}</p>
-                                  <p className="text-sm text-gray-500">{sale.productSku}</p>
+                                <div className="flex items-center gap-3">
+                                  {(() => {
+                                    const product = products.find((p) => String(p.id) === String(sale.productId));
+                                    const imgUrl = getProductImageUrl(product);
+                                    return imgUrl ? (
+                                      <img src={imgUrl} alt="" className="w-9 h-9 rounded object-cover flex-shrink-0" />
+                                    ) : (
+                                      <div className="w-9 h-9 rounded bg-gray-200 flex items-center justify-center flex-shrink-0">
+                                        <Package className="h-4 w-4 text-gray-500" />
+                                      </div>
+                                    );
+                                  })()}
+                                  <div>
+                                    <p className="font-medium">{sale.productName}</p>
+                                    <p className="text-sm text-gray-500">{sale.productSku}</p>
+                                  </div>
                                 </div>
                               </TableCell>
                               <TableCell>
@@ -1251,23 +1272,34 @@ ${salesMetrics.topSellers.map((s, i) =>
               </CardHeader>
               <CardContent>
                 <div className="space-y-3">
-                  {salesMetrics.topProducts.map((product, index) => (
-                    <div key={product.productId} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-                      <div className="flex items-center gap-3">
-                        <Badge className="bg-indigo-100 text-indigo-800 border-indigo-200">
-                          #{index + 1}
-                        </Badge>
-                        <div>
-                          <p className="font-medium text-gray-900">{product.productName}</p>
-                          <p className="text-sm text-gray-500">{product.productSku}</p>
+                  {salesMetrics.topProducts.map((product, index) => {
+                    const fullProduct = products.find((p) => String(p.id) === String(product.productId));
+                    const imgUrl = getProductImageUrl(fullProduct);
+                    return (
+                      <div key={product.productId} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                        <div className="flex items-center gap-3">
+                          <Badge className="bg-indigo-100 text-indigo-800 border-indigo-200">
+                            #{index + 1}
+                          </Badge>
+                          {imgUrl ? (
+                            <img src={imgUrl} alt="" className="w-10 h-10 rounded object-cover flex-shrink-0" />
+                          ) : (
+                            <div className="w-10 h-10 rounded bg-gray-200 flex items-center justify-center flex-shrink-0">
+                              <Package className="h-5 w-5 text-gray-500" />
+                            </div>
+                          )}
+                          <div>
+                            <p className="font-medium text-gray-900">{product.productName}</p>
+                            <p className="text-sm text-gray-500">{product.productSku}</p>
+                          </div>
+                        </div>
+                        <div className="text-right">
+                          <p className="font-bold text-gray-900">${product.totalSales.toFixed(2)}</p>
+                          <p className="text-sm text-gray-500">{product.totalQuantity} {translate('totalQuantityUnits')}</p>
                         </div>
                       </div>
-                      <div className="text-right">
-                        <p className="font-bold text-gray-900">${product.totalSales.toFixed(2)}</p>
-                        <p className="text-sm text-gray-500">{product.totalQuantity} {translate('totalQuantityUnits')}</p>
-                      </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </CardContent>
             </Card>

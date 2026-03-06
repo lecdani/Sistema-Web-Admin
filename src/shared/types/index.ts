@@ -78,6 +78,10 @@ export interface Product {
   brandId?: string;
   categoryId?: string;
   description?: string;
+  /** URL de la imagen del producto (devuelta por getProducts cuando tiene imagen) */
+  image?: string;
+  /** Nombre del archivo en S3 (solo para enviar en create/update) */
+  imageFileName?: string;
   currentPrice: number;
   isActive: boolean;
   createdAt: Date;
@@ -199,6 +203,8 @@ export interface POD {
   storeName?: string;
   sellerName?: string;
   imageUrl: string;
+  /** Nombre del archivo en S3 (para resolver URL si imageUrl no viene del backend). */
+  imageFileName?: string;
   uploadedAt: Date;
   uploadedBy: string;
   uploadedByName?: string;

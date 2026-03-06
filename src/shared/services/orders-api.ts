@@ -1620,25 +1620,21 @@ export const ordersApi = {
   },
 
   /**
-   * Sube el POD a la factura. PATCH /invoice/invoices/{id}/pod (mismo que PWA).
+   * Asocia el POD a la factura enviando solo el fileName (clave en S3).
+   * La imagen debe subirse antes con POST /images/upload; este PATCH solo envía el link/fileName.
+   * PATCH /invoice/invoices/{id}/pod — body: { pod: fileName } (sin base64).
    */
   async uploadPODForInvoice(params: {
     invoiceId: number | string;
+    /** Nombre del archivo devuelto por POST /images/upload (clave S3). */
     fileName: string;
-    contentType?: string;
     notes?: string;
-    imageDataUrl?: string | null;
   }): Promise<boolean> {
     const id = String(params.invoiceId).trim();
-    const name = (params.fileName || 'POD.png').trim();
-    const podPath = name.startsWith('imagenes/') ? name : `imagenes/${name}`;
-    let podBase64: string | undefined;
-    if (params.imageDataUrl && typeof params.imageDataUrl === 'string' && params.imageDataUrl.startsWith('data:')) {
-      const base64 = params.imageDataUrl.replace(/^data:image\/[^;]+;base64,/, '');
-      if (base64.length > 0) podBase64 = base64;
-    }
-    const body: Record<string, unknown> = { id, pod: podPath };
-    if (podBase64) body.podBase64 = podBase64;
+    const fileName = (params.fileName || '').trim();
+    if (!fileName) return false;
+    const body: Record<string, unknown> = { id, pod: fileName };
+    if (params.notes) body.notes = params.notes;
     const res = await safePatch<any>(`/invoice/invoices/${encodeURIComponent(id)}/pod`, body);
     return res !== null && res !== undefined;
   },

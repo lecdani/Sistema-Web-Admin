@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Loader2, Store as StoreIcon, Edit, Send, ArrowLeft } from 'lucide-react';
+import { Loader2, Store as StoreIcon, Edit, Send, ArrowLeft, Package } from 'lucide-react';
 import { Button } from '@/shared/components/base/Button';
 import { Badge } from '@/shared/components/base/Badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/shared/components/base/Select';
@@ -11,9 +11,17 @@ import { ordersApi } from '@/shared/services/orders-api';
 import { storesApi } from '@/shared/services/stores-api';
 import { histpricesApi } from '@/shared/services/histprices-api';
 import { getFromLocalStorage } from '@/shared/services/database';
+import { getBackendAssetUrl } from '@/shared/config/api';
 import { toast } from 'sonner';
 import { useLanguage } from '@/shared/hooks/useLanguage';
 import { ProductModalOrderEdit, ProductPositionEdit } from './ProductModalOrderEdit';
+
+function getProductImageUrl(product: Product | null | undefined): string {
+  if (!product) return '';
+  if (product.image) return getBackendAssetUrl(product.image);
+  if (product.imageFileName) return getBackendAssetUrl('images/url/' + product.imageFileName);
+  return '';
+}
 
 interface EditOrderPlanogramProps {
   order: Order;
@@ -141,6 +149,7 @@ export function EditOrderPlanogram({ order, onClose, onSaved }: EditOrderPlanogr
               sku: orderItem?.sku ?? product?.sku ?? '',
               toOrder: orderItem?.quantity ?? 0,
               price: orderItem?.price ?? product?.currentPrice ?? 0,
+              imageUrl: product ? getProductImageUrl(product) : undefined,
             });
           }
         }
@@ -291,6 +300,13 @@ export function EditOrderPlanogram({ order, onClose, onSaved }: EditOrderPlanogr
                 <div key={`${item.row}-${item.col}-${index}`} className="flex items-center justify-between gap-3 py-2.5 px-4 rounded-lg border border-gray-200 bg-white text-sm shadow-sm">
                   <div className="flex items-center gap-3 min-w-0">
                     <span className="bg-indigo-100 text-indigo-700 font-medium rounded-md w-6 h-6 flex items-center justify-center shrink-0 text-xs">{index + 1}</span>
+                    {item.imageUrl ? (
+                      <img src={item.imageUrl} alt="" className="w-9 h-9 rounded object-cover flex-shrink-0" />
+                    ) : (
+                      <div className="w-9 h-9 rounded bg-gray-200 flex items-center justify-center flex-shrink-0">
+                        <Package className="h-4 w-4 text-gray-500" />
+                      </div>
+                    )}
                     <div className="min-w-0">
                       <span className="font-medium text-gray-900 truncate block">{item.productName || item.sku}</span>
                       <span className="text-gray-500 text-xs">{item.toOrder} × ${item.price.toFixed(2)}</span>
@@ -432,10 +448,20 @@ export function EditOrderPlanogram({ order, onClose, onSaved }: EditOrderPlanogr
               >
                 {item.productId ? (
                   <>
-                    <span className="text-[10px] leading-snug font-medium text-gray-900 line-clamp-2 w-full break-words">
+                    {item.imageUrl ? (
+                      <img
+                        src={item.imageUrl}
+                        alt=""
+                        className="w-6 h-6 rounded object-cover flex-shrink-0 mx-auto"
+                      />
+                    ) : (
+                      <div className="w-6 h-6 rounded bg-gray-200 flex items-center justify-center flex-shrink-0 mx-auto">
+                        <Package className="h-3 w-3 text-gray-500" />
+                      </div>
+                    )}
+                    <span className="text-[10px] leading-snug font-medium text-gray-900 line-clamp-2 w-full break-words mt-0.5">
                       {item.productName || item.sku}
                     </span>
-                    <span className="text-[9px] text-gray-600 mt-1">${(item.price || 0).toFixed(2)}</span>
                     {item.toOrder > 0 && (
                       <span className="text-[10px] font-semibold text-indigo-600 mt-0.5">{item.toOrder} u</span>
                     )}

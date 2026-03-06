@@ -18,6 +18,7 @@ import { Label } from '@/shared/components/base/Label';
 import { ScrollArea } from '@/shared/components/base/ScrollArea';
 import { useLanguage } from '@/shared/hooks/useLanguage';
 import { PlanogramWithDistribution, Product } from '@/shared/types';
+import { getBackendAssetUrl } from '@/shared/config/api';
 
 interface PlanogramViewerProps {
   planogram: PlanogramWithDistribution;
@@ -194,11 +195,22 @@ export const PlanogramViewer: React.FC<PlanogramViewerProps> = ({ planogram }) =
                         }
                       >
                         {product ? (
-                          <div className="text-center w-full h-full flex flex-col justify-center p-1">
-                            <div className="font-bold text-green-800 truncate text-xs leading-tight mb-0.5">
+                          <div className="text-center w-full h-full flex flex-col justify-center p-0.5 relative">
+                            {product.image ? (
+                              <img
+                                src={getBackendAssetUrl(product.image)}
+                                alt=""
+                                className="w-6 h-6 mx-auto rounded object-cover flex-shrink-0 mb-0.5"
+                              />
+                            ) : (
+                              <div className="w-6 h-6 mx-auto rounded bg-green-100 flex items-center justify-center flex-shrink-0 mb-0.5">
+                                <Package className="h-3 w-3 text-green-600" />
+                              </div>
+                            )}
+                            <div className="font-bold text-green-800 truncate text-[10px] leading-tight">
                               {product.sku}
                             </div>
-                            <div className="text-[10px] text-green-700 truncate leading-tight">
+                            <div className="text-[9px] text-green-700 truncate leading-tight">
                               {product.name.split(' ').slice(0, 2).join(' ')}
                             </div>
                             <div className="absolute top-0.5 right-0.5 w-2.5 h-2.5 bg-green-600 rounded-full shadow-md"></div>
@@ -238,10 +250,18 @@ export const PlanogramViewer: React.FC<PlanogramViewerProps> = ({ planogram }) =
 
                       return (
                         <div key={product.id} className="p-1.5 border rounded text-[10px] hover:bg-gray-50 transition-colors">
-                          <div className="space-y-0.5">
-                            <div className="font-medium truncate text-gray-900 text-xs leading-tight">{product.name}</div>
-                            <div className="text-gray-500 leading-tight">{product.sku}</div>
-                            <div className="flex items-center justify-between gap-1">
+                          <div className="flex gap-2 items-start">
+                            <div className="flex-shrink-0 w-9 h-9 rounded overflow-hidden bg-gray-100 flex items-center justify-center">
+                              {product.image ? (
+                                <img src={getBackendAssetUrl(product.image)} alt="" className="w-full h-full object-cover" />
+                              ) : (
+                                <Package className="h-4 w-4 text-gray-400" />
+                              )}
+                            </div>
+                            <div className="flex-1 min-w-0 space-y-0.5">
+                              <div className="font-medium truncate text-gray-900 text-xs leading-tight">{product.name}</div>
+                              <div className="text-gray-500 leading-tight">{product.sku}</div>
+                              <div className="flex items-center justify-between gap-1">
                               <Badge className={`${getCategoryColor(product.category)} text-[9px] py-0 px-1`}>
                                 {product.category}
                               </Badge>
@@ -250,6 +270,7 @@ export const PlanogramViewer: React.FC<PlanogramViewerProps> = ({ planogram }) =
                                   {position}
                                 </Badge>
                               )}
+                              </div>
                             </div>
                           </div>
                         </div>

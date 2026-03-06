@@ -4,6 +4,8 @@ import type { Product } from '@/shared/types';
 const E = API_CONFIG.ENDPOINTS.PRODUCTS;
 
 function toProduct(raw: any, currentPrice?: number): Product {
+  const imageVal = raw.image ?? raw.Image ?? raw.imageUrl ?? raw.ImageUrl;
+  const imageFileNameVal = raw.imageFileName ?? raw.ImageFileName;
   return {
     id: String(raw.id ?? raw.Id ?? ''),
     sku: String(raw.sku ?? raw.Sku ?? ''),
@@ -12,6 +14,8 @@ function toProduct(raw: any, currentPrice?: number): Product {
     brandId: raw.brandId ?? raw.BrandId ?? undefined,
     categoryId: raw.categoryId ?? raw.CategoryId ?? undefined,
     description: raw.description ?? raw.Description ?? undefined,
+    image: imageVal != null && imageVal !== '' ? String(imageVal) : undefined,
+    imageFileName: imageFileNameVal != null && imageFileNameVal !== '' ? String(imageFileNameVal) : undefined,
     currentPrice: currentPrice ?? Number(raw.currentPrice ?? raw.CurrentPrice ?? 0),
     isActive: typeof raw.isActive === 'boolean' ? raw.isActive : (raw.IsActive ?? true),
     createdAt: raw.createdAt ? new Date(raw.createdAt) : raw.CreatedAt ? new Date(raw.CreatedAt) : new Date(),
@@ -26,13 +30,20 @@ export interface ProductPayload {
   isActive: boolean;
   brandId?: string;
   categoryId?: string;
+  /** Opcional. Nombre del archivo en S3 devuelto por POST /images/upload (confirmación de que el archivo existe en AWS S3). */
+  imageFileName?: string;
 }
 
-/** Lista todos los productos */
+/** Lista todos los productos. Si el backend devuelve error (ej. 500), devuelve [] para no romper la app. */
 export async function fetchProducts(): Promise<Product[]> {
-  const res = await apiClient.get<any>(E.LIST);
-  const list = Array.isArray(res) ? res : res?.data ?? res?.items ?? [];
-  return (list as any[]).map((raw: any) => toProduct(raw));
+  try {
+    const res = await apiClient.get<any>(E.LIST);
+    const list = Array.isArray(res) ? res : res?.data ?? res?.items ?? [];
+    return (list as any[]).map((raw: any) => toProduct(raw));
+  } catch (err: any) {
+    console.warn('[products-api] Error al listar productos:', err?.data?.message ?? err?.message);
+    return [];
+  }
 }
 
 /** Obtiene un producto por id */
@@ -54,8 +65,11 @@ export async function fetchProductsByCategory(category: string): Promise<Product
   return (list as any[]).map((raw: any) => toProduct(raw));
 }
 
-/** Crea un producto */
-export async function createProduct(data: ProductPayload): Promise<Product> {
+/** Crea un producto. imageFileNameOverride: si se pasa, se envía siempre al backend (evita pérdida por estado). */
+export async function createProduct(
+  data: ProductPayload,
+  imageFileNameOverride?: string | null
+): Promise<Product> {
   const payload: any = {
     name: (data.name ?? '').trim(),
     category: (data.category ?? '').trim(),
@@ -64,6 +78,18 @@ export async function createProduct(data: ProductPayload): Promise<Product> {
   };
   if (data.brandId) payload.brandId = data.brandId;
   if (data.categoryId) payload.categoryId = data.categoryId;
+  const fileName = (imageFileNameOverride != null && imageFileNameOverride !== '')
+    ? String(imageFileNameOverride).trim()
+    : (data.imageFileName != null && data.imageFileName !== '')
+      ? String(data.imageFileName).trim()
+      : '';
+  if (fileName) {
+    payload.imageFileName = fileName;
+    payload.ImageFileName = fileName;
+  }
+  if (typeof process !== 'undefined' && process.env?.NODE_ENV === 'development') {
+    console.log('[products-api] createProduct payload:', JSON.stringify(payload));
+  }
   const res = await apiClient.post<any>(E.CREATE, payload);
   if (res && (res.id || res.name)) return toProduct(res);
   const list = await fetchProducts();
@@ -78,6 +104,10 @@ export async function updateProduct(id: string, data: Partial<ProductPayload>): 
   const payload: any = { id, name: data.name?.trim(), category: data.category?.trim(), sku: data.sku?.trim(), isActive: data.isActive };
   if (data.brandId != null) payload.brandId = data.brandId;
   if (data.categoryId != null) payload.categoryId = data.categoryId;
+  if (data.imageFileName !== undefined) {
+    payload.imageFileName = data.imageFileName;
+    payload.ImageFileName = data.imageFileName;
+  }
   const res = await apiClient.put<any>(endpoint, payload);
   if (typeof res === 'string' || res === null || res === undefined) {
     const fetched = await fetchProductById(id);
