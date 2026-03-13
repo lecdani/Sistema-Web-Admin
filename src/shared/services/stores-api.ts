@@ -4,11 +4,27 @@ import type { Store } from '@/shared/types';
 const E = API_CONFIG.ENDPOINTS.STORES;
 
 function toStore(raw: any): Store {
+    const hasPlanRaw =
+        raw.hasPlanogram ??
+        raw.HasPlanogram ??
+        raw.has_planogram ??
+        raw.HAS_PLANOGRAM;
+
+    const hasPlanogram =
+        typeof hasPlanRaw === 'boolean'
+            ? hasPlanRaw
+            : typeof hasPlanRaw === 'number'
+                ? hasPlanRaw === 1
+                : typeof hasPlanRaw === 'string'
+                    ? ['true', '1', 'yes', 'y', 'si', 'sí'].includes(hasPlanRaw.trim().toLowerCase())
+                    : false;
+
     return {
         id: String(raw.id ?? raw.Id ?? ''),
         name: String(raw.name ?? raw.Name ?? ''),
         address: String(raw.address ?? raw.Address ?? ''),
         cityId: String(raw.cityId ?? raw.CityId ?? ''),
+        hasPlanogram,
         isActive: typeof raw.isActive === 'boolean' ? raw.isActive : (raw.IsActive ?? true),
         createdAt: raw.createdAt ? new Date(raw.createdAt) : raw.CreatedAt ? new Date(raw.CreatedAt) : new Date(),
         updatedAt: raw.updatedAt ? new Date(raw.updatedAt) : raw.UpdatedAt ? new Date(raw.UpdatedAt) : new Date()
@@ -20,6 +36,7 @@ function toPayload(data: Partial<Store>) {
         name: data.name?.trim(),
         address: data.address?.trim(),
         cityId: data.cityId,
+        hasPlanogram: data.hasPlanogram ?? false,
         isActive: data.isActive
     };
 }

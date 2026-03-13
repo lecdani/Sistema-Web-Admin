@@ -1,5 +1,4 @@
-import React from 'react';
-import { Building2 } from 'lucide-react';
+import React, { useState } from 'react';
 
 interface LogoProps {
   size?: 'sm' | 'md' | 'lg';
@@ -8,43 +7,62 @@ interface LogoProps {
   variant?: 'light' | 'dark';
 }
 
-export const Logo: React.FC<LogoProps> = ({ 
-  size = 'md', 
-  showText = true, 
+const sizeMap = {
+  sm: { img: 'h-8 w-auto', text: 'text-lg' },
+  md: { img: 'h-10 w-auto', text: 'text-xl' },
+  lg: { img: 'h-12 w-auto', text: 'text-2xl' }
+};
+
+export const Logo: React.FC<LogoProps> = ({
+  size = 'md',
+  showText = true,
   className = '',
   variant = 'light'
 }) => {
-  const sizeClasses = {
-    sm: 'h-8 w-8',
-    md: 'h-10 w-10',
-    lg: 'h-12 w-12'
-  };
+  const [imgError, setImgError] = useState(false);
+  const isLight = variant === 'light';
+  const textColor = isLight ? 'text-white' : 'text-gray-900';
+  const subtitleColor = isLight ? 'text-indigo-100' : 'text-gray-500';
 
-  const textSizeClasses = {
-    sm: 'text-lg',
-    md: 'text-xl',
-    lg: 'text-2xl'
-  };
+  if (imgError) {
+    return (
+      <div className={`flex items-center gap-3 ${className}`}>
+        <div className={`${sizeMap[size].img} min-w-[2rem] rounded-lg bg-gray-900 flex items-center justify-center px-2`}>
+          <span className="font-bold text-white text-sm tracking-tight">∞</span>
+        </div>
+        {showText && (
+          <div className="flex flex-col">
+            <span className={`${sizeMap[size].text} font-bold ${textColor} leading-none`}>ETERNAL</span>
+            <span className={`text-xs ${subtitleColor} leading-none mt-1`}>Sistema Empresarial</span>
+          </div>
+        )}
+      </div>
+    );
+  }
 
-  const iconColor = variant === 'light' ? 'text-white' : 'text-indigo-600';
-  const textColor = variant === 'light' ? 'text-white' : 'text-gray-900';
-  const subtitleColor = variant === 'light' ? 'text-indigo-100' : 'text-gray-500';
+  // En variant dark (sidebar/menú) el logo es blanco: fondo azul como el del avatar para que se vea
+  const logoImg = (
+    <img
+      src="/logo-eternal.png"
+      alt="ETERNAL"
+      className={variant === 'dark' ? 'h-full w-auto max-h-full object-contain' : `${sizeMap[size].img} object-contain object-left`}
+      onError={() => setImgError(true)}
+    />
+  );
 
   return (
     <div className={`flex items-center gap-3 ${className}`}>
-      <div className="relative">
-        <div className={`${sizeClasses[size]} bg-white/20 rounded-xl flex items-center justify-center backdrop-blur-sm ${variant === 'dark' ? 'bg-indigo-50 border border-indigo-200' : ''}`}>
-          <Building2 className={`${size === 'sm' ? 'h-4 w-4' : size === 'md' ? 'h-5 w-5' : 'h-6 w-6'} ${iconColor}`} />
+      {variant === 'dark' ? (
+        <div className={`rounded-lg bg-indigo-600 flex items-center justify-center p-1.5 flex-shrink-0 ${sizeMap[size].img}`}>
+          {logoImg}
         </div>
-      </div>
+      ) : (
+        logoImg
+      )}
       {showText && (
         <div className="flex flex-col">
-          <h1 className={`${textSizeClasses[size]} font-bold ${textColor} leading-none`}>
-            Tu Empresa
-          </h1>
-          <p className={`text-xs ${subtitleColor} leading-none mt-1`}>
-            Sistema Empresarial
-          </p>
+          <span className={`${sizeMap[size].text} font-bold ${textColor} leading-none`}>ETERNAL</span>
+          <span className={`text-xs ${subtitleColor} leading-none mt-1`}>Sistema Empresarial</span>
         </div>
       )}
     </div>

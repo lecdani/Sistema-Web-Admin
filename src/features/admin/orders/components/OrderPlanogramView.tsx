@@ -6,6 +6,7 @@ import { Order, Planogram, Distribution, Product } from '@/shared/types';
 import { planogramsApi } from '@/shared/services/planograms-api';
 import { distributionsApi } from '@/shared/services/distributions-api';
 import { productsApi } from '@/shared/services/products-api';
+import { categoriesApi } from '@/shared/services/categories-api';
 import { ordersApi } from '@/shared/services/orders-api';
 import { histpricesApi } from '@/shared/services/histprices-api';
 import { getFromLocalStorage } from '@/shared/services/database';
@@ -30,6 +31,7 @@ interface ProductPosition {
   productId: string;
   productName: string;
   sku: string;
+  category: string;
   toOrder: number;
   price: number;
   imageUrl?: string;
@@ -40,6 +42,7 @@ export const OrderPlanogramView: React.FC<OrderPlanogramViewProps> = ({ order })
   const [grid, setGrid] = useState<ProductPosition[]>([]);
   const [planogramName, setPlanogramName] = useState<string | null>(null);
   const [planogramDescription, setPlanogramDescription] = useState<string | null>(null);
+  const [allCategories, setAllCategories] = useState<{ id: string; name: string }[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
 
@@ -76,42 +79,82 @@ export const OrderPlanogramView: React.FC<OrderPlanogramViewProps> = ({ order })
         }
 
 
-        let planogramsData: Planogram[] = [];
-        try {
-          planogramsData = await planogramsApi.fetchAll();
-        } catch (_) {
-          planogramsData = (getFromLocalStorage('app-planograms') || []) as Planogram[];
-        }
-        if (!mounted) return;
+        const planogramIdFromOrder: string =
+          (apiOrder.planogramId && String(apiOrder.planogramId).trim()) ||
+          (order.planogramId && String(order.planogramId).trim()) ||
+          '';
 
-        const activePlan =
-          planogramsData.find((p: Planogram) => p.isActive) ||
-          (order.planogramId && planogramsData.find((p: Planogram) => p.id === order.planogramId)) ||
-          planogramsData[0];
-        if (!activePlan) {
+        let planogram: Planogram | null = null;
+        if (planogramIdFromOrder) {
+          try {
+            const byId = await planogramsApi.getById(planogramIdFromOrder);
+            planogram = byId as Planogram | null;
+          } catch {
+            planogram = null;
+          }
+        }
+
+        if (!planogram) {
+          let planogramsData: Planogram[] = [];
+          try {
+            planogramsData = await planogramsApi.fetchAll();
+          } catch (_) {
+            planogramsData = (getFromLocalStorage('app-planograms') || []) as Planogram[];
+          }
+          if (!mounted || !planogramsData.length) {
+            setLoadError(translate('noActivePlanogramActivate'));
+            setLoading(false);
+            return;
+          }
+          planogram =
+            planogramsData.find((p: Planogram) => !!planogramIdFromOrder && p.id === planogramIdFromOrder) ||
+            planogramsData.find((p: Planogram) => p.isActive) ||
+            planogramsData[0];
+        }
+
+        if (!planogram) {
           setLoadError(translate('noActivePlanogramActivate'));
           setLoading(false);
           return;
         }
-        setPlanogramName(activePlan.name ?? null);
-        setPlanogramDescription(activePlan.description ?? null);
+        setPlanogramName(planogram.name ?? null);
+        setPlanogramDescription(planogram.description ?? null);
 
         let distList: Distribution[] = [];
         try {
-          distList = await distributionsApi.getByPlanogram(activePlan.id);
+          distList = await distributionsApi.getByPlanogram(planogram.id);
         } catch (_) {
           const allDist = (getFromLocalStorage('app-distributions') || []) as Distribution[];
-          distList = allDist.filter((d: Distribution) => d.planogramId === activePlan.id);
+          distList = allDist.filter((d: Distribution) => d.planogramId === planogram.id);
         }
         if (!mounted) return;
 
         let productsData: Product[] = [];
+        let categoriesList: { id: string; name: string }[] = [];
         try {
-          productsData = (await productsApi.fetchAll()) as Product[];
+          [productsData, categoriesList] = await Promise.all([
+            (productsApi.fetchAll() as Promise<Product[]>),
+            categoriesApi.fetchAll().then((list) => list.map((c) => ({ id: c.id, name: c.name }))),
+          ]);
         } catch (_) {
           productsData = (getFromLocalStorage('app-products') || []) as Product[];
+          categoriesList = [];
         }
         if (!mounted) return;
+        setAllCategories(categoriesList);
+
+        const categoryById = new Map<string, string>();
+        categoriesList.forEach((c) => {
+          categoryById.set(c.id, c.name);
+          categoryById.set(String(Number(c.id)), c.name);
+        });
+        const resolveCategory = (p: Product | null): string => {
+          if (!p) return '';
+          const name = (p.category || '').trim();
+          if (name) return name;
+          const id = p.categoryId != null ? String(p.categoryId) : '';
+          return id ? (categoryById.get(id) ?? categoryById.get(String(Number(id))) ?? '') : '';
+        };
 
         const productMap = new Map<string, Product>();
         productsData.forEach((p) => {
@@ -158,6 +201,7 @@ export const OrderPlanogramView: React.FC<OrderPlanogramViewProps> = ({ order })
               productId: product?.id ?? '',
               productName: orderItem?.productName ?? product?.name ?? product?.sku ?? '',
               sku: orderItem?.sku ?? product?.sku ?? '',
+              category: resolveCategory(product ?? null),
               toOrder: orderItem?.quantity ?? 0,
               price: orderItem?.price ?? product?.currentPrice ?? 0,
               imageUrl: product ? getProductImageUrl(product) : undefined,
@@ -317,6 +361,35 @@ export const OrderPlanogramView: React.FC<OrderPlanogramViewProps> = ({ order })
           <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-slate-400" />{translate('noQuantity')}</span>
           <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-blue-50 border border-blue-300" />{translate('withQuantity')}</span>
         </div>
+
+        {/* Resumen por categoría: todas las registradas, con Pcs (0 o suma del pedido) */}
+        {allCategories.length > 0 && (
+          <div className="mt-6 border border-slate-200 rounded-lg overflow-hidden bg-slate-50/50">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="bg-slate-200 text-slate-800">
+                  <th className="text-left py-2 px-3 font-semibold">{translate('familyCol') || 'Family'}</th>
+                  <th className="text-right py-2 px-3 font-semibold w-16">{translate('pcsCol') || 'Pcs'}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {[...allCategories]
+                  .sort((a, b) => a.name.localeCompare(b.name))
+                  .map((cat) => {
+                    const pcs = grid
+                      .filter((item) => (item.category || '').trim() === cat.name)
+                      .reduce((sum, item) => sum + item.toOrder, 0);
+                    return (
+                      <tr key={cat.id} className="border-t border-slate-200 bg-white">
+                        <td className="py-2 px-3 text-slate-900">{cat.name}</td>
+                        <td className="py-2 px-3 text-right font-medium text-slate-800">{pcs}</td>
+                      </tr>
+                    );
+                  })}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
     </div>
   );

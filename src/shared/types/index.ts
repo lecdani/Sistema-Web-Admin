@@ -49,6 +49,8 @@ export interface Store {
   name: string;
   address: string;
   cityId: string;
+  /** Indica si la tienda usa planograma en la PWA/backend. */
+  hasPlanogram?: boolean;
   isActive: boolean;
   createdAt: Date;
   updatedAt: Date;

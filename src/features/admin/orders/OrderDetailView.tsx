@@ -24,6 +24,7 @@ import { getBackendAssetUrl } from '@/shared/config/api';
 import { toast } from 'sonner';
 import { histpricesApi } from '@/shared/services/histprices-api';
 import { productsApi } from '@/shared/services/products-api';
+import { categoriesApi } from '@/shared/services/categories-api';
 import { storesApi } from '@/shared/services/stores-api';
 import { citiesApi } from '@/shared/services/cities-api';
 import { usersApi } from '@/shared/services/users-api';
@@ -70,6 +71,8 @@ export function OrderDetailView({ orderId, onClose, onOrderUpdated }: OrderDetai
   const [storeEditValue, setStoreEditValue] = useState('');
   const [storeSaveLoading, setStoreSaveLoading] = useState(false);
   const [storeError, setStoreError] = useState<string | null>(null);
+  const [allCategories, setAllCategories] = useState<{ id: string; name: string }[]>([]);
+  const [storeHasPlanogram, setStoreHasPlanogram] = useState(true);
 
   useEffect(() => {
     const load = async () => {
@@ -79,28 +82,45 @@ export function OrderDetailView({ orderId, onClose, onOrderUpdated }: OrderDetai
         setInvoiceDisplay(null);
         return;
       }
+      const categoriesList = await categoriesApi.fetchAll();
+      setAllCategories(categoriesList.map((c) => ({ id: c.id, name: c.name })));
+      const categoryById = new Map<string, string>();
+      categoriesList.forEach((c) => {
+        categoryById.set(c.id, c.name);
+        categoryById.set(String(Number(c.id)), c.name);
+      });
+
       // Enriquecer items con precio desde histprices cuando falte (igual que PWA)
       const needsPrice = ord.items.some((i: any) => i.productId && !Number(i.price));
       const needsProductName = ord.items.some(
         (i: any) => i.productId && !(i.productName || i.sku || '').trim()
       );
+      const needsCategory = ord.items.some(
+        (i: any) => i.productId && (i.category == null || i.category === '')
+      );
       let orderToSet = ord;
-      if (needsPrice || needsProductName) {
+      if (needsPrice || needsProductName || needsCategory) {
         const enrichedItems = await Promise.all(
           ord.items.map(async (item: any) => {
             let productName = (item.productName || item.sku || '').trim();
             let price = Number(item.price) || 0;
+            let category = (item.category ?? '').trim();
             if (item.productId) {
               if (!price) {
                 const latest = await histpricesApi.getLatest(item.productId);
                 price = latest?.price ?? 0;
               }
-              if (!productName) {
-                const product = await productsApi.getById(item.productId);
-                if (product) productName = product.name || product.sku || '';
+              const product = await productsApi.getById(item.productId);
+              if (product) {
+                if (!productName) productName = product.name || product.sku || '';
+                if (!category && product.category) category = product.category.trim();
+                if (!category && product.categoryId != null) {
+                  const id = String(product.categoryId);
+                  category = categoryById.get(id) ?? categoryById.get(String(Number(id))) ?? '';
+                }
               }
             }
-            return { ...item, productName: productName || item.productName, price };
+            return { ...item, productName: productName || item.productName, price, category: category || item.category };
           })
         );
         const computedSubtotal = enrichedItems.reduce(
@@ -126,6 +146,7 @@ export function OrderDetailView({ orderId, onClose, onOrderUpdated }: OrderDetai
         try {
           const store = await storesApi.getById(storeIdToResolve);
           if (store) {
+            setStoreHasPlanogram(store.hasPlanogram !== false);
             resolvedStoreName = store.name;
             resolvedStoreAddress = store.address || '';
             setStoreNameDisplay(store.name);
@@ -501,10 +522,12 @@ export function OrderDetailView({ orderId, onClose, onOrderUpdated }: OrderDetai
             <Package className="h-4 w-4" />
             {translate('infoAndProducts')}
           </TabsTrigger>
-          <TabsTrigger value="planogram" className="flex items-center gap-2 px-6 py-3 rounded-none border-b-2 border-transparent data-[state=active]:border-indigo-600 data-[state=active]:bg-white data-[state=active]:text-indigo-600">
-            <Layout className="h-4 w-4" />
-            {translate('planogram')}
-          </TabsTrigger>
+          {storeHasPlanogram && (
+            <TabsTrigger value="planogram" className="flex items-center gap-2 px-6 py-3 rounded-none border-b-2 border-transparent data-[state=active]:border-indigo-600 data-[state=active]:bg-white data-[state=active]:text-indigo-600">
+              <Layout className="h-4 w-4" />
+              {translate('planogram')}
+            </TabsTrigger>
+          )}
           <TabsTrigger value="invoice" className="flex items-center gap-2 px-6 py-3 rounded-none border-b-2 border-transparent data-[state=active]:border-indigo-600 data-[state=active]:bg-white data-[state=active]:text-indigo-600">
             <FileText className="h-4 w-4" />
             {translate('invoiceLabel')}
@@ -692,38 +715,74 @@ export function OrderDetailView({ orderId, onClose, onOrderUpdated }: OrderDetai
                 );
               })}
             </div>
+
+            {/* Resumen por categoría: todas las registradas, con Pcs (0 o suma del pedido) */}
+            {allCategories.length > 0 && (
+              <div className="mt-6 border border-slate-200 rounded-lg overflow-hidden bg-slate-50/50">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="bg-slate-200 text-slate-800">
+                      <th className="text-left py-2 px-3 font-semibold">{translate('familyCol') || 'Family'}</th>
+                      <th className="text-right py-2 px-3 font-semibold w-16">{translate('pcsCol') || 'Pcs'}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {[...allCategories]
+                      .sort((a, b) => a.name.localeCompare(b.name))
+                      .map((cat) => {
+                        const pcs = (order.items || []).reduce(
+                          (sum: number, item: any) => {
+                            const qty = item.quantity ?? item.toOrder ?? 0;
+                            return (item.category || '').trim() === cat.name ? sum + qty : sum;
+                          },
+                          0
+                        );
+                        return (
+                          <tr key={cat.id} className="border-t border-slate-200 bg-white">
+                            <td className="py-2 px-3 text-gray-900">{cat.name}</td>
+                            <td className="py-2 px-3 text-right font-medium text-gray-800">{pcs}</td>
+                          </tr>
+                        );
+                      })}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         </TabsContent>
 
-        <TabsContent value="planogram" className="p-6 mt-0">
-          <OrderPlanogramView
-            order={
-              {
-                id: order.id,
-                backendOrderId: (order as any).backendOrderId,
-                salespersonId: (order as any).salespersonId ?? '',
-                storeId: (order as any).storeId ?? '',
-                createdAt: order.date ? new Date(order.date) : new Date(),
-                po: (order as any).po ?? order.id,
-                status: order.status === 'invoiced' || order.status === 'completed' ? 'completed' : 'pending',
-                storeName: order.storeName,
-                subtotal: displaySubtotal,
-                total: displayTotal,
-                items: (order.items || []).map((it: any) => ({
-                  id: it.id ?? '',
-                  orderId: order.id,
-                  productId: it.productId ?? it.sku ?? '',
-                  quantity: it.quantity ?? it.toOrder ?? 0,
-                  productName: it.productName,
-                  unitPrice: Number(it.price) || 0,
-                  subtotal: (it.quantity ?? it.toOrder ?? 0) * (Number(it.price) || 0),
-                  status: 'pending',
-                })),
-                updatedAt: new Date(),
-              } as Order
-            }
-          />
-        </TabsContent>
+        {storeHasPlanogram && (
+          <TabsContent value="planogram" className="p-6 mt-0">
+            <OrderPlanogramView
+              order={
+                {
+                  id: order.id,
+                  backendOrderId: (order as any).backendOrderId,
+                  salespersonId: (order as any).salespersonId ?? '',
+                  storeId: (order as any).storeId ?? '',
+                  createdAt: order.date ? new Date(order.date) : new Date(),
+                  po: (order as any).po ?? order.id,
+                  status: order.status === 'invoiced' || order.status === 'completed' ? 'completed' : 'pending',
+                  storeName: order.storeName,
+                  planogramId: (order as any).planogramId,
+                  subtotal: displaySubtotal,
+                  total: displayTotal,
+                  items: (order.items || []).map((it: any) => ({
+                    id: it.id ?? '',
+                    orderId: order.id,
+                    productId: it.productId ?? it.sku ?? '',
+                    quantity: it.quantity ?? it.toOrder ?? 0,
+                    productName: it.productName,
+                    unitPrice: Number(it.price) || 0,
+                    subtotal: (it.quantity ?? it.toOrder ?? 0) * (Number(it.price) || 0),
+                    status: 'pending',
+                  })),
+                  updatedAt: new Date(),
+                } as Order
+              }
+            />
+          </TabsContent>
+        )}
 
         <TabsContent value="invoice" className="p-6 mt-0">
           {(() => {

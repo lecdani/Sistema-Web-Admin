@@ -40,11 +40,11 @@ import {
 } from '@/shared/components/base/AlertDialog';
 import { Planogram, Product, Distribution, PlanogramWithDistribution } from '@/shared/types';
 import { useLanguage } from '@/shared/hooks/useLanguage';
-import { getFromLocalStorage } from '@/shared/services/database';
 import { toast } from '@/shared/components/base/Toast';
 import { planogramsApi } from '@/shared/services/planograms-api';
 import { distributionsApi } from '@/shared/services/distributions-api';
 import { productsApi } from '@/shared/services/products-api';
+import { fetchAllOrderSummaries } from '@/shared/services/orders-api';
 import { PlanogramEditor } from './components/PlanogramEditor';
 import { PlanogramViewer } from './components/PlanogramViewer';
 
@@ -66,7 +66,7 @@ export const PlanogramManagement: React.FC<PlanogramManagementProps> = ({ onBack
   const [showEditDialog, setShowEditDialog] = useState(false);
   const [selectedPlanogram, setSelectedPlanogram] = useState<PlanogramWithDistribution | null>(null);
   const [editingPlanogram, setEditingPlanogram] = useState<Planogram | null>(null);
-  const [orders, setOrders] = useState<{ planogramId?: string }[]>([]);
+  const [ordersWithPlanogram, setOrdersWithPlanogram] = useState<{ planogramId?: string }[]>([]);
 
   useEffect(() => {
     loadData();
@@ -80,18 +80,20 @@ export const PlanogramManagement: React.FC<PlanogramManagementProps> = ({ onBack
 
   const loadData = async () => {
     try {
-      const [planogramData, productData] = await Promise.all([
+      const [planogramData, productData, orderSummaries] = await Promise.all([
         planogramsApi.fetchAll(),
-        productsApi.fetchAll()
+        productsApi.fetchAll(),
+        fetchAllOrderSummaries()
       ]);
       setPlanograms(planogramData);
       setProducts(productData);
-      setOrders(getFromLocalStorage('app-orders') || []);
+      setOrdersWithPlanogram(orderSummaries);
       const distArrays = await Promise.all(planogramData.map((p) => distributionsApi.getByPlanogram(p.id)));
       setDistributions(distArrays.flat());
     } catch (error) {
       console.error('Error cargando datos:', error);
       toast.error(translate('errorLoadPlanogramData'));
+      setOrdersWithPlanogram([]);
     } finally {
       setIsLoading(false);
     }
@@ -170,13 +172,13 @@ export const PlanogramManagement: React.FC<PlanogramManagementProps> = ({ onBack
     setEditingPlanogram(null);
   };
 
-  /** Editable si no tiene venta asociada (app-orders con planogramId). Sin pedidos o sin coincidencia = editable. */
+  /** Editable solo si no tiene ningún pedido asociado en BD (orders.planogram_id). */
   const canEditPlanogram = (planogram: Planogram): boolean => {
-    const list = Array.isArray(orders) ? orders : [];
+    const list = Array.isArray(ordersWithPlanogram) ? ordersWithPlanogram : [];
     if (list.length === 0) return true;
     const pid = String(planogram?.id ?? '').trim();
-    const hasSale = list.some((o: any) => String(o?.planogramId ?? o?.planogram_id ?? '').trim() === pid);
-    return !hasSale;
+    const hasOrder = list.some((o: { planogramId?: string }) => String(o?.planogramId ?? '').trim() === pid);
+    return !hasOrder;
   };
 
   const handleEditPlanogram = (planogram: Planogram) => {
@@ -525,38 +527,6 @@ export const PlanogramManagement: React.FC<PlanogramManagementProps> = ({ onBack
                           >
                             <Edit className="h-4 w-4" />
                           </Button>
-                        )}
-                        
-                        {!planogram.isActive && (
-                          <AlertDialog>
-                            <AlertDialogTrigger asChild>
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                className="text-green-600 hover:text-green-700"
-                                title="Activar planograma"
-                              >
-                                <Power className="h-4 w-4" />
-                              </Button>
-                            </AlertDialogTrigger>
-                            <AlertDialogContent>
-                              <AlertDialogHeader>
-                                <AlertDialogTitle>{translate('activatePlanogramTitle')}</AlertDialogTitle>
-                                <AlertDialogDescription>
-                                  {translate('activatePlanogramConfirm').replace('{name}', planogram.name)}
-                                </AlertDialogDescription>
-                              </AlertDialogHeader>
-                              <AlertDialogFooter>
-                                <AlertDialogCancel>{translate('cancel')}</AlertDialogCancel>
-                                <AlertDialogAction
-                                  onClick={() => handleActivatePlanogram(planogram)}
-                                  className="bg-green-600 hover:bg-green-700"
-                                >
-                                  {translate('activate')}
-                                </AlertDialogAction>
-                              </AlertDialogFooter>
-                            </AlertDialogContent>
-                          </AlertDialog>
                         )}
                       </div>
                     </td>

@@ -57,6 +57,7 @@ interface StoreFormData {
   name: string;
   address: string;
   cityId: string;
+  hasPlanogram: boolean;
 }
 
 export const StoreManagement: React.FC<StoreManagementProps> = ({ onBack }) => {
@@ -80,6 +81,7 @@ export const StoreManagement: React.FC<StoreManagementProps> = ({ onBack }) => {
     name: '',
     address: '',
     cityId: '',
+    hasPlanogram: true,
   });
   const [formErrors, setFormErrors] = useState<Partial<Record<keyof StoreFormData, string>>>({});
 
@@ -150,7 +152,7 @@ export const StoreManagement: React.FC<StoreManagementProps> = ({ onBack }) => {
   };
 
   const resetForm = () => {
-    setFormData({ name: '', address: '', cityId: '' });
+    setFormData({ name: '', address: '', cityId: '', hasPlanogram: true });
     setFormErrors({});
     setEditingStore(null);
   };
@@ -187,7 +189,8 @@ export const StoreManagement: React.FC<StoreManagementProps> = ({ onBack }) => {
       const storeData: any = {
         name: formData.name.trim(),
         address: formData.address.trim(),
-        cityId: formData.cityId
+        cityId: formData.cityId,
+        hasPlanogram: !!formData.hasPlanogram,
       };
 
       if (editingStore) {
@@ -213,7 +216,8 @@ export const StoreManagement: React.FC<StoreManagementProps> = ({ onBack }) => {
     setFormData({
       name: store.name,
       address: store.address,
-      cityId: store.cityId
+      cityId: store.cityId,
+      hasPlanogram: !!store.hasPlanogram,
     });
     setFormErrors({});
     setEditingStore(store);
@@ -382,6 +386,26 @@ export const StoreManagement: React.FC<StoreManagementProps> = ({ onBack }) => {
                   </SelectContent>
                 </Select>
                 {formErrors.cityId && <p className="text-sm text-red-600">{formErrors.cityId}</p>}
+              </div>
+
+              <div className="flex items-start gap-2 pt-1">
+                <input
+                  id="hasPlanogram"
+                  type="checkbox"
+                  className="mt-1 h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                  checked={formData.hasPlanogram}
+                  onChange={(e) =>
+                    setFormData((prev) => ({ ...prev, hasPlanogram: e.target.checked }))
+                  }
+                />
+                <div>
+                  <Label htmlFor="hasPlanogram" className="text-sm font-medium text-gray-700">
+                    {translate('hasPlanogramLabel')}
+                  </Label>
+                  <p className="text-xs text-gray-500 mt-0.5">
+                    {translate('hasPlanogramHelp')}
+                  </p>
+                </div>
               </div>
 
             </div>
@@ -696,6 +720,15 @@ export const StoreManagement: React.FC<StoreManagementProps> = ({ onBack }) => {
                   {translate('address')}
                 </Label>
                 <p className="text-sm text-gray-700 whitespace-pre-wrap">{selectedStore.address}</p>
+              </div>
+
+              <div className="bg-gray-50 rounded-lg p-4 border border-gray-100">
+                <Label className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2 block">
+                  {translate('hasPlanogramLabel')}
+                </Label>
+                <p className="text-sm text-gray-700">
+                  {selectedStore.hasPlanogram ? translate('yesLabel') ?? 'Sí' : translate('noLabel') ?? 'No'}
+                </p>
               </div>
             </div>
           )}

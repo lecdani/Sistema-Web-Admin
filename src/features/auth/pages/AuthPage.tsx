@@ -37,6 +37,16 @@ export const AuthPage: React.FC = () => {
     <div className="min-h-screen flex">
       {/* Panel Izquierdo - Información Empresarial */}
       <div className="hidden lg:flex lg:w-1/2 xl:w-2/5 gradient-primary-alt relative overflow-hidden">
+        {/* Fondo: esmaltes en la misma zona (derecha), detrás del texto, sin interferir */}
+        <div
+          className="absolute inset-0 opacity-20 pointer-events-none"
+          style={{
+            backgroundImage: "url('/esmaltes.png')",
+            backgroundRepeat: 'no-repeat',
+            backgroundPosition: 'right calc(50% + 3cm)',
+            backgroundSize: '255px auto'
+          }}
+        />
         {/* Background Pattern */}
         <div className="absolute inset-0 opacity-10">
           <div className="absolute top-0 left-0 w-full h-full bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNDAiIGhlaWdodD0iNDAiIHZpZXdCb3g9IjAgMCA0MCA0MCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48ZGVmcz48cGF0dGVybiBpZD0iZ3JpZCIgd2lkdGg9IjQwIiBoZWlnaHQ9IjQwIiBwYXR0ZXJuVW5pdHM9InVzZXJTcGFjZU9uVXNlIj48cGF0aCBkPSJNIDQwIDAgTCAwIDAgMCA0MCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSJ3aGl0ZSIgc3Ryb2tlLXdpZHRoPSIxIiBvcGFjaXR5PSIwLjEiLz48L3BhdHRlcm4+PC9kZWZzPjxyZWN0IHdpZHRoPSIxMDAlIiBoZWlnaHQ9IjEwMCUiIGZpbGw9InVybCgjZ3JpZCkiLz48L3N2Zz4=')] bg-repeat"></div>
@@ -60,7 +70,7 @@ export const AuthPage: React.FC = () => {
               </p>
             </div>
 
-            {/* Features */}
+            {/* Features (la imagen esmaltes va en el fondo, a la derecha) */}
             <div className="space-y-4">
               {features.map((feature, index) => {
                 const Icon = feature.icon;
@@ -74,9 +84,14 @@ export const AuthPage: React.FC = () => {
             </div>
           </div>
 
-          {/* Footer */}
-          <div className="text-center text-indigo-200 text-sm">
-            {translate('copyright')}
+          {/* Footer y créditos */}
+          <div className="text-center text-indigo-200 text-sm space-y-1">
+            <p>{translate('copyright').replace('{year}', String(new Date().getFullYear()))}</p>
+            <p className="text-xs">
+              <a href="https://www.linkedin.com/in/daniela-echezuria-9287b3202/" target="_blank" rel="noopener noreferrer" className="hover:text-white underline">Daniela Echezuría</a>
+              {' · '}
+              <a href="https://www.linkedin.com/in/aeuribe24/" target="_blank" rel="noopener noreferrer" className="hover:text-white underline">Andrés Uribe</a>
+            </p>
           </div>
         </div>
 

@@ -180,8 +180,9 @@ export function Invoice({
           <table style={{ width: '100%', fontSize: '0.875rem', borderCollapse: 'collapse' }}>
             <thead>
               <tr style={{ backgroundColor: s.slate800, color: s.white }}>
-                <th style={{ padding: '1rem 2rem', fontWeight: 600, textAlign: 'center', width: '3.5rem' }}>{translate('qtyCol')}</th>
-                <th style={{ padding: '1rem 2rem', fontWeight: 600, textAlign: 'left' }}>{translate('descriptionCol')}</th>
+              <th style={{ padding: '1rem 2rem', fontWeight: 600, textAlign: 'center', width: '3.5rem' }}>{translate('qtyCol')}</th>
+              <th style={{ padding: '1rem 2rem', fontWeight: 600, textAlign: 'left', width: '6rem' }}>{translate('skuCol') || 'SKU'}</th>
+              <th style={{ padding: '1rem 2rem', fontWeight: 600, textAlign: 'left' }}>{translate('descriptionCol')}</th>
                 <th style={{ padding: '1rem 2rem', fontWeight: 600, textAlign: 'right', width: '6rem' }}>{translate('unitPriceCol')}</th>
                 <th style={{ padding: '1rem 2rem', fontWeight: 600, textAlign: 'right', width: '7rem' }}>{translate('amountCol')}</th>
               </tr>
@@ -194,8 +195,9 @@ export function Invoice({
                     borderBottom: index < items.length - 1 ? `1px solid ${s.slate100}` : undefined,
                   }}
                 >
-                  <td style={{ padding: '1rem 2rem', textAlign: 'center', color: s.slate700 }}>{item.qty}</td>
-                  <td style={{ padding: '1rem 2rem', color: s.slate900 }}>{item.description || '—'}</td>
+                <td style={{ padding: '1rem 2rem', textAlign: 'center', color: s.slate700 }}>{item.qty}</td>
+                <td style={{ padding: '1rem 2rem', color: s.slate700 }}>{item.code || '—'}</td>
+                <td style={{ padding: '1rem 2rem', color: s.slate900 }}>{item.description || '—'}</td>
                   <td style={{ padding: '1rem 2rem', textAlign: 'right', color: s.slate700 }}>${Number(item.price).toFixed(2)}</td>
                   <td style={{ padding: '1rem 2rem', textAlign: 'right', fontWeight: 500, color: s.slate900 }}>${Number(item.amount).toFixed(2)}</td>
                 </tr>

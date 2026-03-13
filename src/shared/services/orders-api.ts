@@ -24,6 +24,8 @@ export interface AdminOrderSummary {
   invoiceId?: string | number;
   /** Código PO (Purchase Order), único. */
   po?: string;
+  /** ID del planograma asociado al pedido (tabla orders.planogram_id). */
+  planogramId?: string;
 }
 
 // Igual que PWA: list?.data ?? list?.items ?? []
@@ -127,6 +129,10 @@ function mapRawOrderToAdmin(raw: any): AdminOrderSummary | null {
       raw?.invoice?.id ??
       raw?.Invoice?.Id,
     po: raw?.po ?? raw?.Po ?? raw?.purchaseOrder ?? raw?.PurchaseOrder ?? raw?.PO ?? undefined,
+    planogramId:
+      (raw?.planogramId ?? raw?.planogram_id ?? '').trim()
+        ? String(raw?.planogramId ?? raw?.planogram_id ?? '').trim()
+        : undefined,
   };
 }
 
@@ -499,6 +505,8 @@ export interface OrderForUI {
   salespersonId?: string;
   /** Código PO (Purchase Order), único. */
   po?: string;
+  /** ID del planograma asociado al pedido (tabla orders.planogram_id). */
+  planogramId?: string;
 }
 
 function detailQuantity(d: any): number {
@@ -614,6 +622,12 @@ function mapRawOrderToUI(raw: any, details: any[] = []): OrderForUI {
   );
   const date =
     raw?.createdAt ?? raw?.CreatedAt ?? raw?.date ?? raw?.Date ?? new Date().toISOString();
+  const planogramIdRaw =
+    (raw?.planogramId ??
+      raw?.PlanogramId ??
+      raw?.planogram_id ??
+      raw?.PLANOGRAM_ID ??
+      '') as string;
   const items = (details || []).map((d: any) => {
     const qty = Number(d?.quantity ?? d?.Quantity ?? 0);
     const subtotalRow = Number(
@@ -725,6 +739,7 @@ function mapRawOrderToUI(raw: any, details: any[] = []): OrderForUI {
     vendorNumber: raw?.vendorNumber ?? raw?.VendorNumber,
     comments: raw?.comments ?? raw?.Comments,
     po: raw?.po ?? raw?.Po ?? raw?.purchaseOrder ?? raw?.PurchaseOrder ?? raw?.PO ?? undefined,
+    planogramId: (planogramIdRaw || '').trim() || undefined,
     invoiceId:
       raw?.invoiceId ??
       raw?.InvoiceId ??
