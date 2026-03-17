@@ -156,6 +156,17 @@ export interface OrderItem {
   status: 'pending' | 'fulfilled' | 'partial' | 'cancelled';
 }
 
+// ============================
+// Rutas / Assignments (vendedor -> tiendas)
+// ============================
+
+export interface Assignment {
+  id: string;
+  userId: string;
+  storeId: string;
+  createdAt?: Date;
+}
+
 export interface Invoice {
   id: string;
   orderId: string;

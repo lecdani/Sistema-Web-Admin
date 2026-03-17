@@ -318,35 +318,31 @@ export const OrderPlanogramView: React.FC<OrderPlanogramViewProps> = ({ order })
               >
                 {item.productId ? (
                   <>
-                    {item.imageUrl ? (
-                      <img
-                        src={item.imageUrl}
-                        alt=""
-                        className="w-6 h-6 rounded object-cover flex-shrink-0 mx-auto"
-                        style={{ minWidth: 20, minHeight: 20 }}
-                      />
-                    ) : (
-                      <div className="w-6 h-6 rounded bg-slate-200 flex items-center justify-center flex-shrink-0 mx-auto">
-                        <Package className="h-3 w-3 text-slate-500" />
-                      </div>
-                    )}
+                    <div className="flex items-center justify-center gap-1 w-full">
+                      {item.imageUrl ? (
+                        <img
+                          src={item.imageUrl}
+                          alt=""
+                          className="w-5 h-5 rounded object-cover flex-shrink-0"
+                          style={{ minWidth: 18, minHeight: 18 }}
+                        />
+                      ) : (
+                        <div className="w-5 h-5 rounded bg-slate-200 flex items-center justify-center flex-shrink-0">
+                          <Package className="h-2.5 w-2.5 text-slate-500" />
+                        </div>
+                      )}
+                      <span
+                        className="text-[9px] leading-tight font-semibold text-slate-900 truncate max-w-[42px]"
+                        title={item.sku}
+                      >
+                        {item.sku || '—'}
+                      </span>
+                    </div>
                     <span
-                      style={{
-                        fontSize: 9,
-                        lineHeight: 1.2,
-                        fontWeight: 500,
-                        color: '#1e293b',
-                        wordBreak: 'break-word',
-                        overflow: 'hidden',
-                        display: '-webkit-box',
-                        WebkitLineClamp: 2,
-                        WebkitBoxOrient: 'vertical' as any,
-                        width: '100%',
-                        marginTop: 2,
-                      }}
-                      title={`${item.productName || item.sku} · $${(item.price || 0).toFixed(2)}`}
+                      className="text-[8px] leading-tight font-medium text-slate-600 break-words line-clamp-2 w-full mt-0.5"
+                      title={item.productName}
                     >
-                      {item.productName || item.sku}
+                      {item.productName || ''}
                     </span>
                     {item.toOrder > 0 && (
                       <span style={{ fontSize: 10, fontWeight: 600, color: '#1d4ed8', marginTop: 1 }}>{item.toOrder} u</span>

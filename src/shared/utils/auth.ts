@@ -45,7 +45,7 @@ export function removeLoggedUser(): void {
  */
 export function getAuthToken(): string | null {
   const user = getLoggedUser();
-  return user?.token || null;
+  return (user as any)?.token ?? (user as any)?.Token ?? null;
 }
 
 /**

@@ -87,6 +87,7 @@ export function useAuthLogin() {
       // Guardar el usuario en localStorage (incluir phone y avatar para Perfil y useAuth)
       const userToStore = {
         ...user,
+        ...(userId ? { id: userId, Id: userId } : {}),
         role: 'admin',
         Role: 'Admin',
         isActive: true,

@@ -1379,55 +1379,6 @@ export const ordersApi = {
   },
 
   /**
-   * Registra un VisitLog para un vendedor en una tienda.
-   */
-  async createVisitLog(params: {
-    storeId: string;
-    salespersonId: string;
-    visitDate?: string;
-  }): Promise<string | number | null> {
-    const visitDate =
-      (params.visitDate || new Date().toISOString().slice(0, 10)) as string;
-    const body = {
-      storeId: params.storeId,
-      StoreId: params.storeId,
-      salespersonId: params.salespersonId,
-      SalespersonId: params.salespersonId,
-      visitDate,
-      VisitDate: visitDate,
-    };
-
-    const res = await safePost<any>('/visit-logs/visit-logs', body);
-    if (res == null) return null;
-
-    let root: any = res;
-    if (typeof res === 'object' && res !== null) {
-      const data =
-        (res as any).data ??
-        (res as any).value ??
-        (res as any).visitLog ??
-        (res as any).VisitLog;
-      if (data && typeof data === 'object') {
-        root = data;
-      }
-    }
-
-    let id: string | number | null = null;
-    if (typeof root === 'string' || typeof root === 'number') {
-      id = root;
-    } else if (typeof root === 'object' && root !== null) {
-      id =
-        root.id ??
-        root.Id ??
-        root.visitLogId ??
-        root.VisitLogId ??
-        null;
-    }
-
-    return id != null && id !== false ? id : null;
-  },
-
-  /**
    * Actualiza el estado del pedido a facturado/entregado (como en la PWA).
    * PUT /orders/order/{id}/status con body { orderId, isInvoiced: true }
    */

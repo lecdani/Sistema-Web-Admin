@@ -30,6 +30,7 @@ import { citiesApi } from '@/shared/services/cities-api';
 import { usersApi } from '@/shared/services/users-api';
 import { Invoice } from './components/Invoice';
 import { OrderPlanogramView } from './components/OrderPlanogramView';
+import { OrderCatalogGridView } from './components/OrderCatalogGridView';
 import type { Order } from '@/shared/types';
 
 interface OrderDetailViewProps {
@@ -522,12 +523,10 @@ export function OrderDetailView({ orderId, onClose, onOrderUpdated }: OrderDetai
             <Package className="h-4 w-4" />
             {translate('infoAndProducts')}
           </TabsTrigger>
-          {storeHasPlanogram && (
-            <TabsTrigger value="planogram" className="flex items-center gap-2 px-6 py-3 rounded-none border-b-2 border-transparent data-[state=active]:border-indigo-600 data-[state=active]:bg-white data-[state=active]:text-indigo-600">
-              <Layout className="h-4 w-4" />
-              {translate('planogram')}
-            </TabsTrigger>
-          )}
+          <TabsTrigger value="planogram" className="flex items-center gap-2 px-6 py-3 rounded-none border-b-2 border-transparent data-[state=active]:border-indigo-600 data-[state=active]:bg-white data-[state=active]:text-indigo-600">
+            <Layout className="h-4 w-4" />
+            {storeHasPlanogram ? translate('planogram') : translate('catalog') || 'Catálogo'}
+          </TabsTrigger>
           <TabsTrigger value="invoice" className="flex items-center gap-2 px-6 py-3 rounded-none border-b-2 border-transparent data-[state=active]:border-indigo-600 data-[state=active]:bg-white data-[state=active]:text-indigo-600">
             <FileText className="h-4 w-4" />
             {translate('invoiceLabel')}
@@ -751,8 +750,8 @@ export function OrderDetailView({ orderId, onClose, onOrderUpdated }: OrderDetai
           </div>
         </TabsContent>
 
-        {storeHasPlanogram && (
-          <TabsContent value="planogram" className="p-6 mt-0">
+        <TabsContent value="planogram" className="p-6 mt-0">
+          {storeHasPlanogram ? (
             <OrderPlanogramView
               order={
                 {
@@ -781,8 +780,25 @@ export function OrderDetailView({ orderId, onClose, onOrderUpdated }: OrderDetai
                 } as Order
               }
             />
-          </TabsContent>
-        )}
+          ) : (
+            <OrderCatalogGridView
+              order={
+                {
+                  id: order.id,
+                  items: (order.items || []).map((it: any) => ({
+                    id: it.id ?? '',
+                    orderId: order.id,
+                    productId: it.productId ?? it.sku ?? '',
+                    quantity: it.quantity ?? it.toOrder ?? 0,
+                    productName: it.productName,
+                    price: Number(it.price) || 0,
+                    sku: it.sku,
+                  })),
+                } as any
+              }
+            />
+          )}
+        </TabsContent>
 
         <TabsContent value="invoice" className="p-6 mt-0">
           {(() => {

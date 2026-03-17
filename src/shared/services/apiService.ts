@@ -14,7 +14,7 @@ function getAuthToken(): string | null {
   if (!storedUser) return null;
   try {
     const user = JSON.parse(storedUser);
-    return user?.token || null;
+    return user?.token ?? user?.Token ?? null;
   } catch {
     return null;
   }

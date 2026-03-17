@@ -112,6 +112,11 @@ export const API_CONFIG = {
     IMAGES: {
       UPLOAD: '/images/upload',
       URL: '/images/url/{fileName}'
+    },
+    ASSIGNMENTS: {
+      LIST: '/assignments/assignments',
+      CREATE: '/assignments/assignments',
+      DELETE: '/assignments/assignments/{id}'
     }
   },
 

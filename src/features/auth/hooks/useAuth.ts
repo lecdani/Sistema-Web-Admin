@@ -47,7 +47,7 @@ export function useAuth() {
         // 1) Prioridad: usuario logueado por la API (LoggedOrderItAppUser)
         const loggedUser = getLoggedUser();
         if (loggedUser) {
-          apiClient.setAuthToken(loggedUser.token);
+          apiClient.setAuthToken((loggedUser as any).token ?? (loggedUser as any).Token ?? '');
           const user = loggedUserToUser(loggedUser);
           setAuthState({
             user,
@@ -241,7 +241,7 @@ export function useAuth() {
   const refreshUser = useCallback((): void => {
     const loggedUser = getLoggedUser();
     if (loggedUser) {
-      apiClient.setAuthToken(loggedUser.token);
+      apiClient.setAuthToken((loggedUser as any).token ?? (loggedUser as any).Token ?? '');
       const user = loggedUserToUser(loggedUser);
       setAuthState(prev => ({
         ...prev,
