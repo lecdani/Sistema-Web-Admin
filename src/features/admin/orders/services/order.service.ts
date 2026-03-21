@@ -10,7 +10,7 @@ import { getFromLocalStorage, setToLocalStorage } from '@/shared/services/databa
 export const generatePONumber = (): string => {
   const timestamp = Date.now();
   const random = Math.floor(Math.random() * 1000).toString().padStart(3, '0');
-  return `PO-${timestamp}-${random}`;
+  return `${timestamp}-${random}`;
 };
 
 // Crear un nuevo pedido

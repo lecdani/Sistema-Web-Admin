@@ -299,7 +299,7 @@ export function CreateOrderDialog({ onClose, onOrderCreated, editingOrder }: Cre
       vendorNumber: '2F318',
       items: selectedItems.map((cell) => ({
         productId: cell.productId!,
-        sku: cell.product.sku,
+        sku: cell.product.code || cell.product.sku,
         productName: cell.product.name,
         quantity: cell.quantity,
         price: cell.product.currentPrice,
@@ -407,7 +407,7 @@ export function CreateOrderDialog({ onClose, onOrderCreated, editingOrder }: Cre
       vendorNumber: '2F318',
       items: selectedItems.map((cell) => ({
         productId: cell.productId!,
-        sku: cell.product.sku,
+        sku: cell.product.code || cell.product.sku,
         productName: cell.product.name,
         quantity: cell.quantity,
         price: cell.product.currentPrice,
@@ -735,7 +735,7 @@ export function CreateOrderDialog({ onClose, onOrderCreated, editingOrder }: Cre
                           {cell.product!.name}
                         </p>
                         <p className="text-sm text-gray-500">
-                          {cell.product!.sku} • {cell.product!.category}
+                          {cell.product!.code || cell.product!.sku} • {cell.product!.category}
                         </p>
                       </div>
                     </div>
@@ -952,7 +952,7 @@ export function CreateOrderDialog({ onClose, onOrderCreated, editingOrder }: Cre
                           {/* Información del producto */}
                           <div className="flex-1 flex flex-col justify-center px-1">
                             <div className={`font-bold truncate text-[10px] leading-tight ${hasQuantity ? 'text-green-800' : 'text-blue-800'}`}>
-                              {cell.product!.sku}
+                              {cell.product!.code || cell.product!.sku}
                             </div>
                             <div className={`text-[9px] truncate leading-tight ${hasQuantity ? 'text-green-700' : 'text-blue-600'}`}>
                               {cell.product!.name.split(' ').slice(0, 2).join(' ')}

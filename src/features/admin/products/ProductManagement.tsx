@@ -20,7 +20,6 @@ import {
   DollarSign,
   TrendingUp,
   History,
-  Calendar,
   Award,
   FolderTree,
   ImagePlus
@@ -69,13 +68,13 @@ interface ProductManagementProps {
 }
 
 interface ProductFormData {
-  sku: string;
+  /** Código del producto (obligatorio). */
+  code: string;
   name: string;
   category: string;
   brandId: string;
   categoryId: string;
   isActive: boolean;
-  initialPrice?: number;
   /** Nombre del archivo en S3 (tras subir). Se envía en create/update. */
   imageFileName?: string;
   /** URL para mostrar preview (object URL del archivo seleccionado o product.image al editar) */
@@ -84,6 +83,48 @@ interface ProductFormData {
 
 interface PriceUpdateData {
   price: number;
+}
+
+interface FamilyFormData {
+  name: string;
+  code: string;
+  sku: string;
+  volume: string;
+  unit: string;
+}
+interface FamilyFormErrors {
+  name?: string;
+  code?: string;
+  sku?: string;
+  volume?: string;
+  unit?: string;
+}
+
+/** Clave estable para mapa precio↔familia (evita fallos string vs number en ids). */
+function familyPriceKey(id: string | number | undefined | null): string {
+  return String(id ?? '').trim();
+}
+
+/** Código comercial del producto (prioriza `code`, luego `sku`). */
+function getProductCodeDisplay(p: Product): string {
+  const s = String(p.code || p.sku || '').trim();
+  return s || '—';
+}
+
+/** Texto de volumen/unidad de familia; `null` si no hay nada que mostrar. */
+function formatFamilyVolumeLine(category: Category): string | null {
+  const rawVol = (category as any).volume;
+  const unit = String((category as any).unit ?? '').trim();
+  let volPart: string | null = null;
+  if (rawVol != null && String(rawVol).trim() !== '') {
+    const n = Number(rawVol);
+    volPart = Number.isFinite(n) ? String(n) : String(rawVol).trim();
+  }
+  if (!unit && !volPart) return null;
+  if (volPart && unit) return `Vol: ${volPart} ${unit}`.trim();
+  if (volPart) return `Vol: ${volPart}`;
+  if (unit) return unit;
+  return null;
 }
 
 export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) => {
@@ -113,12 +154,23 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
   const [brandName, setBrandName] = useState('');
   const [showCategoryDialog, setShowCategoryDialog] = useState(false);
   const [editingCategory, setEditingCategory] = useState<Category | null>(null);
-  const [categoryName, setCategoryName] = useState('');
+  const [familyForm, setFamilyForm] = useState<FamilyFormData>({
+    name: '',
+    code: '',
+    sku: '',
+    volume: '',
+    unit: ''
+  });
+  const [familyFormErrors, setFamilyFormErrors] = useState<FamilyFormErrors>({});
   const [brandSearchTerm, setBrandSearchTerm] = useState('');
   const [categorySearchTerm, setCategorySearchTerm] = useState('');
+  /** Precio vigente por id de familia (histprices latest). */
+  const [familyLatestPrices, setFamilyLatestPrices] = useState<Record<string, number>>({});
+  /** Familia seleccionada para diálogos de precio / historial. */
+  const [selectedFamilyForPrice, setSelectedFamilyForPrice] = useState<Category | null>(null);
 
   const [formData, setFormData] = useState<ProductFormData>({
-    sku: '',
+    code: '',
     name: '',
     category: '',
     brandId: '',
@@ -149,7 +201,7 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
     price: 0
   });
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [formErrors, setFormErrors] = useState<Partial<Record<'sku' | 'name' | 'category' | 'brandId' | 'categoryId' | 'initialPrice', string>>>({});
+  const [formErrors, setFormErrors] = useState<Partial<Record<'code' | 'name' | 'brandId' | 'categoryId', string>>>({});
 
   useEffect(() => {
     loadProducts();
@@ -159,9 +211,17 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
     applyFilters();
   }, [products, searchTerm, statusFilter, categoryFilter]);
 
-  const loadProducts = async () => {
-    setIsLoading(true);
-    setLoadError(null);
+  const loadProducts = async (opts?: {
+    /** Sin pantalla de carga completa (p. ej. tras actualizar precio). */
+    quiet?: boolean;
+    /** Forzar precio mostrado tras crear histórico (getLatest a veces llega tarde). */
+    forceFamilyPrice?: { familyId: string; price: number };
+  }) => {
+    const quiet = opts?.quiet === true;
+    if (!quiet) {
+      setIsLoading(true);
+      setLoadError(null);
+    }
 
     const [productsResult, brandsResult, categoriesResult] = await Promise.allSettled([
       productsApi.fetchAll(),
@@ -194,27 +254,46 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
       );
       toast.error(translate('errorLoadProducts'));
       setProducts([]);
-      setIsLoading(false);
+      if (!quiet) setIsLoading(false);
       return;
     }
 
     const list = productsResult.value;
+    const catList = categoriesResult.status === 'fulfilled' ? categoriesResult.value : [];
     try {
-      const withPrices = await Promise.all(
-        list.map(async (p) => {
+      const familyIdsToFetch = new Set<string>();
+      catList.forEach((c) => familyIdsToFetch.add(familyPriceKey(c.id)));
+      list.forEach((p) => {
+        const fid = familyPriceKey((p as any).familyId ?? p.categoryId);
+        if (fid) familyIdsToFetch.add(fid);
+      });
+      const familyPriceMap: Record<string, number> = {};
+      await Promise.all(
+        [...familyIdsToFetch].map(async (id) => {
           try {
-            const latest = await histpricesApi.getLatest(p.id);
-            return { ...p, currentPrice: latest?.price ?? 0 };
+            const latest = await histpricesApi.getLatest(id);
+            familyPriceMap[id] = latest?.price ?? 0;
           } catch {
-            return { ...p, currentPrice: 0 };
+            familyPriceMap[id] = 0;
           }
         })
       );
+      const forced = opts?.forceFamilyPrice;
+      const forcedKey = forced ? familyPriceKey(forced.familyId) : '';
+      if (forcedKey && Number.isFinite(Number(forced!.price)) && Number(forced!.price) > 0) {
+        familyPriceMap[forcedKey] = Number(forced!.price);
+      }
+      setFamilyLatestPrices(familyPriceMap);
+      const withPrices = list.map((p) => {
+        const familyId = familyPriceKey((p as any).familyId ?? p.categoryId);
+        return { ...p, currentPrice: familyId ? familyPriceMap[familyId] ?? 0 : 0 };
+      });
       setProducts(withPrices);
     } catch {
+      setFamilyLatestPrices({});
       setProducts(list.map((p) => ({ ...p, currentPrice: 0 })));
     } finally {
-      setIsLoading(false);
+      if (!quiet) setIsLoading(false);
     }
   };
 
@@ -228,7 +307,8 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
         const categoryName = getCategoryName(product).toLowerCase();
         return (
           product.name.toLowerCase().includes(searchLower) ||
-          product.sku.toLowerCase().includes(searchLower) ||
+          (product.code ?? '').toLowerCase().includes(searchLower) ||
+          (product.sku ?? '').toLowerCase().includes(searchLower) ||
           categoryName.includes(searchLower) ||
           (product.description && product.description.toLowerCase().includes(searchLower))
         );
@@ -256,7 +336,7 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
     }
     clearPendingImageFileName();
     setFormData({
-      sku: '',
+      code: '',
       name: '',
       category: '',
       brandId: '',
@@ -273,37 +353,75 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
   };
 
   const validateForm = (): boolean => {
-    const err: Partial<Record<'sku' | 'name' | 'category' | 'brandId' | 'categoryId' | 'initialPrice', string>> = {};
-    if (!formData.sku.trim()) err.sku = translate('skuRequired');
+    const err: Partial<Record<'code' | 'name' | 'brandId' | 'categoryId', string>> = {};
+    if (!formData.code.trim()) err.code = translate('productCodeRequired');
     if (!formData.name.trim()) err.name = translate('nameRequired');
     if (!formData.brandId) err.brandId = translate('brandRequired');
-    if (!formData.categoryId) err.categoryId = translate('categoryRequired');
-    if (!editingProduct) {
-      const price = formData.initialPrice ?? 0;
-      if (price <= 0) err.initialPrice = translate('initialPriceRequired');
+    if (!formData.categoryId) err.categoryId = translate('familyRequired');
+    const codeNorm = formData.code.trim().toLowerCase();
+    if (codeNorm) {
+      const dup = products.find(
+        (p) =>
+          String(p.code ?? '').trim().toLowerCase() === codeNorm &&
+          (!editingProduct || p.id !== editingProduct.id)
+      );
+      if (dup) err.code = translate('duplicateProductCode');
     }
-    const existing = products.find(
-      p => p.sku.trim().toLowerCase() === formData.sku.trim().toLowerCase() && (!editingProduct || p.id !== editingProduct.id)
-    );
-    if (existing) err.sku = translate('duplicateSku');
     setFormErrors(err);
     return Object.keys(err).length === 0;
   };
 
   const handleSaveProduct = async () => {
-    if (!validateForm()) return;
+    if (!validateForm()) {
+      let firstError = '';
+      const codeTrim = formData.code.trim();
+      const codeNorm = codeTrim.toLowerCase();
+      if (!codeTrim) firstError = translate('productCodeRequired');
+      else if (
+        products.some(
+          (p) =>
+            String(p.code ?? '').trim().toLowerCase() === codeNorm &&
+            (!editingProduct || p.id !== editingProduct.id)
+        )
+      ) {
+        firstError = translate('duplicateProductCode');
+      } else if (!formData.name.trim()) firstError = translate('nameRequired');
+      else if (!formData.brandId) firstError = translate('brandRequired');
+      else if (!formData.categoryId) firstError = translate('familyRequired');
+      if (!firstError) firstError = translate('completeRequiredFields');
+      toast.error(firstError);
+      return;
+    }
     try {
-      const cat = categories.find(c => c.id === formData.categoryId);
+      const familyId = formData.categoryId || undefined;
       const payload: Record<string, unknown> = {
         name: formData.name.trim(),
-        category: cat?.name ?? formData.category.trim(),
-        sku: formData.sku.trim(),
+        code: formData.code.trim(),
         brandId: formData.brandId || undefined,
-        categoryId: formData.categoryId || undefined,
+        familyId,
+        categoryId: familyId,
         isActive: editingProduct ? editingProduct.isActive : true,
       };
       if (editingProduct) {
         const imageForUpdate = formData.imageFileName?.trim() || lastUploadedFileNameRef.current?.trim() || undefined;
+        const currentFamilyId = String((editingProduct as any).familyId ?? editingProduct.categoryId ?? '').trim();
+        const nextFamilyId = String(familyId ?? '').trim();
+        const currentBrandId = String(editingProduct.brandId ?? '').trim();
+        const nextBrandId = String(formData.brandId ?? '').trim();
+        const currentName = String(editingProduct.name ?? '').trim();
+        const nextName = String(formData.name ?? '').trim();
+        const currentCode = String(editingProduct.code ?? '').trim();
+        const nextCode = String(formData.code ?? '').trim();
+        const hasChanges =
+          currentName !== nextName ||
+          currentCode !== nextCode ||
+          currentBrandId !== nextBrandId ||
+          currentFamilyId !== nextFamilyId ||
+          !!imageForUpdate;
+        if (!hasChanges) {
+          toast.error(translate('noChangesToSave'));
+          return;
+        }
         if (imageForUpdate) payload.imageFileName = imageForUpdate;
         await productsApi.update(editingProduct.id, payload as any);
         toast.success(translate('productSaved'));
@@ -318,16 +436,6 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
           imageFileNameForCreate
         );
         clearPendingImageFileName();
-        const initialPrice = Number(formData.initialPrice) || 0;
-        if (initialPrice > 0) {
-          const now = new Date();
-          await histpricesApi.create({
-            productId: created.id,
-            price: initialPrice,
-            startDate: now,
-            endDate: now
-          });
-        }
         toast.success(translate('productCreated'));
         setSearchTerm(created.name);
         setCurrentPage(1);
@@ -341,34 +449,63 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
     }
   };
 
+  const refreshOneFamilyPrice = async (familyId: string) => {
+    const id = familyPriceKey(familyId);
+    if (!id) return;
+    try {
+      const latest = await histpricesApi.getLatest(id);
+      setFamilyLatestPrices((prev) => ({ ...prev, [id]: latest?.price ?? 0 }));
+    } catch {
+      setFamilyLatestPrices((prev) => ({ ...prev, [id]: 0 }));
+    }
+  };
+
   const handleUpdatePrice = async () => {
-    if (!selectedProduct) return;
+    const family = selectedFamilyForPrice;
+    if (!family?.id) return;
     if (priceUpdateData.price <= 0) {
       toast.error(translate('priceMustBePositive'));
       return;
     }
     try {
       const now = new Date();
-      await histpricesApi.create({
-        productId: selectedProduct.id,
+      const fid = familyPriceKey(family.id);
+      const created = await histpricesApi.create({
+        familyId: fid,
         price: priceUpdateData.price,
         startDate: now,
         endDate: now
       });
+      const fromApi = Number(created?.price);
+      const finalPrice =
+        Number.isFinite(fromApi) && fromApi > 0 ? fromApi : priceUpdateData.price;
+
+      setFamilyLatestPrices((prev) => ({ ...prev, [fid]: finalPrice }));
+      setProducts((prev) =>
+        prev.map((p) => {
+          const pid = familyPriceKey((p as any).familyId ?? p.categoryId);
+          return pid === fid ? { ...p, currentPrice: finalPrice } : p;
+        })
+      );
+
       toast.success(translate('priceUpdatedSuccess'));
       resetPriceForm();
       setShowUpdatePriceDialog(false);
-      setSelectedProduct(null);
-      await loadProducts();
+      setSelectedFamilyForPrice(null);
+
+      await loadProducts({
+        quiet: true,
+        forceFamilyPrice: { familyId: fid, price: finalPrice },
+      });
     } catch (error: any) {
       const msg = error?.data?.message ?? error?.message ?? translate('errorUpdatePrice');
       toast.error(msg);
     }
   };
 
-  const loadPriceHistoryForDialog = async (productId: string) => {
+  const loadPriceHistoryForDialog = async (familyId: string) => {
     try {
-      const list = await histpricesApi.getByProduct(productId);
+      const list = await histpricesApi.getByFamily(familyId);
       setPriceHistoryList(list.sort((a, b) => new Date(b.startDate).getTime() - new Date(a.startDate).getTime()));
     } catch {
       setPriceHistoryList([]);
@@ -376,12 +513,15 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
   };
 
   useEffect(() => {
-    if (queryDate && selectedProduct) {
-      histpricesApi.getByDate(selectedProduct.id, queryDate).then(setQueryResult).catch(() => setQueryResult(null));
+    if (queryDate && selectedFamilyForPrice?.id) {
+      histpricesApi
+        .getByDate(selectedFamilyForPrice.id, queryDate)
+        .then(setQueryResult)
+        .catch(() => setQueryResult(null));
     } else {
       setQueryResult(null);
     }
-  }, [queryDate, selectedProduct?.id]);
+  }, [queryDate, selectedFamilyForPrice?.id]);
 
   const resetQueryForm = () => {
     setQueryDate('');
@@ -389,11 +529,15 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
   };
 
   const handleEditProduct = (product: Product) => {
-    const categoryId = product.categoryId ?? categories.find(c => c.name === product.category)?.id ?? '';
+    const categoryId =
+      product.categoryId ??
+      product.familyId ??
+      categories.find((c) => c.name === product.category)?.id ??
+      '';
     setFormData({
-      sku: product.sku,
+      code: product.code ?? '',
       name: product.name,
-      category: product.category,
+      category: product.category ?? '',
       brandId: product.brandId ?? '',
       categoryId,
       isActive: product.isActive,
@@ -436,8 +580,13 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
   const activeCategories = categories.filter(c => c.isActive);
 
   const getCategoryName = (product: Product): string => {
-    const byId = product.categoryId ? categories.find(c => c.id === product.categoryId)?.name : undefined;
-    return byId || product.category || '-';
+    const id = product.categoryId ?? product.familyId;
+    if (id != null && String(id).trim() !== '') {
+      const sid = String(id).trim();
+      const match = categories.find((c) => String(c.id).trim() === sid);
+      if (match?.name) return match.name;
+    }
+    return (product.category && product.category.trim()) || '-';
   };
 
   const handleBack = () => {
@@ -474,23 +623,97 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
   };
 
   const handleSaveCategory = async () => {
-    const name = categoryName.trim();
+    const errors: FamilyFormErrors = {};
+    const name = familyForm.name.trim();
     if (!name) {
-      toast.error(translate('categoryNameRequired'));
+      errors.name = translate('familyNameRequired');
+    }
+    if (!familyForm.code.trim()) {
+      errors.code = translate('familyCodeRequired');
+    }
+    if (!familyForm.sku.trim()) {
+      errors.sku = translate('familySkuRequired');
+    }
+    if (Object.keys(errors).length > 0) {
+      setFamilyFormErrors(errors);
+      toast.error(Object.values(errors)[0] || translate('completeRequiredFields'));
       return;
     }
+    const volumeNumber = familyForm.volume.trim() ? Number(familyForm.volume) : 0;
+    if (familyForm.volume.trim() && (!Number.isFinite(volumeNumber) || volumeNumber <= 0)) {
+      setFamilyFormErrors((prev) => ({ ...prev, volume: translate('familyVolumeInvalid') }));
+      toast.error(translate('familyVolumeInvalid'));
+      return;
+    }
+    const payload = {
+      name,
+      code: familyForm.code.trim(),
+      sku: familyForm.sku.trim(),
+      volume: volumeNumber,
+      unit: familyForm.unit.trim(),
+    };
+    const sku = payload.sku;
+    const code = payload.code;
+    if (!/^\d{6}$/.test(sku)) {
+      setFamilyFormErrors((prev) => ({ ...prev, sku: translate('familySkuMustBe6Digits') }));
+      toast.error(translate('familySkuMustBe6Digits'));
+      return;
+    }
+    if (!/^\d{4}$/.test(code)) {
+      setFamilyFormErrors((prev) => ({ ...prev, code: translate('familyCodeMustBe4Digits') }));
+      toast.error(translate('familyCodeMustBe4Digits'));
+      return;
+    }
+    const normalizedSku = sku.trim();
+    const normalizedCode = code.trim();
+    const isDuplicateSku = categories.some(
+      (c) => String((c as any).sku ?? '').trim() === normalizedSku && (!editingCategory || c.id !== editingCategory.id)
+    );
+    if (isDuplicateSku) {
+      setFamilyFormErrors((prev) => ({ ...prev, sku: translate('duplicateFamilySku') }));
+      toast.error(translate('duplicateFamilySku'));
+      return;
+    }
+    const isDuplicateCode = categories.some(
+      (c) => String((c as any).code ?? '').trim() === normalizedCode && (!editingCategory || c.id !== editingCategory.id)
+    );
+    if (isDuplicateCode) {
+      setFamilyFormErrors((prev) => ({ ...prev, code: translate('duplicateFamilyCode') }));
+      toast.error(translate('duplicateFamilyCode'));
+      return;
+    }
+    setFamilyFormErrors({});
     try {
       if (editingCategory) {
-        const updated = await categoriesApi.update(editingCategory.id, { name });
+        const currentName = String(editingCategory.name ?? '').trim();
+        const currentCode = String((editingCategory as any).code ?? '').trim();
+        const currentSku = String((editingCategory as any).sku ?? '').trim();
+        const currentVolumeRaw = Number((editingCategory as any).volume ?? 0);
+        const currentVolume = Number.isFinite(currentVolumeRaw) ? currentVolumeRaw : 0;
+        const currentUnit = String((editingCategory as any).unit ?? '').trim();
+        const hasChanges =
+          currentName !== payload.name ||
+          currentCode !== payload.code ||
+          currentSku !== payload.sku ||
+          currentVolume !== payload.volume ||
+          currentUnit !== payload.unit;
+        if (!hasChanges) {
+          toast.error(translate('noChangesToSave'));
+          return;
+        }
+        const updated = await categoriesApi.update(editingCategory.id, payload as any);
         setCategories((prev) => prev.map((c) => (c.id === editingCategory.id ? updated : c)));
-        toast.success(translate('categoryUpdated'));
+        await refreshOneFamilyPrice(editingCategory.id);
+        toast.success(translate('familyUpdated'));
       } else {
-        const created = await categoriesApi.create({ name });
+        const created = await categoriesApi.create(payload as any);
         setCategories((prev) => [...prev, created]);
-        toast.success(translate('categoryCreated'));
+        await refreshOneFamilyPrice(created.id);
+        toast.success(translate('familyCreated'));
         setCategorySearchTerm(created.name);
       }
-      setCategoryName('');
+      setFamilyForm({ name: '', code: '', sku: '', volume: '', unit: '' });
+      setFamilyFormErrors({});
       setEditingCategory(null);
       setShowCategoryDialog(false);
     } catch (e: any) {
@@ -512,7 +735,7 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
     try {
       await categoriesApi.toggleActive(category.id);
       setCategories((prev) => prev.map((c) => (c.id === category.id ? { ...c, isActive: !c.isActive } : c)));
-      toast.success(category.isActive ? translate('categoryDeactivated') : translate('categoryActivated'));
+      toast.success(category.isActive ? translate('familyDeactivated') : translate('familyActivated'));
     } catch (e: any) {
       toast.error(e?.message ?? translate('errorToggleStatusGeneric'));
     }
@@ -571,17 +794,18 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
             
             <div className="space-y-5 px-6 py-4">
               <div className="space-y-2">
-                <Label htmlFor="sku">{translate('sku')} *</Label>
+                <Label htmlFor="productCode">{translate('productCode')} *</Label>
                 <Input
-                  id="sku"
-                  value={formData.sku}
+                  id="productCode"
+                  value={formData.code}
                   onChange={(e) => {
-                    setFormData({ ...formData, sku: e.target.value });
-                    if (formErrors.sku) setFormErrors(prev => ({ ...prev, sku: undefined }));
+                    setFormData({ ...formData, code: e.target.value });
+                    if (formErrors.code) setFormErrors(prev => ({ ...prev, code: undefined }));
                   }}
-                  className={formErrors.sku ? 'border-red-500' : ''}
+                  className={formErrors.code ? 'border-red-500' : ''}
+                  placeholder={translate('productCodePlaceholder')}
                 />
-                {formErrors.sku && <p className="text-sm text-red-600">{formErrors.sku}</p>}
+                {formErrors.code && <p className="text-sm text-red-600">{formErrors.code}</p>}
               </div>
               <div className="space-y-2">
                 <Label htmlFor="name">{translate('name')} *</Label>
@@ -622,17 +846,16 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
                 )}
               </div>
               <div className="space-y-2">
-                <Label>{translate('categories')} *</Label>
+                <Label>{translate('family')} *</Label>
                 <Select
                   value={formData.categoryId || undefined}
                   onValueChange={(v) => {
-                    const cat = categories.find(c => c.id === v);
-                    setFormData({ ...formData, categoryId: v, category: cat?.name ?? '' });
+                    setFormData({ ...formData, categoryId: v });
                     if (formErrors.categoryId) setFormErrors(prev => ({ ...prev, categoryId: undefined }));
                   }}
                 >
                   <SelectTrigger className={formErrors.categoryId ? 'border-red-500' : ''}>
-                    <SelectValue placeholder={translate('selectCategory')}>
+                    <SelectValue placeholder={translate('selectFamily')}>
                       {activeCategories.find((c) => c.id === formData.categoryId)?.name}
                     </SelectValue>
                   </SelectTrigger>
@@ -644,7 +867,40 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
                 </Select>
                 {formErrors.categoryId && <p className="text-sm text-red-600">{formErrors.categoryId}</p>}
                 {activeCategories.length === 0 && (
-                  <p className="text-xs text-amber-600">{translate('addCategoriesFirst')}</p>
+                  <p className="text-xs text-amber-600">{translate('addFamiliesFirst')}</p>
+                )}
+                {formData.categoryId && (
+                  <div className="mt-2 rounded-lg border border-indigo-200 bg-indigo-50 p-3">
+                    {(() => {
+                      const selectedFamily = categories.find((c) => c.id === formData.categoryId);
+                      if (!selectedFamily) return null;
+                      return (
+                        <div className="text-sm text-indigo-900 font-medium space-y-1">
+                          <div>
+                            {[
+                              `SKU: ${(selectedFamily as any).sku || '—'}`,
+                              `${translate('familyCodeLabel')}: ${(selectedFamily as any).code || '—'}`,
+                              selectedFamily.name || '—',
+                              formatFamilyVolumeLine(selectedFamily),
+                            ]
+                              .filter(Boolean)
+                              .join(' · ')}
+                          </div>
+                          <div className="flex items-center gap-1 text-green-700">
+                            <DollarSign className="h-4 w-4 shrink-0" />
+                            <span>
+                              {translate('currentPrice')}:{' '}
+                              {(familyLatestPrices[familyPriceKey(selectedFamily.id)] ?? 0).toLocaleString(locale, {
+                                minimumFractionDigits: 2,
+                                maximumFractionDigits: 2,
+                              })}
+                            </span>
+                          </div>
+                          <p className="text-xs font-normal text-indigo-700/90">{translate('productPriceFamilyHint')}</p>
+                        </div>
+                      );
+                    })()}
+                  </div>
                 )}
               </div>
               <div className="space-y-2">
@@ -736,27 +992,6 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
                   </div>
                 </div>
               </div>
-              {!editingProduct && (
-                <div className="space-y-2">
-                  <Label htmlFor="initialPrice">{translate('initialPriceLabel')}</Label>
-                  <div className="relative">
-                    <DollarSign className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
-                    <Input
-                      id="initialPrice"
-                      type="number"
-                      min="0"
-                      step="0.01"
-                      value={formData.initialPrice ?? ''}
-                      onChange={(e) => {
-                        setFormData({ ...formData, initialPrice: e.target.value ? parseFloat(e.target.value) : undefined });
-                        if (formErrors.initialPrice) setFormErrors(prev => ({ ...prev, initialPrice: undefined }));
-                      }}
-                      className={`pl-10 ${formErrors.initialPrice ? 'border-red-500' : ''}`}
-                    />
-                  </div>
-                  {formErrors.initialPrice && <p className="text-sm text-red-600">{formErrors.initialPrice}</p>}
-                </div>
-              )}
             </div>
             
             <DialogFooter>
@@ -843,7 +1078,7 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
           <div className="p-4">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-xs font-medium text-gray-500">{translate('categories')}</p>
+                <p className="text-xs font-medium text-gray-500">{translate('families')}</p>
                 <p className="text-2xl font-bold text-blue-600 mt-1">
                   {getUniqueCategories().length}
                 </p>
@@ -916,13 +1151,13 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
               <thead className="bg-gray-50">
                 <tr>
                   <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    {translate('productSkuHeader')}
+                    {translate('productNameCodeHeader')}
                   </th>
                   <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                     {translate('brandHeader')}
                   </th>
                   <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    {translate('categoryHeader')}
+                    {translate('family')}
                   </th>
                   <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                     {translate('priceHeader')}
@@ -947,13 +1182,13 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
                             <Package className="h-6 w-6 text-indigo-600" />
                           )}
                         </div>
-                        <div className="ml-4">
-                          <div className="text-sm font-medium text-gray-900">
-                            {product.name}
+                        <div className="ml-4 min-w-0">
+                          <div className="text-base font-bold text-indigo-950 flex items-center gap-1.5 tracking-tight">
+                            <Hash className="h-4 w-4 text-indigo-600 shrink-0" />
+                            <span className="truncate font-mono tabular-nums">{getProductCodeDisplay(product)}</span>
                           </div>
-                          <div className="text-sm text-gray-500 flex items-center gap-1">
-                            <Hash className="h-3 w-3" />
-                            {product.sku}
+                          <div className="text-sm text-gray-500 truncate mt-0.5" title={product.name}>
+                            {product.name}
                           </div>
                         </div>
                       </div>
@@ -967,52 +1202,22 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
                       </Badge>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="flex items-center gap-2">
-                        <div className="flex items-center">
-                          <DollarSign className="h-4 w-4 text-green-600 mr-1" />
-                          <span className="text-sm font-medium text-green-600">
-                            {(product.currentPrice || 0).toLocaleString(locale, { 
-                              minimumFractionDigits: 2, 
-                              maximumFractionDigits: 2 
-                            })}
-                          </span>
-                        </div>
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <button
-                              onClick={() => {
-                                setSelectedProduct(product);
-                                setPriceUpdateData({ price: product.currentPrice || 0 });
-                                setShowUpdatePriceDialog(true);
-                              }}
-                              className="inline-flex items-center justify-center h-8 w-8 rounded-md text-blue-600 hover:text-blue-700 hover:bg-blue-50 transition-colors"
-                            >
-                              <TrendingUp className="h-4 w-4" />
-                            </button>
-                          </TooltipTrigger>
-                          <TooltipContent>
-                            <p>{translate('updatePrice')}</p>
-                          </TooltipContent>
-                        </Tooltip>
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <button
-                              onClick={() => {
-                                setSelectedProduct(product);
-                                resetQueryForm();
-                                loadPriceHistoryForDialog(product.id);
-                                setShowPriceHistoryDialog(true);
-                              }}
-                              className="inline-flex items-center justify-center h-8 w-8 rounded-md text-green-600 hover:text-green-700 hover:bg-green-50 transition-colors"
-                            >
-                              <History className="h-4 w-4" />
-                            </button>
-                          </TooltipTrigger>
-                          <TooltipContent>
-                            <p>{translate('priceHistoryTooltip')}</p>
-                          </TooltipContent>
-                        </Tooltip>
-                      </div>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <div className="flex items-center cursor-default max-w-[140px]">
+                            <DollarSign className="h-4 w-4 text-green-600 mr-1 shrink-0" />
+                            <span className="text-sm font-medium text-green-600 truncate">
+                              {(product.currentPrice || 0).toLocaleString(locale, {
+                                minimumFractionDigits: 2,
+                                maximumFractionDigits: 2,
+                              })}
+                            </span>
+                          </div>
+                        </TooltipTrigger>
+                        <TooltipContent className="max-w-xs">
+                          <p>{translate('productPriceFamilyHint')}</p>
+                        </TooltipContent>
+                      </Tooltip>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <Badge className={getStatusBadgeColor(product.isActive)}>
@@ -1192,14 +1397,19 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
             <Card>
               <CardContent className="p-0">
                 <div className="flex items-center justify-between px-4 py-3.5 border-b-2 border-indigo-200 bg-indigo-50/80 rounded-t-lg">
-                  <span className="text-base font-bold text-indigo-900">{translate('categories')}</span>
+                  <span className="text-base font-bold text-indigo-900">{translate('families')}</span>
                   <button
                     type="button"
-                    onClick={() => { setEditingCategory(null); setCategoryName(''); setShowCategoryDialog(true); }}
+                    onClick={() => {
+                      setEditingCategory(null);
+                      setFamilyForm({ name: '', code: '', sku: '', volume: '', unit: '' });
+                      setFamilyFormErrors({});
+                      setShowCategoryDialog(true);
+                    }}
                     className="text-indigo-600 hover:text-indigo-800 font-medium flex items-center gap-1.5"
                   >
                     <Plus className="h-3.5 w-3.5" />
-                    {translate('addCategory')}
+                    {translate('addFamily')}
                   </button>
                 </div>
                 <div className="px-3 py-1.5 border-b border-gray-200 bg-white">
@@ -1216,16 +1426,86 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
                 </div>
                 <div className="divide-y divide-gray-200 bg-white">
                   {(categorySearchTerm.trim() ? categories.filter(c => c.name.toLowerCase().includes(categorySearchTerm.trim().toLowerCase())) : categories).length === 0 ? (
-                    <p className="px-4 py-8 text-sm text-gray-500 text-center">{categorySearchTerm.trim() ? translate('noResults') : translate('noCategories')}</p>
+                    <p className="px-4 py-8 text-sm text-gray-500 text-center">{categorySearchTerm.trim() ? translate('noResults') : translate('noFamilies')}</p>
                   ) : (
-                    (categorySearchTerm.trim() ? categories.filter(c => c.name.toLowerCase().includes(categorySearchTerm.trim().toLowerCase())) : categories).map((c) => (
-                      <div key={c.id} className="flex items-center justify-between px-4 py-3 hover:bg-gray-50 group">
-                        <span className="text-sm font-medium text-gray-900">{c.name}</span>
-                        <div className="flex items-center gap-1 opacity-70 group-hover:opacity-100">
+                    (categorySearchTerm.trim() ? categories.filter(c => c.name.toLowerCase().includes(categorySearchTerm.trim().toLowerCase())) : categories).map((c) => {
+                      const familyVolLine = formatFamilyVolumeLine(c);
+                      return (
+                      <div key={c.id} className="flex items-center justify-between px-4 py-3 hover:bg-gray-50 group gap-3">
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center flex-wrap gap-2">
+                            <span className="text-sm font-semibold text-gray-900">{`SKU: ${(c as any).sku || '—'}`}</span>
+                            <span className="text-sm font-semibold text-gray-900">{`${translate('familyCodeLabel')}: ${(c as any).code || '—'}`}</span>
+                            <span className="text-sm font-semibold text-gray-900">{c.name}</span>
+                          </div>
+                          {familyVolLine ? (
+                            <span className="text-xs text-gray-500 block truncate">{familyVolLine}</span>
+                          ) : null}
+                          <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+                            <span className="text-xs font-medium text-green-700 flex items-center gap-0.5">
+                              <DollarSign className="h-3 w-3" />
+                              {(familyLatestPrices[familyPriceKey(c.id)] ?? 0).toLocaleString(locale, {
+                                minimumFractionDigits: 2,
+                                maximumFractionDigits: 2,
+                              })}
+                            </span>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setSelectedFamilyForPrice(c);
+                                    setPriceUpdateData({ price: familyLatestPrices[familyPriceKey(c.id)] ?? 0 });
+                                    setShowUpdatePriceDialog(true);
+                                  }}
+                                  className="inline-flex items-center justify-center h-7 w-7 rounded-md text-blue-600 hover:text-blue-700 hover:bg-blue-50 transition-colors"
+                                  aria-label={translate('updatePrice')}
+                                >
+                                  <TrendingUp className="h-3.5 w-3.5" />
+                                </button>
+                              </TooltipTrigger>
+                              <TooltipContent>
+                                <p>{translate('updatePrice')}</p>
+                              </TooltipContent>
+                            </Tooltip>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setSelectedFamilyForPrice(c);
+                                    resetQueryForm();
+                                    loadPriceHistoryForDialog(c.id);
+                                    setShowPriceHistoryDialog(true);
+                                  }}
+                                  className="inline-flex items-center justify-center h-7 w-7 rounded-md text-green-600 hover:text-green-700 hover:bg-green-50 transition-colors"
+                                  aria-label={translate('priceHistoryTooltip')}
+                                >
+                                  <History className="h-3.5 w-3.5" />
+                                </button>
+                              </TooltipTrigger>
+                              <TooltipContent>
+                                <p>{translate('priceHistoryTooltip')}</p>
+                              </TooltipContent>
+                            </Tooltip>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-1 opacity-70 group-hover:opacity-100 shrink-0">
                           <span className={`text-xs px-1.5 py-0.5 rounded ${c.isActive ? 'text-green-600 bg-green-50' : 'text-gray-400 bg-gray-100'}`}>
                             {c.isActive ? translate('activeBadge') : translate('inactiveBadge')}
                           </span>
-                          <button type="button" onClick={() => { setEditingCategory(c); setCategoryName(c.name); setShowCategoryDialog(true); }} className="p-1.5 rounded-md text-indigo-500 hover:text-indigo-600 hover:bg-indigo-50" aria-label={translate('edit')}>
+                          <button type="button" onClick={() => {
+                            setEditingCategory(c);
+                            setFamilyForm({
+                              name: c.name ?? '',
+                              code: String((c as any).code ?? ''),
+                              sku: String((c as any).sku ?? ''),
+                              volume: (c as any).volume != null ? String((c as any).volume) : '',
+                              unit: String((c as any).unit ?? '')
+                            });
+                            setFamilyFormErrors({});
+                            setShowCategoryDialog(true);
+                          }} className="p-1.5 rounded-md text-indigo-500 hover:text-indigo-600 hover:bg-indigo-50" aria-label={translate('edit')}>
                             <Edit3 className="h-3.5 w-3.5" />
                           </button>
                           <AlertDialog>
@@ -1236,8 +1516,8 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
                             </AlertDialogTrigger>
                             <AlertDialogContent>
                               <AlertDialogHeader>
-                                <AlertDialogTitle>{c.isActive ? translate('deactivate') : translate('activate')} {translate('categories').toLowerCase()}</AlertDialogTitle>
-                                <AlertDialogDescription>{translate('confirmDeactivateCategory').replace('{name}', c.name)}</AlertDialogDescription>
+                                <AlertDialogTitle>{c.isActive ? translate('deactivate') : translate('activate')} {translate('family').toLowerCase()}</AlertDialogTitle>
+                                <AlertDialogDescription>{translate('confirmToggleFamily').replace('{action}', c.isActive ? translate('deactivate') : translate('activate')).replace('{name}', c.name)}</AlertDialogDescription>
                               </AlertDialogHeader>
                               <AlertDialogFooter>
                                 <AlertDialogCancel>{translate('cancel')}</AlertDialogCancel>
@@ -1247,7 +1527,8 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
                           </AlertDialog>
                         </div>
                       </div>
-                    ))
+                      );
+                    })
                   )}
                 </div>
               </CardContent>
@@ -1280,31 +1561,29 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
                     <Package className="h-9 w-9 text-indigo-600" />
                   )}
                 </div>
-                <div className="flex-1 min-w-0 flex flex-col justify-center">
+                <div className="flex-1 min-w-0 flex flex-col justify-center gap-1">
                   <div className="flex items-center gap-2 flex-wrap">
-                    <h3 className="text-lg font-semibold text-gray-900 truncate">
-                      {selectedProduct.name}
+                    <h3 className="text-xl font-bold text-gray-900 tracking-tight flex items-center gap-1.5 min-w-0">
+                      <Hash className="h-5 w-5 text-indigo-600 shrink-0" />
+                      <span className="truncate font-mono tabular-nums">{getProductCodeDisplay(selectedProduct)}</span>
                     </h3>
                     <Badge className={getStatusBadgeColor(selectedProduct.isActive)}>
                       {selectedProduct.isActive ? translate('active') : translate('inactive')}
                     </Badge>
                   </div>
-                  <div className="flex items-center gap-3 text-sm text-gray-600 mt-0.5 flex-wrap">
-                    <span className="flex items-center gap-1">
-                      <Hash className="h-3.5 w-3.5" />
-                      {selectedProduct.sku}
-                    </span>
-                    <span className="flex items-center gap-1 text-green-600 font-medium">
-                      <DollarSign className="h-4 w-4" />
-                      {(selectedProduct.currentPrice || 0).toLocaleString(locale, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                    </span>
+                  <p className="text-sm text-gray-600 truncate" title={selectedProduct.name}>
+                    {selectedProduct.name}
+                  </p>
+                  <div className="flex items-center gap-1 text-green-600 font-semibold text-base pt-0.5">
+                    <DollarSign className="h-4 w-4 shrink-0" />
+                    {(selectedProduct.currentPrice || 0).toLocaleString(locale, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </div>
                 </div>
               </div>
 
               <div className="flex gap-4 rounded-xl bg-gray-50/80 border border-gray-100 p-4">
                 <div className="flex-1 min-w-0">
-                  <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">{translate('categoryHeader')}</p>
+                  <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">{translate('family')}</p>
                   <p className="flex items-center gap-1.5 mt-1 text-sm font-medium text-gray-900 truncate">
                     <Tag className="h-4 w-4 text-gray-400 shrink-0" />
                     {getCategoryName(selectedProduct)}
@@ -1343,22 +1622,32 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
         </DialogContent>
       </Dialog>
 
-      {/* Update Price Dialog */}
-      <Dialog open={showUpdatePriceDialog} onOpenChange={setShowUpdatePriceDialog}>
+      {/* Update Price Dialog (por familia) */}
+      <Dialog
+        open={showUpdatePriceDialog}
+        onOpenChange={(open) => {
+          setShowUpdatePriceDialog(open);
+          if (!open) {
+            resetPriceForm();
+            setSelectedFamilyForPrice(null);
+          }
+        }}
+      >
         <DialogContent className="sm:max-w-xl">
           <DialogHeader>
             <DialogTitle>{translate('updatePriceTitle')}</DialogTitle>
             <DialogDescription>
-              {selectedProduct && translate('updatePriceDesc').replace('{name}', selectedProduct.name)}
+              {selectedFamilyForPrice &&
+                translate('updatePriceDescFamily').replace('{name}', selectedFamilyForPrice.name)}
             </DialogDescription>
           </DialogHeader>
           
           <div className="space-y-5 px-6 py-4">
-            {selectedProduct && (
+            {selectedFamilyForPrice && (
               <div className="bg-gray-50 p-4 rounded-lg">
                 <p className="text-sm text-gray-600">{translate('currentPrice')}:</p>
                 <p className="text-lg font-semibold text-green-600">
-                  ${(selectedProduct.currentPrice || 0).toLocaleString(locale, { 
+                  ${(familyLatestPrices[familyPriceKey(selectedFamilyForPrice.id)] ?? 0).toLocaleString(locale, { 
                     minimumFractionDigits: 2, 
                     maximumFractionDigits: 2 
                   })}
@@ -1398,17 +1687,27 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
         </DialogContent>
       </Dialog>
 
-      {/* Price History Dialog */}
-      <Dialog open={showPriceHistoryDialog} onOpenChange={setShowPriceHistoryDialog}>
+      {/* Price History Dialog (por familia) */}
+      <Dialog
+        open={showPriceHistoryDialog}
+        onOpenChange={(open) => {
+          setShowPriceHistoryDialog(open);
+          if (!open) {
+            resetQueryForm();
+            setSelectedFamilyForPrice(null);
+          }
+        }}
+      >
         <DialogContent className="max-w-2xl">
           <DialogHeader>
             <DialogTitle>{translate('priceHistoryTitle')}</DialogTitle>
             <DialogDescription>
-              {selectedProduct && `${selectedProduct.name} • SKU: ${selectedProduct.sku}`}
+              {selectedFamilyForPrice &&
+                translate('priceHistoryDescFamily').replace('{name}', selectedFamilyForPrice.name)}
             </DialogDescription>
           </DialogHeader>
           
-          {selectedProduct && (
+          {selectedFamilyForPrice && (
             <div className="space-y-4">
               {/* Barra de filtros style */}
               <div className="bg-gray-50 p-3 rounded-lg border">
@@ -1416,7 +1715,7 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
                   <div className="flex items-center gap-2">
                     <span className="text-sm font-medium">{translate('currentPrice')}:</span>
                     <span className="text-lg font-bold text-green-600">
-                      ${(selectedProduct.currentPrice || 0).toLocaleString(locale, { 
+                      ${(familyLatestPrices[familyPriceKey(selectedFamilyForPrice.id)] ?? 0).toLocaleString(locale, { 
                         minimumFractionDigits: 2, 
                         maximumFractionDigits: 2 
                       })}
@@ -1515,6 +1814,7 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
               variant="outline" 
               onClick={() => {
                 resetQueryForm();
+                setSelectedFamilyForPrice(null);
                 setShowPriceHistoryDialog(false);
               }}
             >
@@ -1547,24 +1847,97 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
         </DialogContent>
       </Dialog>
 
-      {/* Category dialog */}
+      {/* Family dialog */}
       <Dialog open={showCategoryDialog} onOpenChange={setShowCategoryDialog}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>{editingCategory ? translate('editCategory') : translate('newCategory')}</DialogTitle>
-            <DialogDescription>{editingCategory ? translate('editCategoryDesc') : translate('newCategoryDesc')}</DialogDescription>
+            <DialogTitle>{editingCategory ? translate('editFamily') : translate('newFamily')}</DialogTitle>
+            <DialogDescription>{editingCategory ? translate('editFamilyDesc') : translate('newFamilyDesc')}</DialogDescription>
           </DialogHeader>
           <div className="space-y-5 px-6 py-4">
-            <Label htmlFor="categoryName">{translate('name')} *</Label>
+            <Label htmlFor="familyName">{translate('name')} *</Label>
             <Input
-              id="categoryName"
-              value={categoryName}
-              onChange={(e) => setCategoryName(e.target.value)}
+              id="familyName"
+              value={familyForm.name}
+              onChange={(e) => {
+                setFamilyForm((prev) => ({ ...prev, name: e.target.value }));
+                if (familyFormErrors.name) setFamilyFormErrors((prev) => ({ ...prev, name: undefined }));
+              }}
               placeholder="Ej. Bebidas"
+              className={familyFormErrors.name ? 'border-red-500' : ''}
             />
+            {familyFormErrors.name && <p className="text-sm text-red-600">{familyFormErrors.name}</p>}
+            <Label htmlFor="familyCode">{translate('familyCodeLabel')} *</Label>
+            <Input
+              id="familyCode"
+              value={familyForm.code}
+              onChange={(e) => {
+                setFamilyForm((prev) => ({ ...prev, code: e.target.value.replace(/\D/g, '').slice(0, 4) }));
+                if (familyFormErrors.code) setFamilyFormErrors((prev) => ({ ...prev, code: undefined }));
+              }}
+              placeholder="Ej. 1234"
+              inputMode="numeric"
+              maxLength={4}
+              required
+              className={familyFormErrors.code ? 'border-red-500' : ''}
+            />
+            {familyFormErrors.code && <p className="text-sm text-red-600">{familyFormErrors.code}</p>}
+            <Label htmlFor="familySku">{translate('familySkuLabel')} *</Label>
+            <Input
+              id="familySku"
+              value={familyForm.sku}
+              onChange={(e) => {
+                setFamilyForm((prev) => ({ ...prev, sku: e.target.value.replace(/\D/g, '').slice(0, 6) }));
+                if (familyFormErrors.sku) setFamilyFormErrors((prev) => ({ ...prev, sku: undefined }));
+              }}
+              placeholder="Ej. 123456"
+              inputMode="numeric"
+              maxLength={6}
+              required
+              className={familyFormErrors.sku ? 'border-red-500' : ''}
+            />
+            {familyFormErrors.sku && <p className="text-sm text-red-600">{familyFormErrors.sku}</p>}
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+            <Label htmlFor="familyVolume">{translate('familyVolumeLabel')}</Label>
+                <Input
+                  id="familyVolume"
+                  type="number"
+                  min="0.01"
+                  step="0.01"
+                  value={familyForm.volume}
+                  onChange={(e) => {
+                    setFamilyForm((prev) => ({ ...prev, volume: e.target.value }));
+                    if (familyFormErrors.volume) setFamilyFormErrors((prev) => ({ ...prev, volume: undefined }));
+                  }}
+                  placeholder="Ej. 1.5"
+                  className={familyFormErrors.volume ? 'border-red-500' : ''}
+                />
+                {familyFormErrors.volume && <p className="text-sm text-red-600 mt-1">{familyFormErrors.volume}</p>}
+              </div>
+              <div>
+                <Label htmlFor="familyUnit">{translate('familyUnitLabel')}</Label>
+                <Input
+                  id="familyUnit"
+                  value={familyForm.unit}
+                  onChange={(e) => {
+                    setFamilyForm((prev) => ({ ...prev, unit: e.target.value }));
+                    if (familyFormErrors.unit) setFamilyFormErrors((prev) => ({ ...prev, unit: undefined }));
+                  }}
+                  placeholder="Ej. L"
+                  className={familyFormErrors.unit ? 'border-red-500' : ''}
+                />
+                {familyFormErrors.unit && <p className="text-sm text-red-600 mt-1">{familyFormErrors.unit}</p>}
+              </div>
+            </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => { setShowCategoryDialog(false); setCategoryName(''); setEditingCategory(null); }}>{translate('cancel')}</Button>
+            <Button variant="outline" onClick={() => {
+              setShowCategoryDialog(false);
+              setFamilyForm({ name: '', code: '', sku: '', volume: '', unit: '' });
+              setFamilyFormErrors({});
+              setEditingCategory(null);
+            }}>{translate('cancel')}</Button>
             <Button onClick={handleSaveCategory} className="bg-indigo-600 hover:bg-indigo-700">{translate('save')}</Button>
           </DialogFooter>
         </DialogContent>

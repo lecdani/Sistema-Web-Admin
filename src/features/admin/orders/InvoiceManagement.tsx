@@ -466,7 +466,7 @@ export function InvoiceManagement({ onBack }: InvoiceManagementProps) {
                 {filteredInvoices.map((invoice) => (
                   <TableRow key={invoice.id}>
                     <TableCell className="font-medium">{invoice.invoiceNumber}</TableCell>
-                    <TableCell>{invoice.orderNumber && invoice.orderNumber !== translate('poNotFound') ? `PO - ${invoice.orderNumber}` : invoice.orderNumber}</TableCell>
+                    <TableCell>{invoice.orderNumber && invoice.orderNumber !== translate('poNotFound') ? `${invoice.orderNumber}` : invoice.orderNumber}</TableCell>
                     <TableCell>
                       {new Date(invoice.issueDate).toLocaleDateString(locale)}
                     </TableCell>
@@ -533,7 +533,7 @@ export function InvoiceManagement({ onBack }: InvoiceManagementProps) {
       <Dialog open={showInvoiceDetail} onOpenChange={setShowInvoiceDetail}>
         <DialogContent className="!w-[70vw] !max-w-[1200px] max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>{translate('invoiceDetailTitle')} {selectedInvoice?.orderNumber && selectedInvoice.orderNumber !== translate('poNotFound') ? `PO - ${selectedInvoice.orderNumber}` : selectedInvoice?.invoiceNumber}</DialogTitle>
+            <DialogTitle>{translate('invoiceDetailTitle')} {selectedInvoice?.orderNumber && selectedInvoice.orderNumber !== translate('poNotFound') ? `${selectedInvoice.orderNumber}` : selectedInvoice?.invoiceNumber}</DialogTitle>
             <DialogDescription>
               {translate('invoiceDetailDesc')}
             </DialogDescription>
@@ -561,7 +561,7 @@ export function InvoiceManagement({ onBack }: InvoiceManagementProps) {
                     </div>
                     <div className="flex justify-between">
                       <span className="text-gray-600">{translate('poNumberCol')}:</span>
-                      <span>{selectedInvoice.orderNumber && selectedInvoice.orderNumber !== translate('poNotFound') ? `PO - ${selectedInvoice.orderNumber}` : selectedInvoice.orderNumber}</span>
+                      <span>{selectedInvoice.orderNumber && selectedInvoice.orderNumber !== translate('poNotFound') ? `${selectedInvoice.orderNumber}` : selectedInvoice.orderNumber}</span>
                     </div>
                     <div className="flex justify-between">
                       <span className="text-gray-600">{translate('sellerLabel')}:</span>

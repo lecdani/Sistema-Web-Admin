@@ -410,7 +410,7 @@ export const PlanogramEditor: React.FC<PlanogramEditorProps> = ({
                         }`}
                         onDragOver={handleDragOver}
                         onDrop={(e) => handleDrop(e, x, y)}
-                        title={cell.product ? `${cell.product.name} (${cell.product.sku}) - Celda ${cellRef}` : translate('dragCellHere').replace('{ref}', cellRef)}
+                        title={cell.product ? `${cell.product.name} (${cell.product.code || cell.product.sku}) - Celda ${cellRef}` : translate('dragCellHere').replace('{ref}', cellRef)}
                       >
                         {cell.product ? (
                           <div className="text-center w-full h-full flex flex-col justify-center p-1 relative">
@@ -426,7 +426,7 @@ export const PlanogramEditor: React.FC<PlanogramEditorProps> = ({
                               </div>
                             )}
                             <div className="font-bold text-blue-800 truncate text-[10px] leading-tight">
-                              {cell.product.sku}
+                              {cell.product.code || cell.product.sku}
                             </div>
                             <div className="text-[9px] text-blue-700 truncate leading-tight">
                               {cell.product.name.split(' ').slice(0, 2).join(' ')}
@@ -502,7 +502,7 @@ export const PlanogramEditor: React.FC<PlanogramEditorProps> = ({
                           </div>
                           <div className="flex-1 min-w-0 space-y-0.5">
                             <p className="font-medium truncate text-gray-900 text-xs leading-tight">{product.name}</p>
-                            <p className="text-gray-500 leading-tight text-[10px]">{product.sku}</p>
+                            <p className="text-gray-500 leading-tight text-[10px]">{product.code || product.sku}</p>
                             <div className="flex items-center justify-between gap-1">
                             <Badge variant="outline" className="text-[9px] py-0 px-1">
                               {product.category}

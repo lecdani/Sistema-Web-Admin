@@ -1264,10 +1264,12 @@ export const ordersApi = {
           (d?.sku ?? d?.Sku ?? d?.product?.sku ?? d?.Product?.Sku ?? pid) ||
           '—';
         if ((price === 0 || amount === 0) && pid) {
-          const latestPrice =
-            orderItem?.price && orderItem.price > 0
-              ? orderItem.price
-              : await histpricesApi.getLatest(pid).then((p) => p?.price ?? 0);
+          let latestPrice = orderItem?.price && orderItem.price > 0 ? orderItem.price : 0;
+          if (!(latestPrice > 0)) {
+            const product = await productsApi.getById(pid);
+            const familyId = String((product as any)?.familyId ?? product?.categoryId ?? '').trim();
+            latestPrice = familyId ? await histpricesApi.getLatest(familyId).then((p) => p?.price ?? 0) : 0;
+          }
           price = latestPrice;
           amount = qty * price;
         }
@@ -1733,7 +1735,9 @@ export const ordersApi = {
         if (unitPrice <= 0 && subtotal <= 0 && qty > 0) {
           const pid = String(d?.productId ?? d?.ProductId ?? '').trim();
           if (pid) {
-            const latest = await histpricesApi.getLatest(pid);
+            const product = await productsApi.getById(pid);
+            const familyId = String((product as any)?.familyId ?? product?.categoryId ?? '').trim();
+            const latest = familyId ? await histpricesApi.getLatest(familyId) : null;
             const p = latest?.price ?? 0;
             if (p > 0) {
               unitPrice = p;

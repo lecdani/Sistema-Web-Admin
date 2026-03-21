@@ -112,7 +112,7 @@ export function PODManagement({ onBack }: PODManagementProps) {
           storeName: store?.name || translate('storeNotFound'),
           sellerName: `${seller?.firstName || ''} ${seller?.lastName || ''}`.trim() || translate('sellerNotFound'),
           uploadedByName: `${uploader?.firstName || ''} ${uploader?.lastName || ''}`.trim() || translate('userNotFound'),
-          orderNumber: order?.po ? `PO - ${order.po}` : translate('noPo'),
+          orderNumber: order?.po ? `${order.po}` : translate('noPo'),
           invoiceNumber: invoice?.invoiceNumber || translate('noInvoice')
         };
       });

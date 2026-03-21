@@ -125,7 +125,7 @@ export function EditOrderPlanogram({ order, onClose, onSaved }: EditOrderPlanogr
             }
             orderItemsByProductId.set(id, {
               productName: (item.productName ?? item.sku ?? getProduct(id)?.name ?? '').trim(),
-              sku: item.sku ?? getProduct(id)?.sku ?? '',
+              sku: item.sku ?? getProduct(id)?.code ?? getProduct(id)?.sku ?? '',
               quantity: item.quantity ?? item.toOrder ?? 0,
               price,
             });
@@ -144,8 +144,8 @@ export function EditOrderPlanogram({ order, onClose, onSaved }: EditOrderPlanogr
               row,
               col,
               productId: product?.id ?? '',
-              productName: orderItem?.productName ?? product?.name ?? product?.sku ?? '',
-              sku: orderItem?.sku ?? product?.sku ?? '',
+              productName: orderItem?.productName ?? product?.name ?? product?.code ?? product?.sku ?? '',
+              sku: orderItem?.sku ?? product?.code ?? product?.sku ?? '',
               toOrder: orderItem?.quantity ?? 0,
               price: orderItem?.price ?? product?.currentPrice ?? 0,
               imageUrl: product ? getProductImageUrl(product) : undefined,
@@ -268,7 +268,7 @@ export function EditOrderPlanogram({ order, onClose, onSaved }: EditOrderPlanogr
               </Button>
               <div>
                 <h1 className="text-base font-semibold text-gray-900">{translate('reviewOrderButton')}</h1>
-                <p className="text-xs text-gray-500">{(order as any).po ? `PO - ${(order as any).po}` : `${translate('orderNumber')} #${orderId}`}</p>
+                <p className="text-xs text-gray-500">{(order as any).po ? `${(order as any).po}` : `${translate('orderNumber')} #${orderId}`}</p>
               </div>
             </div>
           </div>
@@ -365,7 +365,7 @@ export function EditOrderPlanogram({ order, onClose, onSaved }: EditOrderPlanogr
             <Edit className="h-4 w-4 text-gray-700" />
           </div>
           <div className="min-w-0">
-            <h1 className="text-sm font-semibold text-gray-900 truncate">{(order as any).po ? `PO - ${(order as any).po}` : `${translate('editOrderTitle')} #${orderId}`}</h1>
+            <h1 className="text-sm font-semibold text-gray-900 truncate">{(order as any).po ? `${(order as any).po}` : `${translate('editOrderTitle')} #${orderId}`}</h1>
             <p className="text-[11px] text-gray-500 truncate">{planogramName ?? translate('planogram')}</p>
           </div>
         </div>

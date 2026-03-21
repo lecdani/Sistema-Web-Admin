@@ -833,35 +833,35 @@ const createDefaultOrderHeaders = () => {
       salespersonId: 2, // vendedor@empresa.com id
       storeId: stores[0]?.id || 'store_madrid_001',
       createdAt: '2024-01-15',
-      po: 'PO-001-2024'
+      po: '001-2024'
     },
     {
       orderHeaderSerial: 'ORD-2024-002',
       salespersonId: 2,
       storeId: stores[1]?.id || 'store_barcelona_001',
       createdAt: '2024-01-18',
-      po: 'PO-002-2024'
+      po: '002-2024'
     },
     {
       orderHeaderSerial: 'ORD-2024-003',
       salespersonId: 2,
       storeId: stores[2]?.id || 'store_valencia_001',
       createdAt: '2024-01-22',
-      po: 'PO-003-2024'
+      po: '003-2024'
     },
     {
       orderHeaderSerial: 'ORD-2024-004',
       salespersonId: 2,
       storeId: stores[0]?.id || 'store_madrid_001',
       createdAt: '2024-02-05',
-      po: 'PO-004-2024'
+      po: '004-2024'
     },
     {
       orderHeaderSerial: 'ORD-2024-005',
       salespersonId: 2,
       storeId: stores[1]?.id || 'store_barcelona_001',
       createdAt: '2024-02-12',
-      po: 'PO-005-2024'
+      po: '005-2024'
     }
   ];
   

@@ -113,7 +113,7 @@ export function OrderDetailView({ orderId, onClose, onOrderUpdated }: OrderDetai
               }
               const product = await productsApi.getById(item.productId);
               if (product) {
-                if (!productName) productName = product.name || product.sku || '';
+                if (!productName) productName = product.name || product.code || product.sku || '';
                 if (!category && product.category) category = product.category.trim();
                 if (!category && product.categoryId != null) {
                   const id = String(product.categoryId);
@@ -493,7 +493,7 @@ export function OrderDetailView({ orderId, onClose, onOrderUpdated }: OrderDetai
               <ShoppingCart className="h-6 w-6" />
             </div>
             <div>
-              <h2 className="text-2xl font-bold">{order.po ? `PO - ${order.po}` : `${translate('orderNumber')} #${order.id ?? order.backendOrderId ?? '—'}`}</h2>
+              <h2 className="text-2xl font-bold">{order.po ? `${order.po}` : `${translate('orderNumber')} #${order.id ?? order.backendOrderId ?? '—'}`}</h2>
               <p className="text-blue-100 text-sm mt-1">
                 {translate('createdOn')} {new Date(order.date || (order as any).createdAt).toLocaleDateString(locale, {
                   day: 'numeric',
@@ -552,7 +552,7 @@ export function OrderDetailView({ orderId, onClose, onOrderUpdated }: OrderDetai
                     {!editingPo ? (
                       <div className="flex items-center justify-end gap-2 flex-wrap">
                         <span className="font-medium text-gray-900">
-                          {order.po ? `PO - ${order.po}` : '—'}
+                          {order.po ? `${order.po}` : '—'}
                         </span>
                         {isPendingOrder && (
                           <Button
@@ -703,7 +703,7 @@ export function OrderDetailView({ orderId, onClose, onOrderUpdated }: OrderDetai
                           <span className="bg-indigo-100 text-indigo-700 font-semibold rounded-full w-6 h-6 flex items-center justify-center text-xs">{index + 1}</span>
                           <h3 className="font-semibold text-gray-900">{item.productName || 'N/A'}</h3>
                         </div>
-                        <p className="text-xs text-gray-500">{item.sku}</p>
+                        <p className="text-xs text-gray-500">{item.code || item.sku}</p>
                       </div>
                       <div className="text-right ml-4 space-y-1">
                         <div className="text-sm text-gray-600">{quantity} × ${unitPrice.toFixed(2)}</div>
@@ -806,7 +806,7 @@ export function OrderDetailView({ orderId, onClose, onOrderUpdated }: OrderDetai
             const invFromOrder =
               order.items?.length && !invFromApi
                 ? {
-                    invoiceNumber: order.po ? `PO - ${order.po}` : (order.id ?? '—'),
+                    invoiceNumber: order.po ? `${order.po}` : (order.id ?? '—'),
                     date: order.date,
                     total: displayTotal,
                     subtotal: displaySubtotal,
@@ -840,7 +840,7 @@ export function OrderDetailView({ orderId, onClose, onOrderUpdated }: OrderDetai
                 </CardHeader>
                 <CardContent className="p-0">
                   <Invoice
-                    invoiceNumber={order.po ? `PO - ${order.po}` : String(inv.invoiceNumber)}
+                    invoiceNumber={order.po ? `${order.po}` : String(inv.invoiceNumber)}
                     date={formatInvoiceDate(invoiceDateStr)}
                     vendorName={sellerNameDisplay}
                     storeName={storeNameDisplay || order.storeName || '—'}

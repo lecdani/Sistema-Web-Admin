@@ -190,7 +190,7 @@ export const PlanogramViewer: React.FC<PlanogramViewerProps> = ({ planogram }) =
                         }`}
                         title={
                           product 
-                            ? `${product.name} (${product.sku}) - Celda ${cellRef}` 
+                            ? `${product.name} (${product.code || product.sku}) - Celda ${cellRef}` 
                             : translate('cellEmpty').replace('{ref}', cellRef)
                         }
                       >
@@ -208,7 +208,7 @@ export const PlanogramViewer: React.FC<PlanogramViewerProps> = ({ planogram }) =
                               </div>
                             )}
                             <div className="font-bold text-green-800 truncate text-[10px] leading-tight">
-                              {product.sku}
+                              {product.code || product.sku}
                             </div>
                             <div className="text-[9px] text-green-700 truncate leading-tight">
                               {product.name.split(' ').slice(0, 2).join(' ')}
@@ -260,7 +260,7 @@ export const PlanogramViewer: React.FC<PlanogramViewerProps> = ({ planogram }) =
                             </div>
                             <div className="flex-1 min-w-0 space-y-0.5">
                               <div className="font-medium truncate text-gray-900 text-xs leading-tight">{product.name}</div>
-                              <div className="text-gray-500 leading-tight">{product.sku}</div>
+                              <div className="text-gray-500 leading-tight">{product.code || product.sku}</div>
                               <div className="flex items-center justify-between gap-1">
                               <Badge className={`${getCategoryColor(product.category)} text-[9px] py-0 px-1`}>
                                 {product.category}

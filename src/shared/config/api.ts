@@ -69,7 +69,7 @@ export const API_CONFIG = {
     PRODUCTS: {
       LIST: '/products/products',
       GET_BY_ID: '/products/products/{id}',
-      GET_BY_CATEGORY: '/products/products/category/{category}',
+      GET_BY_BRAND: '/products/products/brand/{brandId}',
       CREATE: '/products/products',
       UPDATE: '/products/products/{id}',
       DELETE: '/products/products/{id}'
@@ -81,18 +81,19 @@ export const API_CONFIG = {
       UPDATE: '/brands/brands/{id}',
       DEACTIVATE: '/brands/brands/desactivate/{id}'
     },
-    CATEGORIES: {
-      LIST: '/categories/categories',
-      GET_BY_ID: '/categories/categories/{id}',
-      CREATE: '/categories/categories',
-      UPDATE: '/categories/categories/{id}',
-      DEACTIVATE: '/categories/categories/desactivate/{id}'
+    FAMILIES: {
+      LIST: '/families/families',
+      GET_BY_ID: '/families/families/{id}',
+      CREATE: '/families/families',
+      UPDATE: '/families/families/{id}',
+      DELETE: '/families/families/{id}',
+      DEACTIVATE: '/families/families/desactivate/{id}'
     },
     HISTPRICES: {
       CREATE: '/histprices/histprices',
-      GET_BY_PRODUCT: '/histprices/histprices/product/{productId}',
-      GET_LATEST: '/histprices/histprices/latest/{productId}',
-      GET_BY_DATE: '/histprices/histprices/by-date/{productId}/{date}'
+      GET_BY_FAMILY: '/histprices/histprices/family/{familyId}',
+      GET_LATEST: '/histprices/histprices/latest/{familyId}',
+      GET_BY_DATE: '/histprices/histprices/by-date/{familyId}/{date}'
     },
     PLANOGRAMS: {
       LIST: '/planograms/planograms',
@@ -235,7 +236,7 @@ export class ApiClient {
           endpoint === API_CONFIG.ENDPOINTS.USERS.UPDATE_PROFILE;
         const isChangePasswordEndpoint = endpoint === API_CONFIG.ENDPOINTS.AUTH.CHANGE_PASSWORD;
         const isHistPriceLatestEndpoint =
-          endpoint.startsWith(API_CONFIG.ENDPOINTS.HISTPRICES.GET_LATEST.replace('{productId}', ''));
+          endpoint.startsWith(API_CONFIG.ENDPOINTS.HISTPRICES.GET_LATEST.replace('{familyId}', ''));
         const isOrdersByUserEndpoint =
           endpoint.startsWith('/orders/orders/user/');
         const isExpected404 =

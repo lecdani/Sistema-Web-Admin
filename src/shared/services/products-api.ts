@@ -6,13 +6,26 @@ const E = API_CONFIG.ENDPOINTS.PRODUCTS;
 function toProduct(raw: any, currentPrice?: number): Product {
   const imageVal = raw.image ?? raw.Image ?? raw.imageUrl ?? raw.ImageUrl;
   const imageFileNameVal = raw.imageFileName ?? raw.ImageFileName;
+  // .NET suele devolver FamilyId; la UI usa categoryId para resolver el nombre en el listado.
+  const familyOrCategoryRaw =
+    raw.familyId ??
+    raw.FamilyId ??
+    raw.categoryId ??
+    raw.CategoryId ??
+    undefined;
+  const familyOrCategoryId =
+    familyOrCategoryRaw != null && String(familyOrCategoryRaw).trim() !== ''
+      ? String(familyOrCategoryRaw).trim()
+      : undefined;
   return {
     id: String(raw.id ?? raw.Id ?? ''),
-    sku: String(raw.sku ?? raw.Sku ?? ''),
     name: String(raw.name ?? raw.Name ?? ''),
-    category: String(raw.category ?? raw.Category ?? raw.categoryName ?? raw.CategoryName ?? ''),
+    code: String(raw.code ?? raw.Code ?? '').trim() || undefined,
+    category: String(raw.category ?? raw.Category ?? raw.categoryName ?? raw.CategoryName ?? raw.familyName ?? raw.FamilyName ?? ''),
+    sku: String(raw.sku ?? raw.Sku ?? raw.familySku ?? raw.FamilySku ?? ''),
     brandId: raw.brandId ?? raw.BrandId ?? undefined,
-    categoryId: raw.categoryId ?? raw.CategoryId ?? undefined,
+    familyId: familyOrCategoryId,
+    categoryId: familyOrCategoryId,
     description: raw.description ?? raw.Description ?? undefined,
     image: imageVal != null && imageVal !== '' ? String(imageVal) : undefined,
     imageFileName: imageFileNameVal != null && imageFileNameVal !== '' ? String(imageFileNameVal) : undefined,
@@ -25,10 +38,12 @@ function toProduct(raw: any, currentPrice?: number): Product {
 
 export interface ProductPayload {
   name: string;
-  category: string;
-  sku: string;
+  code?: string;
+  category?: string;
+  sku?: string;
   isActive: boolean;
   brandId?: string;
+  familyId?: string;
   categoryId?: string;
   /** Opcional. Nombre del archivo en S3 devuelto por POST /images/upload (confirmación de que el archivo existe en AWS S3). */
   imageFileName?: string;
@@ -57,9 +72,9 @@ export async function fetchProductById(id: string): Promise<Product | null> {
   }
 }
 
-/** Obtiene productos por categoría */
-export async function fetchProductsByCategory(category: string): Promise<Product[]> {
-  const endpoint = E.GET_BY_CATEGORY.replace('{category}', encodeURIComponent(category));
+/** Obtiene productos por marca */
+export async function fetchProductsByBrand(brandId: string): Promise<Product[]> {
+  const endpoint = E.GET_BY_BRAND.replace('{brandId}', encodeURIComponent(brandId));
   const res = await apiClient.get<any>(endpoint);
   const list = Array.isArray(res) ? res : res?.data ?? res?.items ?? [];
   return (list as any[]).map((raw: any) => toProduct(raw));
@@ -72,12 +87,19 @@ export async function createProduct(
 ): Promise<Product> {
   const payload: any = {
     name: (data.name ?? '').trim(),
-    category: (data.category ?? '').trim(),
-    sku: (data.sku ?? '').trim(),
     isActive: data.isActive ?? true
   };
+  const productCode = (data.code ?? '').trim();
+  if (productCode) {
+    payload.code = productCode;
+    payload.Code = productCode;
+  }
   if (data.brandId) payload.brandId = data.brandId;
-  if (data.categoryId) payload.categoryId = data.categoryId;
+  const familyId = data.familyId ?? data.categoryId;
+  if (familyId) {
+    payload.familyId = familyId;
+    payload.FamilyId = familyId;
+  }
   const fileName = (imageFileNameOverride != null && imageFileNameOverride !== '')
     ? String(imageFileNameOverride).trim()
     : (data.imageFileName != null && data.imageFileName !== '')
@@ -93,7 +115,7 @@ export async function createProduct(
   const res = await apiClient.post<any>(E.CREATE, payload);
   if (res && (res.id || res.name)) return toProduct(res);
   const list = await fetchProducts();
-  const created = list.find(p => p.sku === payload.sku);
+  const created = list.find(p => p.name === payload.name);
   if (created) return created;
   return toProduct({ id: (res?.id ?? '').toString(), ...payload });
 }
@@ -101,9 +123,18 @@ export async function createProduct(
 /** Actualiza un producto */
 export async function updateProduct(id: string, data: Partial<ProductPayload>): Promise<Product> {
   const endpoint = E.UPDATE.replace('{id}', encodeURIComponent(id));
-  const payload: any = { id, name: data.name?.trim(), category: data.category?.trim(), sku: data.sku?.trim(), isActive: data.isActive };
+  const payload: any = { id, name: data.name?.trim(), isActive: data.isActive };
+  if (data.code !== undefined) {
+    const productCode = String(data.code ?? '').trim();
+    payload.code = productCode;
+    payload.Code = productCode;
+  }
   if (data.brandId != null) payload.brandId = data.brandId;
-  if (data.categoryId != null) payload.categoryId = data.categoryId;
+  const familyId = data.familyId ?? data.categoryId;
+  if (familyId != null) {
+    payload.familyId = familyId;
+    payload.FamilyId = familyId;
+  }
   if (data.imageFileName !== undefined) {
     payload.imageFileName = data.imageFileName;
     payload.ImageFileName = data.imageFileName;
@@ -125,7 +156,9 @@ export async function deleteProduct(id: string): Promise<void> {
 export const productsApi = {
   fetchAll: fetchProducts,
   getById: fetchProductById,
-  getByCategory: fetchProductsByCategory,
+  getByBrand: fetchProductsByBrand,
+  // Alias legacy temporal
+  getByCategory: fetchProductsByBrand,
   create: createProduct,
   update: updateProduct,
   delete: deleteProduct

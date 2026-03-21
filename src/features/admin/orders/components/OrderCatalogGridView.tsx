@@ -107,7 +107,7 @@ export const OrderCatalogGridView: React.FC<OrderCatalogGridViewProps> = ({ orde
       </div>
 
       <div className="bg-white rounded-xl p-3 shadow-sm border border-slate-200 overflow-x-auto flex justify-start md:justify-center">
-        <div className="inline-grid grid-cols-10 gap-2 w-[960px] flex-none">
+        <div className="inline-grid grid-cols-10 grid-flow-row gap-2 w-[960px] flex-none">
           {filledGrid.map((item, index) =>
             item ? (
               <div
@@ -136,16 +136,16 @@ export const OrderCatalogGridView: React.FC<OrderCatalogGridViewProps> = ({ orde
                         </div>
                       )}
                       <span
-                        className="text-[9px] leading-tight font-semibold text-slate-900 truncate max-w-[42px]"
-                        title={String(item.sku ?? item.productId ?? '')}
+                        className="text-[10px] leading-tight font-bold text-slate-900 truncate max-w-[44px]"
+                        title={String(product?.code ?? item.sku ?? item.productId ?? '')}
                       >
-                        {item.sku ?? item.productId ?? '—'}
+                        {product?.code ?? item.sku ?? item.productId ?? '—'}
                       </span>
                     </div>
                   );
                 })()}
                 <span
-                  className="text-[8px] leading-tight font-medium text-slate-600 break-words line-clamp-2 w-full"
+                  className="text-[7px] leading-tight font-normal text-slate-600 break-words line-clamp-2 w-full"
                   title={item.productName ?? ''}
                 >
                   {item.productName ?? ''}

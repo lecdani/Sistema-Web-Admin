@@ -691,7 +691,7 @@ export function OrderManagement({ onBack }: OrderManagementProps) {
                     className="cursor-pointer hover:bg-gray-50"
                     onClick={() => handleViewDetail(order)}
                   >
-                    <TableCell className="font-medium">{order.po ? `PO - ${order.po}` : '—'}</TableCell>
+                    <TableCell className="font-medium">{order.po ? `${order.po}` : '—'}</TableCell>
                     <TableCell>
                       {new Date(order.createdAt).toLocaleDateString(locale)}
                     </TableCell>

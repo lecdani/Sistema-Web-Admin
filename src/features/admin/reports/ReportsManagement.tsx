@@ -703,7 +703,7 @@ export function ReportsManagement({ onBack }: ReportsManagementProps) {
       const detailRows = filteredSalesDataSorted.slice(0, 2000);
       detailRows.forEach((sale) => {
         ws.getCell(row, 1).value = new Date(sale.date).toLocaleDateString(locale);
-        ws.getCell(row, 2).value = sale.invoiceNumber ? `PO - ${sale.invoiceNumber}` : '';
+        ws.getCell(row, 2).value = sale.invoiceNumber ? `${sale.invoiceNumber}` : '';
         ws.getCell(row, 3).value = (sale.productName ?? '').substring(0, 40);
         ws.getCell(row, 4).value = (sale.storeName ?? '').substring(0, 30);
         ws.getCell(row, 5).value = (sale.sellerName ?? '').substring(0, 25);
@@ -1142,7 +1142,7 @@ ${salesMetrics.topSellers.map((s, i) =>
                               <TableRow key={`inv-header-${sale.invoiceId}`} className="bg-muted/60 hover:bg-muted/60">
                                 <TableCell colSpan={8} className="py-2 font-medium text-sm">
                                   <span className="text-primary inline-block min-w-[230px]">
-                                    {sale.invoiceNumber ? `PO - ${sale.invoiceNumber}` : '—'}
+                                    {sale.invoiceNumber ? `${sale.invoiceNumber}` : '—'}
                                   </span>
                                   {' · '}
                                   {new Date(sale.date).toLocaleDateString(locale, {
@@ -1166,7 +1166,7 @@ ${salesMetrics.topSellers.map((s, i) =>
                               <TableCell className="text-muted-foreground">
                                 {new Date(sale.date).toLocaleDateString(locale)}
                               </TableCell>
-                              <TableCell className="font-medium min-w-[230px] w-[230px]">{sale.invoiceNumber ? `PO - ${sale.invoiceNumber}` : '—'}</TableCell>
+                              <TableCell className="font-medium min-w-[230px] w-[230px]">{sale.invoiceNumber ? `${sale.invoiceNumber}` : '—'}</TableCell>
                               <TableCell>
                                 <div className="flex items-center gap-3">
                                   {(() => {

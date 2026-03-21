@@ -67,6 +67,10 @@ export interface Brand {
 export interface Category {
   id: string;
   name: string;
+  code?: string;
+  sku?: string;
+  volume?: number;
+  unit?: string;
   isActive: boolean;
   createdAt: Date;
   updatedAt: Date;
@@ -74,11 +78,14 @@ export interface Category {
 
 export interface Product {
   id: string;
-  sku: string;
   name: string;
-  category: string;
+  /** Código del producto (identificador comercial, distinto del SKU de familia). */
+  code?: string;
   brandId?: string;
+  familyId?: string;
   categoryId?: string;
+  category?: string;
+  sku?: string;
   description?: string;
   /** URL de la imagen del producto (devuelta por getProducts cuando tiene imagen) */
   image?: string;
@@ -150,6 +157,9 @@ export interface OrderItem {
   productId: string;
   quantity: number;
   productName?: string;
+  /** Código de producto (preferente frente a sku legado) */
+  code?: string;
+  sku?: string;
   productBrand?: string;
   unitPrice: number;
   subtotal: number;

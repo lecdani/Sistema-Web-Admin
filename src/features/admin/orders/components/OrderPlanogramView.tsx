@@ -176,7 +176,7 @@ export const OrderPlanogramView: React.FC<OrderPlanogramViewProps> = ({ order })
               } catch (_) {}
             }
             const name = (item.productName ?? item.sku ?? getProduct(id)?.name ?? '').trim();
-            const sku = item.sku ?? getProduct(id)?.sku ?? '';
+            const sku = item.sku ?? getProduct(id)?.code ?? getProduct(id)?.sku ?? '';
             const qty = item.quantity ?? item.toOrder ?? item.Quantity ?? 0;
             orderItemsByProductId.set(id, {
               productName: name,
@@ -199,8 +199,8 @@ export const OrderPlanogramView: React.FC<OrderPlanogramViewProps> = ({ order })
               row,
               col,
               productId: product?.id ?? '',
-              productName: orderItem?.productName ?? product?.name ?? product?.sku ?? '',
-              sku: orderItem?.sku ?? product?.sku ?? '',
+              productName: orderItem?.productName ?? product?.name ?? product?.code ?? product?.sku ?? '',
+              sku: orderItem?.sku ?? product?.code ?? product?.sku ?? '',
               category: resolveCategory(product ?? null),
               toOrder: orderItem?.quantity ?? 0,
               price: orderItem?.price ?? product?.currentPrice ?? 0,
@@ -332,14 +332,14 @@ export const OrderPlanogramView: React.FC<OrderPlanogramViewProps> = ({ order })
                         </div>
                       )}
                       <span
-                        className="text-[9px] leading-tight font-semibold text-slate-900 truncate max-w-[42px]"
+                        className="text-[10px] leading-tight font-bold text-slate-900 truncate max-w-[44px]"
                         title={item.sku}
                       >
                         {item.sku || '—'}
                       </span>
                     </div>
                     <span
-                      className="text-[8px] leading-tight font-medium text-slate-600 break-words line-clamp-2 w-full mt-0.5"
+                      className="text-[7px] leading-tight font-normal text-slate-600 break-words line-clamp-2 w-full mt-0.5"
                       title={item.productName}
                     >
                       {item.productName || ''}
