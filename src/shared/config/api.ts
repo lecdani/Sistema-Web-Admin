@@ -239,9 +239,17 @@ export class ApiClient {
           endpoint.startsWith(API_CONFIG.ENDPOINTS.HISTPRICES.GET_LATEST.replace('{familyId}', ''));
         const isOrdersByUserEndpoint =
           endpoint.startsWith('/orders/orders/user/');
+        /** Sin factura / sin datos / ruta aún no desplegada: el front trata como lista vacía. */
+        const isOrderDiscrepanciesEndpoint =
+          endpoint.includes('/orders/dicrepancies/') ||
+          endpoint.includes('/orders/discrepancies/');
         const isExpected404 =
           response.status === 404 &&
-          (isProfileEndpoint || endpoint.startsWith('/users/users/') || isHistPriceLatestEndpoint || isOrdersByUserEndpoint);
+          (isProfileEndpoint ||
+            endpoint.startsWith('/users/users/') ||
+            isHistPriceLatestEndpoint ||
+            isOrdersByUserEndpoint ||
+            isOrderDiscrepanciesEndpoint);
 
         if (!isExpected404 && !isProfileEndpoint && !isChangePasswordEndpoint) {
           console.error(`[ApiClient] Error en respuesta: ${response.status}`, data);

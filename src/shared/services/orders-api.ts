@@ -28,6 +28,15 @@ export interface AdminOrderSummary {
   planogramId?: string;
 }
 
+export interface OrderDiscrepancyItem {
+  productId: string;
+  sku?: string;
+  productName?: string;
+  orderedQty: number;
+  deliveredQty: number;
+  difference: number;
+}
+
 // Igual que PWA: list?.data ?? list?.items ?? []
 function normalizeOrderListResponse(raw: any): any[] {
   if (Array.isArray(raw)) return raw;
@@ -42,6 +51,17 @@ function normalizeOrderListResponse(raw: any): any[] {
   if (raw?.items && Array.isArray(raw.items)) return raw.items;
   if (raw?.value && Array.isArray(raw.value)) return raw.value;
   return [];
+}
+
+function generateUuidV4(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = Math.floor(Math.random() * 16);
+    const v = c === 'x' ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
 }
 
 function mapRawOrderToAdmin(raw: any): AdminOrderSummary | null {
@@ -390,6 +410,56 @@ async function safeGet<T>(endpoint: string): Promise<T | null> {
   }
 }
 
+/** Primer array no vacío dentro de un objeto (hasta 2 niveles). */
+function extractFirstArray(obj: any, depth = 0): any[] | null {
+  if (obj == null || depth > 2) return null;
+  if (Array.isArray(obj)) return obj.length > 0 ? obj : null;
+  if (typeof obj !== 'object') return null;
+  for (const v of Object.values(obj)) {
+    if (Array.isArray(v)) return v.length > 0 ? (v as any[]) : null;
+    const nested = extractFirstArray(v, depth + 1);
+    if (nested && nested.length > 0) return nested;
+  }
+  return null;
+}
+
+function peelInvoiceLayers(obj: any, maxDepth = 8): any[] {
+  const out: any[] = [];
+  const seen = new Set<any>();
+  let cur: any = obj;
+  let d = 0;
+  while (cur != null && typeof cur === 'object' && d < maxDepth) {
+    if (seen.has(cur)) break;
+    seen.add(cur);
+    out.push(cur);
+    const next =
+      cur?.data ??
+      cur?.Data ??
+      cur?.value ??
+      cur?.Value ??
+      cur?.invoice ??
+      cur?.Invoice ??
+      cur?.result ??
+      cur?.Result ??
+      null;
+    if (next == null || typeof next !== 'object') break;
+    cur = next;
+    d++;
+  }
+  return out;
+}
+
+function firstPositiveNumericFromLayers(layers: any[], keys: string[]): number {
+  for (const L of layers) {
+    if (!L || typeof L !== 'object') continue;
+    for (const k of keys) {
+      const n = Number((L as any)[k]);
+      if (Number.isFinite(n) && n > 0) return n;
+    }
+  }
+  return 0;
+}
+
 // Lista de facturas: soporta .NET (value, Data), arrays y objetos con data/invoices/items
 function normalizeInvoiceList(list: any): any[] {
   if (list == null) return [];
@@ -424,49 +494,54 @@ async function getInvoiceById(invoiceId: string): Promise<any | null> {
     );
   }
   if (one == null) return null;
-  if ((one as any)?.data && typeof (one as any).data === 'object')
-    return (one as any).data;
-  if ((one as any)?.invoice && typeof (one as any).invoice === 'object')
-    return (one as any).invoice;
-  if ((one as any)?.value && typeof (one as any).value === 'object')
-    return (one as any).value;
+  /** Respuesta completa: POD puede ir en el wrapper y líneas en data/invoice. */
   return one;
 }
 
 /** Lee la ruta/link del POD de la factura (igual que PWA: en BD se guarda la ruta, ej. imagenes/Dani.png). */
 function getPodFromInvoice(inv: any): string {
   if (inv == null) return '';
-  const root = inv?.data ?? inv?.invoice ?? inv?.value ?? inv;
-  const v =
-    root?.pod ??
-    root?.Pod ??
-    root?.POD ??
-    root?.podUrl ??
-    root?.PodUrl ??
-    root?.podImageUrl ??
-    root?.PodImageUrl ??
-    root?.podPath ??
-    root?.PodPath ??
-    root?.ruta ??
-    root?.Ruta ??
-    root?.imagePath ??
-    root?.ImagePath ??
-    root?.filePath ??
-    root?.FilePath ??
-    root?.fileName ??
-    root?.FileName ??
-    root?.PodFileName ??
-    root?.url ??
-    root?.Url ??
-    root?.link ??
-    root?.Link ??
-    root?.Reference ??
-    root?.reference;
-  const str = typeof v === 'string' ? v.trim() : '';
-  if (str) return str;
-  const base64 = root?.podBase64 ?? root?.PodBase64;
-  if (typeof base64 === 'string' && base64.length > 0) {
-    return `data:image/png;base64,${base64}`;
+  const podKeys = [
+    'pod',
+    'Pod',
+    'POD',
+    'podUrl',
+    'PodUrl',
+    'podImageUrl',
+    'PodImageUrl',
+    'podPath',
+    'PodPath',
+    'ruta',
+    'Ruta',
+    'imagePath',
+    'ImagePath',
+    'filePath',
+    'FilePath',
+    'fileName',
+    'FileName',
+    'PodFileName',
+    'podFileName',
+    'url',
+    'Url',
+    'link',
+    'Link',
+    'Reference',
+    'reference',
+  ] as const;
+  const layers = peelInvoiceLayers(inv);
+  const seen = new Set<any>();
+  for (const root of layers) {
+    if (root == null || typeof root !== 'object' || seen.has(root)) continue;
+    seen.add(root);
+    for (const pk of podKeys) {
+      const v = (root as any)[pk];
+      const str = typeof v === 'string' ? v.trim() : v != null && v !== '' ? String(v).trim() : '';
+      if (str) return str;
+    }
+    const base64 = (root as any)?.podBase64 ?? (root as any)?.PodBase64;
+    if (typeof base64 === 'string' && base64.length > 0) {
+      return `data:image/png;base64,${base64}`;
+    }
   }
   return '';
 }
@@ -515,8 +590,12 @@ function detailQuantity(d: any): number {
       d?.Quantity ??
       d?.qty ??
       d?.Qty ??
-      d?.amount ??
-      d?.Amount ??
+      d?.invoiceQty ??
+      d?.InvoiceQty ??
+      d?.deliveredQuantity ??
+      d?.DeliveredQuantity ??
+      d?.deliveredQty ??
+      d?.DeliveredQty ??
       0
   );
   return Number.isFinite(n) ? n : 0;
@@ -527,6 +606,8 @@ function detailSubtotal(d: any): number {
     d?.subtotal ??
       d?.Subtotal ??
       d?.SubTotal ??
+      d?.lineTotal ??
+      d?.LineTotal ??
       d?.amount ??
       d?.Amount ??
       d?.total ??
@@ -535,6 +616,10 @@ function detailSubtotal(d: any): number {
       d?.Price ??
       0
   );
+  if (Number.isFinite(n) && n > 0) return n;
+  const qty = detailQuantity(d);
+  const up = Number(d?.unitPrice ?? d?.UnitPrice ?? 0);
+  if (qty > 0 && up > 0) return qty * up;
   return Number.isFinite(n) ? n : 0;
 }
 
@@ -570,17 +655,34 @@ function detailProductName(d: any): string {
 function normalizeDetailList(raw: any): any[] {
   if (raw == null) return [];
   if (Array.isArray(raw)) return raw;
-  const arr =
-    raw?.invoiceDetails ??
-    raw?.InvoiceDetails ??
-    raw?.details ??
-    raw?.Details ??
-    raw?.items ??
-    raw?.Items ??
-    raw?.data ??
-    raw?.Data ??
-    [];
-  return Array.isArray(arr) ? arr : [];
+  const detailKeys = [
+    'invoiceDetails',
+    'InvoiceDetails',
+    'details',
+    'Details',
+    'items',
+    'Items',
+    'invoiceItems',
+    'InvoiceItems',
+    'lines',
+    'Lines',
+    'invoiceLines',
+    'InvoiceLines',
+  ] as const;
+  const layers = peelInvoiceLayers(raw);
+  const seenLayers = new Set<any>();
+  for (const layer of layers) {
+    if (!layer || typeof layer !== 'object' || seenLayers.has(layer)) continue;
+    seenLayers.add(layer);
+    for (const k of detailKeys) {
+      const v = (layer as any)[k];
+      if (Array.isArray(v)) return v;
+    }
+  }
+  const fallbackKeys = detailKeys.map((k) => (raw as any)?.[k]).find((v) => Array.isArray(v));
+  if (Array.isArray(fallbackKeys)) return fallbackKeys;
+  const extracted = extractFirstArray(raw);
+  return Array.isArray(extracted) ? extracted : [];
 }
 
 const productNameCache = new Map<string, { name: string; sku: string }>();
@@ -844,42 +946,55 @@ export const ordersApi = {
     return result;
   },
   /**
-   * Crea un pedido en la API (header + detalles) usando:
-   * - POST /orders/orders
-   * - POST /orderdetails/orderdetails
-   * - POST /invoice/invoices
-   * - POST /invoicedetails/invoicedetails
+   * Crea un pedido con Unit of Work (header + detalles en un solo POST /orders/orders).
    */
   async createOrder(input: CreateOrderInput): Promise<CreatedOrderResult | null> {
-    const headerBody = {
+    const generatedOrderId = generateUuidV4();
+    const mappedItems = input.items.map((item) => {
+      const detailId = generateUuidV4();
+      return {
+        orderDetailId: detailId,
+        OrderDetailId: detailId,
+        productId: item.productId,
+        ProductId: item.productId,
+        quantity: Number(item.quantity) || 0,
+        Quantity: Number(item.quantity) || 0,
+      };
+    });
+
+    const payload: Record<string, unknown> = {
+      id: generatedOrderId,
+      Id: generatedOrderId,
       storeId: input.storeId,
       StoreId: input.storeId,
       salespersonId: input.salespersonId,
       SalespersonId: input.salespersonId,
-      vendorNumber: input.vendorNumber,
-      VendorNumber: input.vendorNumber,
-      status: 'pending',
-      Status: 'pending',
-      createdAt: new Date().toISOString(),
-      CreatedAt: new Date().toISOString(),
-      subtotal: input.subtotal,
-      Subtotal: input.subtotal,
-      tax: input.tax,
-      Tax: input.tax,
-      total: input.total,
-      Total: input.total,
+      items: mappedItems,
+      Items: mappedItems,
     };
+    const poTrimmed = (input.po ?? '').trim();
+    if (poTrimmed) {
+      payload.po = poTrimmed;
+      payload.Po = poTrimmed;
+    }
+    if ((input.planogramId ?? '').trim()) {
+      const pid = String(input.planogramId).trim();
+      payload.planogramId = pid;
+      payload.PlanogramId = pid;
+      payload.planogram_id = pid;
+      payload.PLANOGRAM_ID = pid;
+    }
 
-    const createdOrder = await safePost<any>('/orders/orders', headerBody);
+    const createdOrder = await safePost<any>('/orders/orders', payload);
     if (!createdOrder) {
       return null;
     }
 
-    let orderId: string | number | null = null;
+    let createdOrderId: string | number | null = null;
     if (typeof createdOrder === 'string' && createdOrder.trim().length > 0) {
-      orderId = createdOrder.trim();
+      createdOrderId = createdOrder.trim();
     } else if (typeof createdOrder === 'object') {
-      orderId =
+      createdOrderId =
         createdOrder.orderId ??
         createdOrder.OrderId ??
         createdOrder.id ??
@@ -895,92 +1010,20 @@ export const ordersApi = {
         null;
     }
 
-    if (orderId == null || orderId === '') {
+    if (createdOrderId == null || createdOrderId === '') {
       console.warn('[orders-api] createOrder: respuesta sin orderId.', createdOrder);
       return null;
     }
 
-    // Detalles del pedido
-    for (const item of input.items) {
-      const detailBody = {
-        orderId,
-        OrderId: orderId,
-        productId: item.productId,
-        ProductId: item.productId,
-        quantity: item.quantity,
-        Quantity: item.quantity,
-        unitPrice: item.price,
-        UnitPrice: item.price,
-        subtotal: item.quantity * item.price,
-        Subtotal: item.quantity * item.price,
-      };
-      await safePost<any>('/orderdetails/orderdetails', detailBody);
-    }
+    const invoiceId =
+      createdOrder?.invoiceId ??
+      createdOrder?.InvoiceId ??
+      createdOrder?.data?.invoiceId ??
+      createdOrder?.data?.InvoiceId ??
+      createdOrder?.value?.invoiceId ??
+      createdOrder?.value?.InvoiceId;
 
-    // Crear factura e items de factura
-    let invoiceId: number | string | undefined;
-    const invoiceBody = {
-      orderId,
-      OrderId: orderId,
-      storeId: input.storeId,
-      StoreId: input.storeId,
-      total: input.total,
-      Total: input.total,
-      subtotal: input.subtotal,
-      Subtotal: input.subtotal,
-      tax: input.tax,
-      Tax: input.tax,
-      createdAt: new Date().toISOString(),
-      CreatedAt: new Date().toISOString(),
-    };
-    const invoiceRes = await safePost<any>('/invoice/invoices', invoiceBody);
-    if (invoiceRes != null) {
-      if (typeof invoiceRes === 'string' && invoiceRes.trim()) {
-        invoiceId = invoiceRes.trim();
-      } else {
-        const r = invoiceRes as any;
-        invoiceId =
-          r?.invoiceId ??
-          r?.InvoiceId ??
-          r?.id ??
-          r?.Id ??
-          r?.data?.invoiceId ??
-          r?.data?.InvoiceId ??
-          r?.data?.id ??
-          r?.data?.Id ??
-          r?.value?.invoiceId ??
-          r?.value?.id ??
-          r?.value?.Id ??
-          undefined;
-      }
-      if (invoiceId && input.items.length > 0) {
-        for (const item of input.items) {
-          const lineSubtotal = item.quantity * item.price;
-          const detailBody = {
-            invoiceId: String(invoiceId),
-            InvoiceId: String(invoiceId),
-            productId: String(item.productId),
-            ProductId: String(item.productId),
-            quantity: Number(item.quantity) || 0,
-            Quantity: Number(item.quantity) || 0,
-            subtotal: lineSubtotal,
-            Subtotal: lineSubtotal,
-          };
-          const postDetail = await safePost<any>(
-            '/invoicedetails/invoicedetails',
-            detailBody
-          );
-          if (postDetail === null) {
-            console.error(
-              '[orders-api] POST invoicedetails falló para productId',
-              item.productId
-            );
-          }
-        }
-      }
-    }
-
-    return { orderId, invoiceId };
+    return { orderId: createdOrderId, invoiceId };
   },
 
   /**
@@ -990,15 +1033,12 @@ export const ordersApi = {
   // Nota: getOrdersByUser se usa solo en la PWA (un vendedor). En el Admin usamos getAllOrders (todos los vendedores) + getOrderById; misma lógica de total/subtotal desde facturas.
 
   /**
-   * Obtiene un pedido por id. GET /orders/orders/{id} + detalles en paralelo.
+   * Obtiene un pedido por id. Los detalles ahora vienen en el propio payload de la orden.
    */
   async getOrderById(orderId: string): Promise<OrderForUI | null> {
-    const [raw, detailsFromApi] = await Promise.all([
-      safeGet<any>(`/orders/orders/${encodeURIComponent(orderId)}`),
-      ordersApi.getOrderDetailsByOrderIdRaw(orderId),
-    ]);
+    const raw = await safeGet<any>(`/orders/orders/${encodeURIComponent(orderId)}`);
     if (!raw) return null;
-    let details = detailsFromApi?.length ? detailsFromApi : [];
+    let details: any[] = [];
     if (!details.length && raw) {
       const nested =
         raw?.orderDetails ??
@@ -1039,11 +1079,20 @@ export const ordersApi = {
         if (!result.podUploaded) result.podUploaded = true;
       }
       if (result.total <= 0 || result.subtotal <= 0) {
-        const inv = invoice?.data ?? invoice?.value ?? invoice?.invoice ?? invoice;
-        let invTotal = Number(inv?.total ?? inv?.Total ?? inv?.amount ?? inv?.Amount ?? inv?.totalUsd ?? inv?.TotalUsd ?? 0);
+        const layers = peelInvoiceLayers(invoice);
+        const totalKeys = [
+          'total',
+          'Total',
+          'amount',
+          'Amount',
+          'totalUsd',
+          'TotalUsd',
+          'totalAmount',
+          'TotalAmount',
+        ];
+        let invTotal = firstPositiveNumericFromLayers(layers, totalKeys);
         if (invTotal <= 0) {
-          const details = inv?.invoiceDetails ?? inv?.InvoiceDetails ?? inv?.details ?? inv?.Details ?? inv?.items ?? inv?.Items ?? [];
-          const arr = Array.isArray(details) ? details : [];
+          const arr = normalizeDetailList(invoice);
           invTotal = arr.reduce((s: number, d: any) => s + Number(d?.subtotal ?? d?.Subtotal ?? d?.total ?? d?.Total ?? 0), 0);
         }
         if (invTotal > 0) {
@@ -1068,37 +1117,40 @@ export const ordersApi = {
   },
 
   /**
-   * Detalles de un pedido. GET /orderdetails/orderdetails/order/{orderId}
+   * Detalles de un pedido desde GET /orders/orders/{orderId}.
    */
   async getOrderDetailsByOrderIdRaw(orderId: string): Promise<any[]> {
-    const list = await safeGet<any>(
-      `/orderdetails/orderdetails/order/${encodeURIComponent(orderId)}`
-    );
+    const list = await safeGet<any>(`/orders/orders/${encodeURIComponent(orderId)}`);
     if (list == null) return [];
-    if (Array.isArray(list)) return list;
-    const arr =
-      list?.orderDetails ??
-      list?.OrderDetails ??
-      list?.details ??
-      list?.Details ??
+    const root =
+      list?.order ??
+      list?.Order ??
       list?.data ??
       list?.Data ??
-      list?.items ??
-      list?.Items ??
+      list?.value ??
+      list?.Value ??
+      list;
+    if (Array.isArray(root)) return root;
+    const arr =
+      root?.orderDetails ??
+      root?.OrderDetails ??
+      root?.details ??
+      root?.Details ??
+      root?.items ??
+      root?.Items ??
       [];
     return Array.isArray(arr) ? arr : [];
   },
 
   /**
-   * Detalles de factura por invoiceId. GET /invoicedetails/invoicedetails/invoice/{invoiceId}
+   * Detalles de factura por invoiceId desde GET /invoice/invoices/{invoiceId}.
+   * El backend devuelve la factura con sus detalles anidados.
    */
   async getInvoiceDetailsByInvoiceId(invoiceId: string): Promise<any[]> {
     const id = String(invoiceId).trim();
     if (!id) return [];
-    const res = await safeGet<any>(
-      `/invoicedetails/invoicedetails/invoice/${encodeURIComponent(id)}`
-    );
-    return normalizeDetailList(res ?? null);
+    const invoice = await getInvoiceById(id);
+    return normalizeDetailList(invoice ?? null);
   },
 
   /**
@@ -1108,32 +1160,24 @@ export const ordersApi = {
   async getInvoiceTotalForOrder(orderId: string): Promise<number> {
     const raw = await ordersApi.getInvoiceForOrder(orderId);
     if (!raw) return 0;
-    const inv = raw?.data ?? raw?.value ?? raw?.invoice ?? raw;
-    let total = Number(
-      inv?.totalUsd ??
-        inv?.TotalUsd ??
-        inv?.amountUsd ??
-        inv?.AmountUsd ??
-        inv?.total ??
-        inv?.Total ??
-        inv?.amount ??
-        inv?.Amount ??
-        inv?.totalAmount ??
-        inv?.TotalAmount ??
-        inv?.grandTotal ??
-        inv?.GrandTotal ??
-        0
-    );
+    const layers = peelInvoiceLayers(raw);
+    const totalKeys = [
+      'totalUsd',
+      'TotalUsd',
+      'amountUsd',
+      'AmountUsd',
+      'total',
+      'Total',
+      'amount',
+      'Amount',
+      'totalAmount',
+      'TotalAmount',
+      'grandTotal',
+      'GrandTotal',
+    ];
+    let total = firstPositiveNumericFromLayers(layers, totalKeys);
     if (total <= 0) {
-      const details =
-        inv?.invoiceDetails ??
-        inv?.InvoiceDetails ??
-        inv?.details ??
-        inv?.Details ??
-        inv?.items ??
-        inv?.Items ??
-        [];
-      const arr = Array.isArray(details) ? details : [];
+      const arr = normalizeDetailList(raw);
       total = arr.reduce(
         (s: number, d: any) =>
           s +
@@ -1154,7 +1198,7 @@ export const ordersApi = {
   /**
    * Datos de la factura para pantalla (igual que en la PWA).
    * - Factura: GET /invoice/invoices/{id} cuando hay invoiceId.
-   * - Detalles: del cuerpo de la factura o GET /invoicedetails/invoicedetails/invoice/{id}.
+   * - Detalles: del cuerpo de la factura (anidados en la misma respuesta).
    */
   /** Igual que PWA: datos de factura para pantalla (invoiceNumber, date, total, items). */
   async getInvoiceDisplayForOrder(
@@ -1211,13 +1255,21 @@ export const ordersApi = {
     }
     if (!invId) return null;
 
-    if (!invoice) invoice = await getInvoiceById(invId);
-    if (invoice?.data && typeof invoice.data === 'object')
-      invoice = invoice.data;
-    if (invoice?.invoice && typeof invoice.invoice === 'object')
-      invoice = invoice.invoice;
+    const invoiceById = await getInvoiceById(invId);
+    const rawForInvoice = invoiceById ?? invoice;
+    if (rawForInvoice == null) return null;
+    const layers = peelInvoiceLayers(rawForInvoice);
+    invoice =
+      layers[layers.length - 1] ??
+      rawForInvoice?.data ??
+      rawForInvoice?.Data ??
+      rawForInvoice?.invoice ??
+      rawForInvoice?.Invoice ??
+      rawForInvoice?.value ??
+      rawForInvoice?.Value ??
+      rawForInvoice;
 
-    let details = normalizeDetailList(invoice);
+    let details = normalizeDetailList(rawForInvoice);
     if (details.length === 0)
       details = await ordersApi.getInvoiceDetailsByInvoiceId(invId);
 
@@ -1277,35 +1329,68 @@ export const ordersApi = {
       })
     );
 
-    // Total: factura (incl. totalUsd/TotalUsd si el backend guarda el precio en dólares)
-    const total = Number(
-      invoice?.totalUsd ??
-        invoice?.TotalUsd ??
-        invoice?.amountUsd ??
-        invoice?.AmountUsd ??
-        invoice?.total ??
-        invoice?.Total ??
-        invoice?.amount ??
-        invoice?.Amount ??
-        0
-    );
+    const totalKeys = [
+      'totalUsd',
+      'TotalUsd',
+      'amountUsd',
+      'AmountUsd',
+      'total',
+      'Total',
+      'amount',
+      'Amount',
+      'totalAmount',
+      'TotalAmount',
+    ];
+    let total = firstPositiveNumericFromLayers(layers, totalKeys);
+    if (total <= 0) {
+      total = Number(
+        invoice?.totalUsd ??
+          invoice?.TotalUsd ??
+          invoice?.amountUsd ??
+          invoice?.AmountUsd ??
+          invoice?.total ??
+          invoice?.Total ??
+          invoice?.amount ??
+          invoice?.Amount ??
+          0
+      );
+    }
     const totalFromDetails = items.reduce((s, i) => s + i.amount, 0);
-    const subtotalFromInvoice = Number(
-      invoice?.subtotal ??
-        invoice?.Subtotal ??
-        invoice?.SubTotal ??
-        invoice?.totalBeforeTax ??
-        invoice?.TotalBeforeTax ??
-        0
-    );
+    const subtotalKeys = ['subtotal', 'Subtotal', 'SubTotal', 'totalBeforeTax', 'TotalBeforeTax'];
+    let subtotalFromInvoice = firstPositiveNumericFromLayers(layers, subtotalKeys);
+    if (subtotalFromInvoice <= 0) {
+      subtotalFromInvoice = Number(
+        invoice?.subtotal ??
+          invoice?.Subtotal ??
+          invoice?.SubTotal ??
+          invoice?.totalBeforeTax ??
+          invoice?.TotalBeforeTax ??
+          0
+      );
+    }
     const subtotal = subtotalFromInvoice > 0 ? subtotalFromInvoice : totalFromDetails;
-    const date =
-      invoice?.date ??
-      invoice?.Date ??
-      invoice?.createdAt ??
-      invoice?.CreatedAt ??
-      order?.date ??
-      new Date().toISOString();
+    const dateFields = ['date', 'Date', 'createdAt', 'CreatedAt', 'invoiceDate', 'InvoiceDate'];
+    let date: string | undefined;
+    for (const L of layers) {
+      if (!L || typeof L !== 'object') continue;
+      for (const k of dateFields) {
+        const v = (L as any)[k];
+        if (v != null && v !== '') {
+          date = typeof v === 'string' ? v : v instanceof Date ? v.toISOString() : String(v);
+          break;
+        }
+      }
+      if (date) break;
+    }
+    if (!date) {
+      date =
+        (invoice?.date ??
+          invoice?.Date ??
+          invoice?.createdAt ??
+          invoice?.CreatedAt ??
+          order?.date ??
+          new Date().toISOString()) as string;
+    }
     const invNumber =
       invoice?.invoiceNumber ??
       invoice?.InvoiceNumber ??
@@ -1313,21 +1398,102 @@ export const ordersApi = {
       invoice?.InvoiceId ??
       invId;
 
-    const pod = getPodFromInvoice(invoice);
+    const pod = getPodFromInvoice(rawForInvoice);
+    const dateOut = (typeof date === 'string' && date ? date : new Date().toISOString()) as string;
     return {
       invoiceNumber: String(invNumber),
-      date:
-        typeof date === 'string'
-          ? date
-          : date instanceof Date
-          ? date.toISOString()
-          : new Date().toISOString(),
+      date: dateOut,
       total: total > 0 ? total : totalFromDetails,
       subtotal: subtotal > 0 ? subtotal : totalFromDetails,
       storeId: invoice?.storeId ?? invoice?.StoreId ?? order?.storeId,
       items,
       pod: pod || undefined,
     };
+  },
+
+  /**
+   * Obtiene discrepancias entre lo pedido (Order) y lo entregado (Invoice).
+   * Prueba GET /orders/dicrepancies/{id} (typo histórico) y /orders/discrepancies/{id}.
+   */
+  async getOrderDiscrepancies(orderId: string): Promise<OrderDiscrepancyItem[]> {
+    const id = String(orderId || '').trim();
+    if (!id) return [];
+
+    let raw = await safeGet<any>(
+      `/orders/dicrepancies/${encodeURIComponent(id)}`
+    );
+    if (raw == null) {
+      raw = await safeGet<any>(
+        `/orders/discrepancies/${encodeURIComponent(id)}`
+      );
+    }
+    if (!raw) return [];
+
+    const list = Array.isArray(raw)
+      ? raw
+      : raw?.results ??
+        raw?.Results ??
+        raw?.data ??
+        raw?.Data ??
+        raw?.items ??
+        raw?.Items ??
+        raw?.value ??
+        raw?.Value ??
+        [];
+    const rows = Array.isArray(list) ? list : [];
+
+    return rows.map((r: any) => {
+      const orderedQty = Number(
+        r?.orderedQty ??
+          r?.OrderedQty ??
+          r?.orderQty ??
+          r?.OrderQty ??
+          r?.quantityOrdered ??
+          r?.QuantityOrdered ??
+          r?.requested ??
+          r?.Requested ??
+          0
+      ) || 0;
+      const deliveredQty = Number(
+        r?.deliveredQty ??
+          r?.DeliveredQty ??
+          r?.invoiceQty ??
+          r?.InvoiceQty ??
+          r?.quantityDelivered ??
+          r?.QuantityDelivered ??
+          r?.received ??
+          r?.Received ??
+          0
+      ) || 0;
+      const differenceRaw = Number(
+        r?.difference ??
+          r?.Difference ??
+          r?.delta ??
+          r?.Delta ??
+          Number.NaN
+      );
+      const difference = Number.isFinite(differenceRaw)
+        ? differenceRaw
+        : orderedQty - deliveredQty;
+
+      return {
+        productId: String(
+          r?.productId ?? r?.ProductId ?? r?.id ?? r?.Id ?? ''
+        ).trim(),
+        sku: String(r?.sku ?? r?.Sku ?? '').trim() || undefined,
+        productName:
+          String(
+            r?.productName ??
+              r?.ProductName ??
+              r?.description ??
+              r?.Description ??
+              ''
+          ).trim() || undefined,
+        orderedQty,
+        deliveredQty,
+        difference,
+      };
+    });
   },
 
   /**
@@ -1405,211 +1571,10 @@ export const ordersApi = {
     input: CreateOrderInput,
     optionalInvoiceId?: string | number | null
   ): Promise<boolean> {
-    const id = String(orderId).trim();
-    const existingOrder = await safeGet<any>(`/orders/orders/${encodeURIComponent(id)}`);
-    let salespersonId = input.salespersonId;
-    if (!salespersonId && existingOrder) {
-      salespersonId =
-        existingOrder.salespersonId ??
-        existingOrder.SalespersonId ??
-        existingOrder.userId ??
-        existingOrder.UserId;
-      if (salespersonId != null) salespersonId = String(salespersonId);
-    }
-    const headerBody: Record<string, unknown> = {
-      storeId: input.storeId,
-      StoreId: input.storeId,
-      status: 'pending',
-      Status: 'pending',
-      subtotal: input.subtotal,
-      Subtotal: input.subtotal,
-      tax: input.tax ?? 0,
-      Tax: input.tax ?? 0,
-      total: input.total,
-      Total: input.total,
-    };
-    if (salespersonId) {
-      headerBody.salespersonId = salespersonId;
-      headerBody.SalespersonId = salespersonId;
-    }
-    const poTrimmed = (input.po ?? '').trim();
-    if (poTrimmed) {
-      headerBody.po = poTrimmed;
-      headerBody.Po = poTrimmed;
-    }
-    const putOrderRes = await safePut<any>(`/orders/order/${encodeURIComponent(id)}`, headerBody);
-    if (putOrderRes === null) return false;
-
-    const existingDetails = await ordersApi.getOrderDetailsByOrderIdRaw(id);
-    const byProductId = new Map<string, { id: string; detail: any }>();
-    existingDetails.forEach((d: any) => {
-      const pid = String(d?.productId ?? d?.ProductId ?? '').trim();
-      const detailId = d?.id ?? d?.Id ?? d?.orderDetailId ?? d?.OrderDetailId;
-      if (pid && detailId != null) byProductId.set(pid, { id: String(detailId), detail: d });
-    });
-
-    const newProductIds = new Set(input.items.map((i) => String(i.productId)));
-    for (const item of input.items) {
-      const pid = String(item.productId).trim();
-      const detailBody = {
-        orderId: id,
-        OrderId: id,
-        productId: item.productId,
-        ProductId: item.productId,
-        quantity: item.quantity,
-        Quantity: item.quantity,
-        unitPrice: item.price,
-        UnitPrice: item.price,
-        subtotal: item.quantity * item.price,
-        Subtotal: item.quantity * item.price,
-      };
-      const existing = byProductId.get(pid);
-      if (existing) {
-        const putRes = await safePut<any>(
-          `/orderdetails/orderdetails/${encodeURIComponent(existing.id)}`,
-          detailBody
-        );
-        if (putRes === null) return false;
-      } else {
-        await safePost<any>('/orderdetails/orderdetails', detailBody);
-      }
-    }
-    for (const [pid, { id: detailId, detail }] of byProductId) {
-      if (!newProductIds.has(pid)) {
-        const productId = detail?.productId ?? detail?.ProductId ?? pid;
-        const zeroBody = {
-          orderId: id,
-          OrderId: id,
-          productId,
-          ProductId: productId,
-          quantity: 0,
-          Quantity: 0,
-          unitPrice: 0,
-          UnitPrice: 0,
-          subtotal: 0,
-          Subtotal: 0,
-        };
-        const putRes = await safePut<any>(
-          `/orderdetails/orderdetails/${encodeURIComponent(detailId)}`,
-          zeroBody
-        );
-        if (putRes === null) return false;
-      }
-    }
-
-    let invoiceId: string | number | null = null;
-    if (existingOrder) {
-      const fromOrder =
-        existingOrder.invoiceId ??
-        existingOrder.InvoiceId ??
-        existingOrder.invoice?.id ??
-        existingOrder.invoice?.Id ??
-        (Array.isArray(existingOrder.invoices) ? existingOrder.invoices[0]?.id : null) ??
-        (Array.isArray(existingOrder.Invoices) ? existingOrder.Invoices[0]?.id : null);
-      if (fromOrder != null) invoiceId = String(fromOrder);
-    }
-    if (invoiceId == null) invoiceId = await ordersApi.getInvoiceIdForOrder(id);
-    if (invoiceId == null && optionalInvoiceId != null && optionalInvoiceId !== '')
-      invoiceId = String(optionalInvoiceId);
-
-    if (invoiceId != null) {
-      const invIdStr = String(invoiceId).trim();
-      const rawInv = await getInvoiceById(invIdStr) ?? await ordersApi.getInvoiceForOrder(id);
-      const existingInv = rawInv?.data ?? rawInv?.invoice ?? rawInv?.value ?? rawInv;
-      const invBody: Record<string, unknown> = {
-        id: invIdStr,
-        Id: invIdStr,
-        orderId: id,
-        OrderId: id,
-        storeId: input.storeId,
-        StoreId: input.storeId,
-        total: Number(input.total),
-        Total: Number(input.total),
-        subtotal: Number(input.subtotal),
-        Subtotal: Number(input.subtotal),
-        tax: Number(input.tax ?? 0),
-        Tax: Number(input.tax ?? 0),
-      };
-      if (existingInv && typeof existingInv === 'object') {
-        for (const [k, v] of Object.entries(existingInv)) {
-          if (v === null || v === undefined) continue;
-          if (typeof v === 'object' && !Array.isArray(v)) continue;
-          if (Array.isArray(v)) continue;
-          if (invBody[k] === undefined) invBody[k] = v;
-        }
-      }
-      const putInvRes = await safePut<any>(`/invoice/invoices/${encodeURIComponent(invIdStr)}`, invBody);
-      if (putInvRes === null) return false;
-
-      const invDetailsList = await ordersApi.getInvoiceDetailsByInvoiceId(invIdStr);
-      const invByProduct = new Map<string, { id: string; detail: any }>();
-      invDetailsList.forEach((d: any) => {
-        const dPid = String(d?.productId ?? d?.ProductId ?? '').trim();
-        const did =
-          d?.id ?? d?.Id ?? d?.invoiceDetailId ?? d?.InvoiceDetailId;
-        if (dPid && did != null) invByProduct.set(dPid, { id: String(did), detail: d });
-      });
-
-      for (const item of input.items) {
-        const pid = String(item.productId).trim();
-        const lineSubtotal = item.quantity * item.price;
-        const existing = invByProduct.get(pid);
-        if (existing) {
-          const detailBody = {
-            id: existing.id,
-            Id: existing.id,
-            invoiceId: invIdStr,
-            InvoiceId: invIdStr,
-            productId: item.productId,
-            ProductId: item.productId,
-            quantity: Number(item.quantity),
-            Quantity: Number(item.quantity),
-            subtotal: Number(lineSubtotal),
-            Subtotal: Number(lineSubtotal),
-          };
-          const putDetailRes = await safePut<any>(
-            `/invoicedetails/invoicedetails/${encodeURIComponent(existing.id)}`,
-            detailBody
-          );
-          if (putDetailRes === null) return false;
-        } else {
-          const postBody = {
-            invoiceId: invIdStr,
-            InvoiceId: invIdStr,
-            productId: item.productId,
-            ProductId: item.productId,
-            quantity: Number(item.quantity),
-            Quantity: Number(item.quantity),
-            subtotal: Number(lineSubtotal),
-            Subtotal: Number(lineSubtotal),
-          };
-          const postRes = await safePost<any>('/invoicedetails/invoicedetails', postBody);
-          if (postRes === null) return false;
-        }
-      }
-      for (const [pid, { id: detailId, detail }] of invByProduct) {
-        if (!newProductIds.has(pid)) {
-          const zeroBody = {
-            id: detailId,
-            Id: detailId,
-            invoiceId: invIdStr,
-            InvoiceId: invIdStr,
-            productId: detail?.productId ?? detail?.ProductId ?? pid,
-            ProductId: detail?.productId ?? detail?.ProductId ?? pid,
-            quantity: 0,
-            Quantity: 0,
-            subtotal: 0,
-            Subtotal: 0,
-          };
-          const putZeroRes = await safePut<any>(
-            `/invoicedetails/invoicedetails/${encodeURIComponent(detailId)}`,
-            zeroBody
-          );
-          if (putZeroRes === null) return false;
-        }
-      }
-    }
-    return true;
+    void orderId;
+    void input;
+    void optionalInvoiceId;
+    return false;
   },
 
   /**
@@ -1644,7 +1609,7 @@ export const ordersApi = {
 
   /**
    * Obtiene todas las facturas con sus detalles para reportes de ventas (admin).
-   * Usa GET /invoice/invoices y GET /invoicedetails/invoicedetails/invoice/{id}.
+   * Usa GET /invoice/invoices y, cuando haga falta, GET /invoice/invoices/{id}.
    */
   async getInvoicesForSalesReport(): Promise<
     Array<{

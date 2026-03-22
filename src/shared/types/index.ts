@@ -138,7 +138,7 @@ export interface Order {
   storeId: string;
   createdAt: Date;
   po: string;
-  status: 'completed' | 'pending';
+  status: 'initial' | 'confirmed' | 'invoiced' | 'completed' | 'pending' | 'delivered';
   storeName?: string;
   sellerName?: string;
   planogramId?: string;

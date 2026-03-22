@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/shared/components/base/Button';
 import { Input } from '@/shared/components/base/Input';
@@ -20,6 +20,7 @@ import {
   Download,
   Calendar,
   Package,
+  DollarSign,
   User as UserIcon,
   Store as StoreIcon,
   AlertCircle,
@@ -52,7 +53,6 @@ import ExcelJS from 'exceljs';
 import { toast } from 'sonner';
 import { OrderDetailView } from './OrderDetailView';
 import { OrderPlanogramView } from './components/OrderPlanogramView';
-import { EditOrderPlanogram } from './components/EditOrderPlanogram';
 
 interface OrderManagementProps {
   onBack?: () => void;
@@ -75,6 +75,19 @@ export function OrderManagement({ onBack }: OrderManagementProps) {
   const [planogramDialogMode, setPlanogramDialogMode] = useState<'view' | 'edit'>('view');
   const [orderToDelete, setOrderToDelete] = useState<Order | null>(null);
   const [deletingOrderId, setDeletingOrderId] = useState<string | null>(null);
+  const [shortageStats, setShortageStats] = useState<{
+    affectedOrders: number;
+    affectedLines: number;
+    totalOrdered: number;
+    totalDelivered: number;
+    totalMissing: number;
+  }>({
+    affectedOrders: 0,
+    affectedLines: 0,
+    totalOrdered: 0,
+    totalDelivered: 0,
+    totalMissing: 0,
+  });
 
   const [filters, setFilters] = useState<OrderFilters>({
     dateFrom: '',
@@ -91,6 +104,16 @@ export function OrderManagement({ onBack }: OrderManagementProps) {
   useEffect(() => {
     applyFilters();
   }, [orders, searchTerm, filters]);
+
+  const getOrderLifecycleStatus = (orderLike: {
+    status?: string;
+    invoiceId?: string | number;
+  }): 'initial' | 'confirmed' | 'invoiced' => {
+    const s = String(orderLike?.status || '').toLowerCase().trim();
+    if (s === 'invoiced' || s === 'delivered') return 'invoiced';
+    if (s === 'completed' || s === 'confirmed') return 'confirmed';
+    return 'initial';
+  };
 
   const loadData = async () => {
     try {
@@ -119,10 +142,12 @@ export function OrderManagement({ onBack }: OrderManagementProps) {
       // Mapear al tipo Order del Admin (total/subtotal ya vienen de getAllOrders)
       const mappedOrders: Order[] = apiOrders.map((o) => {
         const rawStatus = (o.status || '').toLowerCase();
-        const normalizedStatus: 'completed' | 'pending' =
-          rawStatus === 'completed' || rawStatus === 'invoiced' || rawStatus === 'delivered'
-            ? 'completed'
-            : 'pending';
+        const normalizedStatus: 'initial' | 'confirmed' | 'invoiced' =
+          rawStatus === 'invoiced' || rawStatus === 'delivered'
+            ? 'invoiced'
+            : rawStatus === 'completed' || rawStatus === 'confirmed'
+            ? 'confirmed'
+            : 'initial';
         const total = Number(o.total) || 0;
         const subtotal = Number(o.subtotal) || 0 || total;
 
@@ -141,7 +166,7 @@ export function OrderManagement({ onBack }: OrderManagementProps) {
           total,
           notes: undefined,
           updatedAt: new Date(o.date),
-          completedAt: normalizedStatus === 'completed' ? new Date(o.date) : undefined,
+          completedAt: normalizedStatus !== 'initial' ? new Date(o.date) : undefined,
           items: [],
         };
       });
@@ -211,6 +236,50 @@ export function OrderManagement({ onBack }: OrderManagementProps) {
       setUsers(allUsers.filter((u: User) => u.role === 'user')); // Solo vendedores
       setProducts(productsData);
       setPlanograms(planogramsData);
+
+      const invoicedForDiscrepancies = enrichedOrders.filter((o) => {
+        const lifecycle = getOrderLifecycleStatus(o);
+        return lifecycle === 'invoiced' || !!(o as any).invoiceId;
+      });
+      if (invoicedForDiscrepancies.length > 0) {
+        const rowsByOrder = await Promise.all(
+          invoicedForDiscrepancies.map(async (o) => {
+            const rows = await ordersApi.getOrderDiscrepancies(o.id);
+            return { orderId: o.id, rows };
+          })
+        );
+        let affectedOrders = 0;
+        let affectedLines = 0;
+        let totalOrdered = 0;
+        let totalDelivered = 0;
+        let totalMissing = 0;
+        rowsByOrder.forEach(({ rows }) => {
+          const nonZero = rows.filter((r) => Number(r.difference) !== 0);
+          if (nonZero.length > 0) affectedOrders += 1;
+          affectedLines += nonZero.length;
+          rows.forEach((r) => {
+            totalOrdered += Number(r.orderedQty || 0);
+            totalDelivered += Number(r.deliveredQty || 0);
+            const diff = Number(r.difference || 0);
+            if (diff > 0) totalMissing += diff;
+          });
+        });
+        setShortageStats({
+          affectedOrders,
+          affectedLines,
+          totalOrdered,
+          totalDelivered,
+          totalMissing,
+        });
+      } else {
+        setShortageStats({
+          affectedOrders: 0,
+          affectedLines: 0,
+          totalOrdered: 0,
+          totalDelivered: 0,
+          totalMissing: 0,
+        });
+      }
     } catch (error) {
       console.error('Error cargando datos:', error);
       toast.error(translate('errorLoadData'));
@@ -251,7 +320,9 @@ export function OrderManagement({ onBack }: OrderManagementProps) {
     }
 
     if (filters.status && filters.status !== 'all') {
-      filtered = filtered.filter(order => order.status === filters.status);
+      filtered = filtered.filter(
+        (order) => getOrderLifecycleStatus(order) === filters.status
+      );
     }
 
     // Ordenar por fecha: más recientes primero
@@ -262,18 +333,25 @@ export function OrderManagement({ onBack }: OrderManagementProps) {
 
   const getStatusBadge = (status: string) => {
     switch (status) {
-      case 'completed':
+      case 'invoiced':
         return (
           <Badge className="bg-green-100 text-green-800 border-green-200">
             <CheckCircle className="h-3 w-3 mr-1" />
-            {translate('completedStatus')}
+            {translate('statusInvoiced')}
           </Badge>
         );
-      case 'pending':
+      case 'confirmed':
+        return (
+          <Badge className="bg-blue-100 text-blue-800 border-blue-200">
+            <FileText className="h-3 w-3 mr-1" />
+            {translate('confirmedStatus')}
+          </Badge>
+        );
+      case 'initial':
         return (
           <Badge className="bg-yellow-100 text-yellow-800 border-yellow-200">
             <Clock className="h-3 w-3 mr-1" />
-            {translate('pendingStatus')}
+            {translate('initialStatus')}
           </Badge>
         );
       default:
@@ -283,9 +361,11 @@ export function OrderManagement({ onBack }: OrderManagementProps) {
 
   const getStatusIcon = (status: string) => {
     switch (status) {
-      case 'completed':
+      case 'invoiced':
         return <CheckCircle className="h-4 w-4" />;
-      case 'pending':
+      case 'confirmed':
+        return <FileText className="h-4 w-4" />;
+      case 'initial':
         return <Clock className="h-4 w-4" />;
       default:
         return <AlertCircle className="h-4 w-4" />;
@@ -307,43 +387,13 @@ export function OrderManagement({ onBack }: OrderManagementProps) {
     }
   };
 
-  const handleEditOrder = (order: Order) => {
-    if (order.status === 'completed') {
-      toast.error(translate('cannotEditCompletedOrder'));
-      return;
-    }
-    setSelectedOrder(order);
-    setPlanogramDialogMode('edit');
-    setShowPlanogramDialog(true);
-  };
-
-  const handleEditOrderSaved = (orderId: string) => {
-    setShowPlanogramDialog(false);
-    loadData();
-    setSelectedOrder({
-      id: orderId,
-      storeId: '',
-      createdAt: new Date(),
-      po: orderId as string,
-      status: 'pending',
-      storeName: '',
-      sellerName: undefined,
-      planogramId: undefined,
-      planogramName: undefined,
-      subtotal: 0,
-      total: 0,
-      notes: undefined,
-      updatedAt: new Date(),
-      completedAt: undefined,
-      items: [],
-      salespersonId: '',
-    } as Order);
-    setShowOrderDetail(true);
+  const handleEditDisabled = () => {
+    toast.error('La edicion de pedidos esta bloqueada.');
   };
 
   const handleDeleteOrderClick = (order: Order, e: React.MouseEvent) => {
     e.stopPropagation();
-    if ((order.status || '').toLowerCase() !== 'pending') {
+    if ((order.status || '').toLowerCase() !== 'initial') {
       toast.error(translate('onlyDeletePendingOrders'));
       return;
     }
@@ -364,9 +414,9 @@ export function OrderManagement({ onBack }: OrderManagementProps) {
     }
   };
 
-  const exportOrders = async () => {
+  const exportOrders = async (scope: 'all' | 'initial' | 'invoiced' = 'all') => {
     try {
-      const sectionStyle = { font: { bold: true, size: 11 } };
+      const sectionFont = { bold: true, size: 11 };
       const headerFill = { type: 'pattern' as const, pattern: 'solid' as const, fgColor: { argb: 'FF1E293B' } };
       const headerFont = { color: { argb: 'FFFFFFFF' as const }, bold: true };
 
@@ -396,7 +446,7 @@ export function OrderManagement({ onBack }: OrderManagementProps) {
       row += 2;
 
       ws.getCell(row, 1).value = translate('ordersDetailSection');
-      ws.getCell(row, 1).font = sectionStyle;
+      ws.getCell(row, 1).font = sectionFont;
       row += 1;
 
       const orderHeaders = [
@@ -418,17 +468,30 @@ export function OrderManagement({ onBack }: OrderManagementProps) {
       });
       row += 1;
 
+      const exportRows =
+        scope === 'all'
+          ? filteredOrders
+          : filteredOrders.filter((o) => getOrderLifecycleStatus(o) === scope);
       let sumSubtotal = 0;
       let sumTotal = 0;
-      for (const o of filteredOrders) {
+      for (const o of exportRows) {
         const subtotal = Number(o.subtotal ?? 0);
         const total = Number(o.total ?? 0);
         sumSubtotal += subtotal;
         sumTotal += total;
-        const statusLabel = (o.status || '').toLowerCase() === 'completed' ? translate('statusCompleted') : translate('statusPending');
+        const lifecycle = getOrderLifecycleStatus({
+          status: (o as any).status,
+          invoiceId: (o as any).invoiceId,
+        });
+        const statusLabel =
+          lifecycle === 'invoiced'
+            ? translate('statusInvoiced')
+            : lifecycle === 'confirmed'
+            ? translate('confirmedStatus')
+            : translate('initialStatus');
         ws.getCell(row, 1).value = (o as any).po ?? o.id ?? '';
         ws.getCell(row, 2).value = o.id ?? '';
-        ws.getCell(row, 3).value = new Date((o as any).createdAt ?? o.date).toLocaleDateString(locale, { day: '2-digit', month: '2-digit', year: 'numeric' });
+        ws.getCell(row, 3).value = new Date((o as any).createdAt ?? new Date().toISOString()).toLocaleDateString(locale, { day: '2-digit', month: '2-digit', year: 'numeric' });
         ws.getCell(row, 4).value = statusLabel;
         ws.getCell(row, 5).value = (o as any).storeName ?? '';
         ws.getCell(row, 6).value = (o as any).sellerName ?? '';
@@ -440,17 +503,20 @@ export function OrderManagement({ onBack }: OrderManagementProps) {
       row += 1;
 
       ws.getCell(row, 1).value = translate('ordersSummarySection');
-      ws.getCell(row, 1).font = sectionStyle;
+      ws.getCell(row, 1).font = sectionFont;
       row += 1;
       ws.getCell(row, 1).value = translate('ordersTotalExported');
       ws.getCell(row, 1).font = { bold: true };
-      ws.getCell(row, 2).value = filteredOrders.length;
+      ws.getCell(row, 2).value = exportRows.length;
       row += 1;
-      ws.getCell(row, 1).value = translate('statusPending');
-      ws.getCell(row, 2).value = filteredOrders.filter((o) => (o.status || '').toLowerCase() === 'pending').length;
+      ws.getCell(row, 1).value = translate('initialStatus');
+      ws.getCell(row, 2).value = exportRows.filter((o) => getOrderLifecycleStatus(o) === 'initial').length;
       row += 1;
-      ws.getCell(row, 1).value = translate('statusCompleted');
-      ws.getCell(row, 2).value = filteredOrders.filter((o) => (o.status || '').toLowerCase() === 'completed').length;
+      ws.getCell(row, 1).value = translate('confirmedStatus');
+      ws.getCell(row, 2).value = exportRows.filter((o) => getOrderLifecycleStatus(o) === 'confirmed').length;
+      row += 1;
+      ws.getCell(row, 1).value = translate('statusInvoiced');
+      ws.getCell(row, 2).value = exportRows.filter((o) => getOrderLifecycleStatus(o) === 'invoiced').length;
       row += 1;
       ws.getCell(row, 1).value = translate('ordersSumSubtotals');
       ws.getCell(row, 2).value = Number(sumSubtotal.toFixed(2));
@@ -472,7 +538,13 @@ export function OrderManagement({ onBack }: OrderManagementProps) {
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
-      link.download = `Informe_Pedidos_${now.toISOString().slice(0, 10)}.xlsx`;
+      const scopeSuffix =
+        scope === 'initial'
+          ? 'Iniciales'
+          : scope === 'invoiced'
+          ? 'Facturados'
+          : 'Todos';
+      link.download = `Informe_Pedidos_${scopeSuffix}_${now.toISOString().slice(0, 10)}.xlsx`;
       link.click();
       URL.revokeObjectURL(url);
       toast.success(translate('ordersExportedSuccess'));
@@ -501,6 +573,30 @@ export function OrderManagement({ onBack }: OrderManagementProps) {
     }
   };
 
+  const orderMetrics = useMemo(() => {
+    const source = filteredOrders.length > 0 ? filteredOrders : orders;
+    const totalOrders = source.length;
+    const initialCount = source.filter((o) => getOrderLifecycleStatus(o) === 'initial').length;
+    const confirmedCount = source.filter((o) => getOrderLifecycleStatus(o) === 'confirmed').length;
+    const invoicedCount = source.filter((o) => getOrderLifecycleStatus(o) === 'invoiced').length;
+    const totalValue = source.reduce((sum, o) => sum + (Number(o.total) || 0), 0);
+    const avgTicket = totalOrders > 0 ? totalValue / totalOrders : 0;
+    const deliveryRate =
+      shortageStats.totalOrdered > 0
+        ? (shortageStats.totalDelivered / shortageStats.totalOrdered) * 100
+        : 0;
+    return {
+      totalOrders,
+      initialCount,
+      confirmedCount,
+      invoicedCount,
+      totalValue,
+      avgTicket,
+      deliveryRate,
+      missingUnits: shortageStats.totalMissing,
+    };
+  }, [orders, filteredOrders, shortageStats]);
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -519,75 +615,126 @@ export function OrderManagement({ onBack }: OrderManagementProps) {
         </div>
         
         <div className="flex items-center gap-2">
-          <Button variant="outline" onClick={exportOrders}>
+          <Button variant="outline" onClick={() => exportOrders('all')}>
             <Download className="h-4 w-4 mr-2" />
-            {translate('export')}
+            {translate('export')} (Todo)
+          </Button>
+          <Button variant="outline" onClick={() => exportOrders('initial')}>
+            <Download className="h-4 w-4 mr-2" />
+            {translate('initialStatus')}
+          </Button>
+          <Button variant="outline" onClick={() => exportOrders('invoiced')}>
+            <Download className="h-4 w-4 mr-2" />
+            {translate('statusInvoiced')}
           </Button>
         </div>
       </div>
 
-      {/* Stats Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-        <Card className="hover:shadow-md transition-all duration-200">
-          <div className="p-4">
+      {/* Metrics */}
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+        <Card className="border-slate-200">
+          <CardContent className="pt-4">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-xs font-medium text-gray-500">{translate('totalOrders')}</p>
-                <p className="text-2xl font-bold text-gray-900 mt-1">{orders.length}</p>
+                <p className="text-xs font-medium text-slate-500">{translate('totalOrders')}</p>
+                <p className="text-2xl font-bold text-slate-900">{orderMetrics.totalOrders}</p>
               </div>
-              <div className="p-2.5 bg-indigo-100 rounded-lg flex items-center justify-center">
+              <div className="rounded-lg bg-indigo-100 p-2.5">
                 <ShoppingCart className="h-5 w-5 text-indigo-600" />
               </div>
             </div>
-          </div>
+          </CardContent>
         </Card>
-
-        <Card className="hover:shadow-md transition-all duration-200">
-          <div className="p-4">
+        <Card className="border-slate-200">
+          <CardContent className="pt-4">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-xs font-medium text-gray-500">{translate('pending')}</p>
-                <p className="text-2xl font-bold text-yellow-600 mt-1">
-                  {orders.filter(o => o.status === 'pending').length}
-                </p>
+                <p className="text-xs font-medium text-slate-500">{translate('initialStatus')}</p>
+                <p className="text-2xl font-bold text-amber-700">{orderMetrics.initialCount}</p>
               </div>
-              <div className="p-2.5 bg-yellow-100 rounded-lg flex items-center justify-center">
-                <Clock className="h-5 w-5 text-yellow-600" />
+              <div className="rounded-lg bg-amber-100 p-2.5">
+                <Clock className="h-5 w-5 text-amber-600" />
               </div>
             </div>
-          </div>
+          </CardContent>
         </Card>
-
-        <Card className="hover:shadow-md transition-all duration-200">
-          <div className="p-4">
+        <Card className="border-slate-200">
+          <CardContent className="pt-4">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-xs font-medium text-gray-500">{translate('completed')}</p>
-                <p className="text-2xl font-bold text-green-600 mt-1">
-                  {orders.filter(o => o.status === 'completed').length}
-                </p>
+                <p className="text-xs font-medium text-slate-500">{translate('confirmedStatus')}</p>
+                <p className="text-2xl font-bold text-blue-700">{orderMetrics.confirmedCount}</p>
               </div>
-              <div className="p-2.5 bg-green-100 rounded-lg flex items-center justify-center">
+              <div className="rounded-lg bg-blue-100 p-2.5">
+                <FileText className="h-5 w-5 text-blue-600" />
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+        <Card className="border-slate-200">
+          <CardContent className="pt-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-xs font-medium text-slate-500">{translate('statusInvoiced')}</p>
+                <p className="text-2xl font-bold text-green-700">{orderMetrics.invoicedCount}</p>
+              </div>
+              <div className="rounded-lg bg-green-100 p-2.5">
                 <CheckCircle className="h-5 w-5 text-green-600" />
               </div>
             </div>
-          </div>
+          </CardContent>
         </Card>
-
-        <Card className="hover:shadow-md transition-all duration-200">
-          <div className="p-4">
+        <Card className="border-slate-200">
+          <CardContent className="pt-4">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-xs font-medium text-gray-500">{translate('totalValue')}</p>
-                <p className="text-2xl font-bold text-gray-900 mt-1">
-                  ${Number(orders.reduce((sum, o) => sum + (Number(o.total) || 0), 0)).toFixed(2)}
-                </p>
+                <p className="text-xs font-medium text-slate-500">{translate('totalValue')}</p>
+                <p className="text-2xl font-bold text-slate-900">${orderMetrics.totalValue.toFixed(2)}</p>
               </div>
-              <div className="p-2.5 bg-indigo-100 rounded-lg flex items-center justify-center">
-                <Package className="h-5 w-5 text-indigo-600" />
+              <div className="rounded-lg bg-slate-100 p-2.5">
+                <Package className="h-5 w-5 text-slate-700" />
               </div>
             </div>
-          </div>
+          </CardContent>
+        </Card>
+        <Card className="border-slate-200">
+          <CardContent className="pt-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-xs font-medium text-slate-500">Ticket promedio</p>
+                <p className="text-2xl font-bold text-slate-900">${orderMetrics.avgTicket.toFixed(2)}</p>
+              </div>
+              <div className="rounded-lg bg-violet-100 p-2.5">
+                <DollarSign className="h-5 w-5 text-violet-700" />
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+        <Card className="border-slate-200">
+          <CardContent className="pt-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-xs font-medium text-slate-500">Nivel de entrega</p>
+                <p className="text-2xl font-bold text-teal-700">{orderMetrics.deliveryRate.toFixed(1)}%</p>
+              </div>
+              <div className="rounded-lg bg-teal-100 p-2.5">
+                <CheckCircle className="h-5 w-5 text-teal-700" />
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+        <Card className="border-slate-200">
+          <CardContent className="pt-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-xs font-medium text-slate-500">Unidades faltantes</p>
+                <p className="text-2xl font-bold text-red-700">{orderMetrics.missingUnits}</p>
+              </div>
+              <div className="rounded-lg bg-red-100 p-2.5">
+                <AlertCircle className="h-5 w-5 text-red-600" />
+              </div>
+            </div>
+          </CardContent>
         </Card>
       </div>
 
@@ -647,16 +794,43 @@ export function OrderManagement({ onBack }: OrderManagementProps) {
                   <Filter className="h-4 w-4 mr-2" />
                   <SelectValue placeholder={translate('filterByStatus')}>
                     {filters.status === 'all' && translate('allStatuses')}
-                    {filters.status === 'pending' && translate('pendingStatus')}
-                    {filters.status === 'completed' && translate('completedStatus')}
+                    {filters.status === 'initial' && translate('initialStatus')}
+                    {filters.status === 'confirmed' && translate('confirmedStatus')}
+                    {filters.status === 'invoiced' && translate('statusInvoiced')}
                   </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">{translate('allStatuses')}</SelectItem>
-                  <SelectItem value="pending">{translate('pendingStatus')}</SelectItem>
-                  <SelectItem value="completed">{translate('completedStatus')}</SelectItem>
+                  <SelectItem value="initial">{translate('initialStatus')}</SelectItem>
+                  <SelectItem value="confirmed">{translate('confirmedStatus')}</SelectItem>
+                  <SelectItem value="invoiced">{translate('statusInvoiced')}</SelectItem>
                 </SelectContent>
               </Select>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card className="border-slate-200">
+        <CardContent className="pt-4">
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 text-sm">
+            <div>
+              <p className="text-slate-500">Pedidos con faltantes</p>
+              <p className="text-lg font-semibold text-slate-900">{shortageStats.affectedOrders}</p>
+            </div>
+            <div>
+              <p className="text-slate-500">Lineas con diferencia</p>
+              <p className="text-lg font-semibold text-amber-700">{shortageStats.affectedLines}</p>
+            </div>
+            <div>
+              <p className="text-slate-500">Pedido vs entregado</p>
+              <p className="text-lg font-semibold text-slate-900">
+                {shortageStats.totalOrdered} / {shortageStats.totalDelivered}
+              </p>
+            </div>
+            <div>
+              <p className="text-slate-500">Faltante neto</p>
+              <p className="text-lg font-semibold text-red-700">{shortageStats.totalMissing}</p>
             </div>
           </div>
         </CardContent>
@@ -713,7 +887,7 @@ export function OrderManagement({ onBack }: OrderManagementProps) {
                     <TableCell className="font-medium tabular-nums whitespace-nowrap">${Number(order.total ?? 0).toFixed(2)}</TableCell>
                     <TableCell onClick={(e) => e.stopPropagation()} className="whitespace-nowrap text-center">
                       <div className="flex items-center justify-center">
-                        {(order.status || '').toLowerCase() === 'completed' ? (
+                        {getOrderLifecycleStatus(order) === 'invoiced' ? (
                           <Button
                             variant="outline"
                             size="sm"
@@ -740,11 +914,11 @@ export function OrderManagement({ onBack }: OrderManagementProps) {
                                 <Eye className="h-4 w-4 shrink-0" />
                                 <span>{translate('viewOrderDetails')}</span>
                               </DropdownMenuItem>
-                              <DropdownMenuItem onClick={() => handleEditOrder(order)} className="gap-3 py-3 px-4 text-base text-slate-800 hover:bg-slate-100 cursor-pointer">
+                              <DropdownMenuItem onClick={handleEditDisabled} className="gap-3 py-3 px-4 text-base text-slate-500 hover:bg-slate-100 cursor-not-allowed">
                                 <Edit className="h-4 w-4 shrink-0" />
-                                <span>{translate('editOrder')}</span>
+                                <span>{translate('editOrder')} ({translate('inactive') || 'Bloqueado'})</span>
                               </DropdownMenuItem>
-                              {(order.status || '').toLowerCase() === 'pending' && (
+                              {getOrderLifecycleStatus(order) === 'initial' && (
                                 <DropdownMenuItem
                                   onClick={(e) => handleDeleteOrderClick(order, e as unknown as React.MouseEvent)}
                                   className="gap-3 py-3 px-4 text-base text-red-600 hover:bg-red-50 cursor-pointer"
@@ -821,13 +995,6 @@ export function OrderManagement({ onBack }: OrderManagementProps) {
       {/* Planogram Dialog (ver solo lectura o editar) */}
       <Dialog open={showPlanogramDialog} onOpenChange={setShowPlanogramDialog}>
         <DialogContent className="!w-[65vw] !max-w-[1200px] max-h-[90vh] overflow-y-auto p-0">
-          {selectedOrder && planogramDialogMode === 'edit' && (
-            <EditOrderPlanogram
-              order={selectedOrder}
-              onClose={() => setShowPlanogramDialog(false)}
-              onSaved={handleEditOrderSaved}
-            />
-          )}
           {selectedOrder && planogramDialogMode === 'view' && (
             <OrderPlanogramView
               order={selectedOrder}

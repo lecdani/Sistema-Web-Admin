@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Button } from '@/shared/components/base/Button';
 import { Input } from '@/shared/components/base/Input';
 import { Badge } from '@/shared/components/base/Badge';
@@ -16,6 +16,7 @@ import {
   Download,
   Upload,
   Layout,
+  Printer,
 } from 'lucide-react';
 import { useLanguage } from '@/shared/hooks/useLanguage';
 import { ordersApi, OrderForUI, isPoAlreadyUsed } from '@/shared/services/orders-api';
@@ -31,7 +32,7 @@ import { usersApi } from '@/shared/services/users-api';
 import { Invoice } from './components/Invoice';
 import { OrderPlanogramView } from './components/OrderPlanogramView';
 import { OrderCatalogGridView } from './components/OrderCatalogGridView';
-import type { Order } from '@/shared/types';
+import type { Order, Product } from '@/shared/types';
 
 interface OrderDetailViewProps {
   orderId: string;
@@ -62,7 +63,8 @@ export function OrderDetailView({ orderId, onClose, onOrderUpdated }: OrderDetai
   const [storeAddressDisplay, setStoreAddressDisplay] = useState<string>('');
   const [storeCityDisplay, setStoreCityDisplay] = useState<string>('');
   const [sellerNameDisplay, setSellerNameDisplay] = useState<string>('');
-  const [activeTab, setActiveTab] = useState('info');
+  const [activeTab, setActiveTab] = useState('summary');
+  const [productByNormCode, setProductByNormCode] = useState<Map<string, Product>>(new Map());
   const [editingPo, setEditingPo] = useState(false);
   const [poEditValue, setPoEditValue] = useState('');
   const [poSaveLoading, setPoSaveLoading] = useState(false);
@@ -74,6 +76,17 @@ export function OrderDetailView({ orderId, onClose, onOrderUpdated }: OrderDetai
   const [storeError, setStoreError] = useState<string | null>(null);
   const [allCategories, setAllCategories] = useState<{ id: string; name: string }[]>([]);
   const [storeHasPlanogram, setStoreHasPlanogram] = useState(true);
+  const [discrepancies, setDiscrepancies] = useState<
+    Array<{
+      productId: string;
+      sku?: string;
+      productName?: string;
+      orderedQty: number;
+      deliveredQty: number;
+      difference: number;
+    }>
+  >([]);
+  const [loadingDiscrepancies, setLoadingDiscrepancies] = useState(false);
 
   useEffect(() => {
     const load = async () => {
@@ -81,6 +94,8 @@ export function OrderDetailView({ orderId, onClose, onOrderUpdated }: OrderDetai
       if (!ord) {
         setOrder(null);
         setInvoiceDisplay(null);
+        setDiscrepancies([]);
+        setLoadingDiscrepancies(false);
         return;
       }
       const categoriesList = await categoriesApi.fetchAll();
@@ -201,6 +216,17 @@ export function OrderDetailView({ orderId, onClose, onOrderUpdated }: OrderDetai
 
       const inv = await ordersApi.getInvoiceDisplayForOrder(orderId, orderToSet.invoiceId);
       setInvoiceDisplay(inv);
+      const hasInvoice =
+        (orderToSet.invoiceId != null && String(orderToSet.invoiceId).trim() !== '') ||
+        !!inv;
+      if (hasInvoice) {
+        setLoadingDiscrepancies(true);
+        const rows = await ordersApi.getOrderDiscrepancies(orderId);
+        setDiscrepancies(rows);
+        setLoadingDiscrepancies(false);
+      } else {
+        setDiscrepancies([]);
+      }
       // Si la tienda seguía vacía pero la factura tiene storeId, resolver nombre de tienda
       const invStoreId = (inv?.storeId != null && inv?.storeId !== '') ? String(inv.storeId).trim() : '';
       if (!resolvedStoreName && invStoreId) {
@@ -232,6 +258,23 @@ export function OrderDetailView({ orderId, onClose, onOrderUpdated }: OrderDetai
     setPodImageError(false);
   }, [order?.podImageUrl, order?.podFileName, invoiceDisplay?.pod]);
 
+  useEffect(() => {
+    let m = true;
+    productsApi.fetchAll().then((list) => {
+      if (!m) return;
+      const map = new Map<string, Product>();
+      (list as Product[]).forEach((p) => {
+        const code = String((p as any).code || (p as any).sku || '').trim().toLowerCase().replace(/-/g, '');
+        if (code) map.set(code, p);
+        map.set(String(p.id).replace(/-/g, '').toLowerCase(), p);
+      });
+      setProductByNormCode(map);
+    });
+    return () => {
+      m = false;
+    };
+  }, []);
+
   if (!order) {
     return (
       <div className="p-8 text-center">
@@ -243,20 +286,28 @@ export function OrderDetailView({ orderId, onClose, onOrderUpdated }: OrderDetai
   const getStatusLabel = (status: string) => {
     const s = (status || '').toLowerCase().trim();
     const map: Record<string, string> = {
-      pending: translate('statusPending'),
-      completed: translate('statusCompleted'),
+      pending: translate('initialStatus'),
+      initial: translate('initialStatus'),
+      completed: translate('confirmedStatus'),
+      confirmed: translate('confirmedStatus'),
       invoiced: translate('statusInvoiced'),
       delivered: translate('statusDelivered'),
+      cancelled: translate('statusCancelled'),
+      canceled: translate('statusCancelled'),
     };
     return map[s] || status || '—';
   };
   const getStatusBadge = (status: string) => {
     const s = (status || '').toLowerCase().trim();
     const statusConfig: Record<string, { label: string; color: string }> = {
-      pending: { label: translate('statusPending'), color: 'bg-yellow-100 text-yellow-800' },
-      completed: { label: translate('statusCompleted'), color: 'bg-green-100 text-green-800' },
+      pending: { label: translate('initialStatus'), color: 'bg-yellow-100 text-yellow-800' },
+      initial: { label: translate('initialStatus'), color: 'bg-yellow-100 text-yellow-800' },
+      completed: { label: translate('confirmedStatus'), color: 'bg-blue-100 text-blue-800' },
+      confirmed: { label: translate('confirmedStatus'), color: 'bg-blue-100 text-blue-800' },
       invoiced: { label: translate('statusInvoiced'), color: 'bg-green-100 text-green-800' },
       delivered: { label: translate('statusDelivered'), color: 'bg-green-100 text-green-800' },
+      cancelled: { label: translate('statusCancelled'), color: 'bg-slate-200 text-slate-800' },
+      canceled: { label: translate('statusCancelled'), color: 'bg-slate-200 text-slate-800' },
     };
     const config = statusConfig[s] || { label: status || '—', color: 'bg-gray-100 text-gray-800' };
     return <Badge className={config.color}>{config.label}</Badge>;
@@ -358,7 +409,7 @@ export function OrderDetailView({ orderId, onClose, onOrderUpdated }: OrderDetai
     return d.includes(',') ? d : new Date(d).toLocaleDateString(locale);
   };
 
-  const isPendingOrder = (order?.status || '').toLowerCase() === 'pending';
+  const isPendingOrder = false;
   const handleStartEditPo = () => {
     setPoEditValue((order?.po ?? '').trim());
     setPoError(null);
@@ -484,6 +535,114 @@ export function OrderDetailView({ orderId, onClose, onOrderUpdated }: OrderDetai
     }
   };
 
+  const hasInvoiceLines = !!(invoiceDisplay?.items && invoiceDisplay.items.length > 0);
+
+  const categoryById = useMemo(() => {
+    const m = new Map<string, string>();
+    allCategories.forEach((c) => {
+      m.set(c.id, c.name);
+      m.set(String(Number(c.id)), c.name);
+    });
+    return m;
+  }, [allCategories]);
+
+  const resolveProductFamilyName = (p: Product | undefined): string => {
+    if (!p) return '';
+    const name = String((p as any).category || '').trim();
+    if (name) return name;
+    const cid = (p as any).categoryId != null ? String((p as any).categoryId) : '';
+    return cid ? categoryById.get(cid) ?? categoryById.get(String(Number(cid))) ?? '' : '';
+  };
+
+  const escapeCsvCell = (val: string): string => {
+    const s = String(val ?? '');
+    if (s.includes(',') || s.includes('"') || s.includes('\n') || s.includes('\r')) {
+      return `"${s.replace(/"/g, '""')}"`;
+    }
+    return s;
+  };
+
+  const downloadCsv = (filename: string, headers: string[], rows: string[][]) => {
+    const csvRows = [headers, ...rows].map((row) => row.map(escapeCsvCell).join(','));
+    const BOM = '\uFEFF';
+    const csv = BOM + csvRows.join('\r\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleExportInitialCsv = () => {
+    const headers = [translate('familyCol') || 'Family', translate('pcsCol') || 'Pcs'];
+    const rows = [...allCategories]
+      .sort((a, b) => a.name.localeCompare(b.name))
+      .map((cat) => {
+        const pcs = (order.items || []).reduce((sum: number, item: any) => {
+          const qty = item.quantity ?? item.toOrder ?? 0;
+          return (item.category || '').trim() === cat.name ? sum + qty : sum;
+        }, 0);
+        return [cat.name, String(pcs)];
+      });
+    downloadCsv(
+      `pedido-inicial-familias-${order.po || order.id}-${new Date().toISOString().slice(0, 10)}.csv`,
+      headers,
+      rows
+    );
+    toast.success('CSV');
+  };
+
+  const handleExportInvoiceLinesCsv = () => {
+    if (!invoiceDisplay?.items?.length) {
+      toast.message(translate('noInvoiceYetAdmin'));
+      return;
+    }
+    const headers = ['Code', 'Description', 'Qty', 'Price', 'Amount'];
+    const rows = invoiceDisplay.items.map((it) => [
+      String(it.code),
+      String(it.description),
+      String(it.qty),
+      String(it.price),
+      String(it.amount ?? it.qty * it.price),
+    ]);
+    downloadCsv(
+      `factura-lineas-${order.po || order.id}-${new Date().toISOString().slice(0, 10)}.csv`,
+      headers,
+      rows
+    );
+    toast.success('CSV');
+  };
+
+  const handleExportInvoiceFamilyCsv = () => {
+    if (!invoiceDisplay?.items?.length) {
+      toast.message(translate('noInvoiceYetAdmin'));
+      return;
+    }
+    const headers = [translate('familyCol') || 'Family', translate('pcsCol') || 'Pcs'];
+    const rows = [...allCategories]
+      .sort((a, b) => a.name.localeCompare(b.name))
+      .map((cat) => {
+        const pcs = invoiceDisplay.items!.reduce((sum, it) => {
+          const norm = String(it.code || '')
+            .trim()
+            .toLowerCase()
+            .replace(/-/g, '');
+          const p = productByNormCode.get(norm);
+          const fam = resolveProductFamilyName(p);
+          return fam === cat.name ? sum + (Number(it.qty) || 0) : sum;
+        }, 0);
+        return [cat.name, String(pcs)];
+      });
+    downloadCsv(
+      `factura-familias-${order.po || order.id}-${new Date().toISOString().slice(0, 10)}.csv`,
+      headers,
+      rows
+    );
+    toast.success('CSV');
+  };
+
   return (
     <div className="space-y-0">
       <div className="bg-gradient-to-r from-indigo-600 to-blue-600 rounded-t-lg p-6 text-white">
@@ -518,26 +677,22 @@ export function OrderDetailView({ orderId, onClose, onOrderUpdated }: OrderDetai
       </div>
 
       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-        <TabsList className="w-full justify-start h-auto p-0 bg-gray-50 border-b rounded-none">
-          <TabsTrigger value="info" className="flex items-center gap-2 px-6 py-3 rounded-none border-b-2 border-transparent data-[state=active]:border-indigo-600 data-[state=active]:bg-white data-[state=active]:text-indigo-600">
+        <TabsList className="w-full justify-start h-auto p-0 bg-gray-50 border-b rounded-none flex-wrap">
+          <TabsTrigger value="summary" className="flex items-center gap-2 px-6 py-3 rounded-none border-b-2 border-transparent data-[state=active]:border-indigo-600 data-[state=active]:bg-white data-[state=active]:text-indigo-600">
             <Package className="h-4 w-4" />
-            {translate('infoAndProducts')}
+            {translate('orderTabSummary')}
           </TabsTrigger>
-          <TabsTrigger value="planogram" className="flex items-center gap-2 px-6 py-3 rounded-none border-b-2 border-transparent data-[state=active]:border-indigo-600 data-[state=active]:bg-white data-[state=active]:text-indigo-600">
+          <TabsTrigger value="initial" className="flex items-center gap-2 px-6 py-3 rounded-none border-b-2 border-transparent data-[state=active]:border-indigo-600 data-[state=active]:bg-white data-[state=active]:text-indigo-600">
             <Layout className="h-4 w-4" />
-            {storeHasPlanogram ? translate('planogram') : translate('catalog') || 'Catálogo'}
+            {translate('orderTabInitial')}
           </TabsTrigger>
-          <TabsTrigger value="invoice" className="flex items-center gap-2 px-6 py-3 rounded-none border-b-2 border-transparent data-[state=active]:border-indigo-600 data-[state=active]:bg-white data-[state=active]:text-indigo-600">
+          <TabsTrigger value="billing" className="flex items-center gap-2 px-6 py-3 rounded-none border-b-2 border-transparent data-[state=active]:border-indigo-600 data-[state=active]:bg-white data-[state=active]:text-indigo-600">
             <FileText className="h-4 w-4" />
-            {translate('invoiceLabel')}
-          </TabsTrigger>
-          <TabsTrigger value="pod" className="flex items-center gap-2 px-6 py-3 rounded-none border-b-2 border-transparent data-[state=active]:border-indigo-600 data-[state=active]:bg-white data-[state=active]:text-indigo-600">
-            <ImageIcon className="h-4 w-4" />
-            POD
+            {translate('orderTabBilling')}
           </TabsTrigger>
         </TabsList>
 
-        <TabsContent value="info" className="p-6 space-y-0 mt-0">
+        <TabsContent value="summary" className="p-6 space-y-0 mt-0">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div className="bg-blue-50 rounded-lg p-5 border border-blue-100">
               <div className="flex items-center gap-2 mb-4">
@@ -689,70 +844,34 @@ export function OrderDetailView({ orderId, onClose, onOrderUpdated }: OrderDetai
               <p className="text-sm text-gray-700">{order.notes}</p>
             </div>
           )}
-          <div className="mt-6">
-            <h3 className="font-semibold text-gray-900 mb-3">{translate('orderLines')}</h3>
-            <div className="space-y-3">
-              {order.items.map((item, index) => {
-                const quantity = item.quantity ?? item.toOrder ?? 0;
-                const unitPrice = item.price ?? 0;
-                return (
-                  <div key={`${item.productId}-${index}`} className="border rounded-lg p-4 hover:shadow-sm transition-shadow bg-white">
-                    <div className="flex items-start justify-between">
-                      <div className="flex-1">
-                        <div className="flex items-center gap-2 mb-1">
-                          <span className="bg-indigo-100 text-indigo-700 font-semibold rounded-full w-6 h-6 flex items-center justify-center text-xs">{index + 1}</span>
-                          <h3 className="font-semibold text-gray-900">{item.productName || 'N/A'}</h3>
-                        </div>
-                        <p className="text-xs text-gray-500">{item.code || item.sku}</p>
-                      </div>
-                      <div className="text-right ml-4 space-y-1">
-                        <div className="text-sm text-gray-600">{quantity} × ${unitPrice.toFixed(2)}</div>
-                        <div className="font-semibold text-gray-900">${(quantity * unitPrice).toFixed(2)}</div>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-
-            {/* Resumen por categoría: todas las registradas, con Pcs (0 o suma del pedido) */}
-            {allCategories.length > 0 && (
-              <div className="mt-6 border border-slate-200 rounded-lg overflow-hidden bg-slate-50/50">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="bg-slate-200 text-slate-800">
-                      <th className="text-left py-2 px-3 font-semibold">{translate('familyCol') || 'Family'}</th>
-                      <th className="text-right py-2 px-3 font-semibold w-16">{translate('pcsCol') || 'Pcs'}</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {[...allCategories]
-                      .sort((a, b) => a.name.localeCompare(b.name))
-                      .map((cat) => {
-                        const pcs = (order.items || []).reduce(
-                          (sum: number, item: any) => {
-                            const qty = item.quantity ?? item.toOrder ?? 0;
-                            return (item.category || '').trim() === cat.name ? sum + qty : sum;
-                          },
-                          0
-                        );
-                        return (
-                          <tr key={cat.id} className="border-t border-slate-200 bg-white">
-                            <td className="py-2 px-3 text-gray-900">{cat.name}</td>
-                            <td className="py-2 px-3 text-right font-medium text-gray-800">{pcs}</td>
-                          </tr>
-                        );
-                      })}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
+          <p className="text-sm text-slate-500 mt-4">
+            {translate('orderTabInitial')}: {translate('planogram')} + {translate('familyCol')}.{' '}
+            {translate('orderTabBilling')}: {translate('planogram')}, {translate('invoiceLabel')}, POD.
+          </p>
         </TabsContent>
 
-        <TabsContent value="planogram" className="p-6 mt-0">
+        <TabsContent value="initial" className="p-6 mt-0 space-y-4" id="order-detail-initial-print">
+          <div className="flex flex-wrap gap-2 print:hidden">
+            <Button type="button" variant="outline" size="sm" onClick={handleExportInitialCsv}>
+              <Download className="h-4 w-4 mr-2" />
+              {translate('exportInitialCsv')}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                setActiveTab('initial');
+                setTimeout(() => window.print(), 200);
+              }}
+            >
+              <Printer className="h-4 w-4 mr-2" />
+              {translate('printInitial')}
+            </Button>
+          </div>
           {storeHasPlanogram ? (
             <OrderPlanogramView
+              quantitySource="order"
               order={
                 {
                   id: order.id,
@@ -798,9 +917,212 @@ export function OrderDetailView({ orderId, onClose, onOrderUpdated }: OrderDetai
               }
             />
           )}
+          {allCategories.length > 0 && (
+            <div className="border border-slate-200 rounded-lg overflow-hidden bg-slate-50/50">
+              <h3 className="text-sm font-semibold text-slate-800 px-3 py-2 bg-slate-100">
+                {translate('familyCol') || 'Family'} ({translate('orderTabInitial')})
+              </h3>
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="bg-slate-200 text-slate-800">
+                    <th className="text-left py-2 px-3 font-semibold">{translate('familyCol') || 'Family'}</th>
+                    <th className="text-right py-2 px-3 font-semibold w-16">{translate('pcsCol') || 'Pcs'}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {[...allCategories]
+                    .sort((a, b) => a.name.localeCompare(b.name))
+                    .map((cat) => {
+                      const pcs = (order.items || []).reduce((sum: number, item: any) => {
+                        const qty = item.quantity ?? item.toOrder ?? 0;
+                        return (item.category || '').trim() === cat.name ? sum + qty : sum;
+                      }, 0);
+                      return (
+                        <tr key={cat.id} className="border-t border-slate-200 bg-white">
+                          <td className="py-2 px-3 text-gray-900">{cat.name}</td>
+                          <td className="py-2 px-3 text-right font-medium text-gray-800">{pcs}</td>
+                        </tr>
+                      );
+                    })}
+                </tbody>
+              </table>
+            </div>
+          )}
         </TabsContent>
 
-        <TabsContent value="invoice" className="p-6 mt-0">
+        <TabsContent value="billing" className="p-6 mt-0 space-y-6" id="order-detail-billing-print">
+          <div className="flex flex-wrap gap-2 print:hidden">
+            <Button type="button" variant="outline" size="sm" onClick={handleExportInvoiceFamilyCsv}>
+              <Download className="h-4 w-4 mr-2" />
+              {translate('exportBillingCsv')}
+            </Button>
+            <Button type="button" variant="outline" size="sm" onClick={handleExportInvoiceLinesCsv}>
+              <Download className="h-4 w-4 mr-2" />
+              {translate('exportInvoiceCsv')}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                setActiveTab('billing');
+                setTimeout(() => window.print(), 200);
+              }}
+            >
+              <Printer className="h-4 w-4 mr-2" />
+              {translate('printBilling')}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                setActiveTab('billing');
+                setTimeout(() => window.print(), 200);
+              }}
+            >
+              <Printer className="h-4 w-4 mr-2" />
+              {translate('printPodOnly')}
+            </Button>
+          </div>
+
+          {!hasInvoiceLines ? (
+            <Alert className="border-amber-200 bg-amber-50">
+              <AlertCircle className="h-4 w-4 text-amber-600" />
+              <AlertDescription className="text-amber-900 ml-2">{translate('noInvoiceYetAdmin')}</AlertDescription>
+            </Alert>
+          ) : null}
+
+          {storeHasPlanogram && hasInvoiceLines ? (
+            <div className="space-y-2">
+              <h3 className="text-sm font-semibold text-slate-800">{translate('planogram')} ({translate('orderTabBilling')})</h3>
+              <OrderPlanogramView
+                quantitySource="invoice"
+                order={
+                  {
+                    id: order.id,
+                    backendOrderId: (order as any).backendOrderId,
+                    salespersonId: (order as any).salespersonId ?? '',
+                    storeId: (order as any).storeId ?? '',
+                    createdAt: order.date ? new Date(order.date) : new Date(),
+                    po: (order as any).po ?? order.id,
+                    status: order.status === 'invoiced' || order.status === 'completed' ? 'completed' : 'pending',
+                    storeName: order.storeName,
+                    planogramId: (order as any).planogramId,
+                    invoiceId: order.invoiceId,
+                    subtotal: displaySubtotal,
+                    total: displayTotal,
+                    items: (order.items || []).map((it: any) => ({
+                      id: it.id ?? '',
+                      orderId: order.id,
+                      productId: it.productId ?? it.sku ?? '',
+                      quantity: it.quantity ?? it.toOrder ?? 0,
+                      productName: it.productName,
+                      unitPrice: Number(it.price) || 0,
+                      subtotal: (it.quantity ?? it.toOrder ?? 0) * (Number(it.price) || 0),
+                      status: 'pending',
+                    })),
+                    updatedAt: new Date(),
+                  } as Order
+                }
+              />
+            </div>
+          ) : null}
+
+          {hasInvoiceLines && allCategories.length > 0 ? (
+            <div className="border border-slate-200 rounded-lg overflow-hidden bg-slate-50/50">
+              <h3 className="text-sm font-semibold text-slate-800 px-3 py-2 bg-slate-100">
+                {translate('familySummaryInvoice')}
+              </h3>
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="bg-slate-200 text-slate-800">
+                    <th className="text-left py-2 px-3 font-semibold">{translate('familyCol') || 'Family'}</th>
+                    <th className="text-right py-2 px-3 font-semibold w-16">{translate('pcsCol') || 'Pcs'}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {[...allCategories]
+                    .sort((a, b) => a.name.localeCompare(b.name))
+                    .map((cat) => {
+                      const pcs = invoiceDisplay!.items!.reduce((sum, it) => {
+                        const norm = String(it.code || '')
+                          .trim()
+                          .toLowerCase()
+                          .replace(/-/g, '');
+                        const p = productByNormCode.get(norm);
+                        const fam = resolveProductFamilyName(p);
+                        return fam === cat.name ? sum + (Number(it.qty) || 0) : sum;
+                      }, 0);
+                      return (
+                        <tr key={cat.id} className="border-t border-slate-200 bg-white">
+                          <td className="py-2 px-3 text-gray-900">{cat.name}</td>
+                          <td className="py-2 px-3 text-right font-medium text-gray-800">{pcs}</td>
+                        </tr>
+                      );
+                    })}
+                </tbody>
+              </table>
+            </div>
+          ) : null}
+
+          <Card className="border-slate-200 mb-4">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm">
+                {translate('discrepanciesTitle')}
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="pt-0">
+              {loadingDiscrepancies ? (
+                <p className="text-sm text-slate-500">{translate('loading')}</p>
+              ) : discrepancies.length === 0 ? (
+                <p className="text-sm text-slate-500">
+                  {translate('discrepanciesEmpty')}
+                </p>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-slate-200 text-left text-slate-600">
+                        <th className="py-2 pr-3">{translate('productLabel')}</th>
+                        <th className="py-2 pr-3">{translate('orderedQtyLabel')}</th>
+                        <th className="py-2 pr-3">{translate('deliveredQtyLabel')}</th>
+                        <th className="py-2">{translate('differenceQtyLabel')}</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {discrepancies.map((row, idx) => (
+                        <tr key={`${row.productId}-${idx}`} className="border-b border-slate-100">
+                          <td className="py-2 pr-3">
+                            <div className="font-medium text-slate-900">
+                              {row.productName || row.sku || row.productId || '—'}
+                            </div>
+                            {row.sku ? (
+                              <div className="text-xs text-slate-500">{row.sku}</div>
+                            ) : null}
+                          </td>
+                          <td className="py-2 pr-3 tabular-nums">{row.orderedQty}</td>
+                          <td className="py-2 pr-3 tabular-nums">{row.deliveredQty}</td>
+                          <td
+                            className={`py-2 tabular-nums font-semibold ${
+                              row.difference === 0
+                                ? 'text-green-700'
+                                : row.difference > 0
+                                ? 'text-amber-700'
+                                : 'text-red-700'
+                            }`}
+                          >
+                            {row.difference}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
           {(() => {
             const invFromApi = invoiceDisplay?.items?.length ? invoiceDisplay : null;
             const invFromOrder =
@@ -858,9 +1180,9 @@ export function OrderDetailView({ orderId, onClose, onOrderUpdated }: OrderDetai
               </Card>
             );
           })()}
-        </TabsContent>
 
-        <TabsContent value="pod" className="p-6 mt-0">
+          <div id="order-detail-pod-print" className="space-y-2">
+            <h3 className="text-sm font-semibold text-slate-800">POD</h3>
           <Card className="border-slate-200 overflow-hidden">
             <CardHeader className="px-4 pt-4 pb-2">
               <CardTitle className="text-sm">{translate('podTitle')}</CardTitle>
@@ -942,6 +1264,7 @@ export function OrderDetailView({ orderId, onClose, onOrderUpdated }: OrderDetai
               )}
             </CardContent>
           </Card>
+          </div>
         </TabsContent>
       </Tabs>
     </div>

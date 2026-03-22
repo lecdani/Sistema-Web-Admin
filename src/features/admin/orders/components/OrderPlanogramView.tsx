@@ -22,6 +22,8 @@ function getProductImageUrl(product: Product | null | undefined): string {
 
 interface OrderPlanogramViewProps {
   order: Order;
+  /** Cantidades del pedido (orden) o de la factura (líneas facturadas). */
+  quantitySource?: 'order' | 'invoice';
   onViewOrder?: () => void;
 }
 
@@ -37,7 +39,10 @@ interface ProductPosition {
   imageUrl?: string;
 }
 
-export const OrderPlanogramView: React.FC<OrderPlanogramViewProps> = ({ order }) => {
+export const OrderPlanogramView: React.FC<OrderPlanogramViewProps> = ({
+  order,
+  quantitySource = 'order',
+}) => {
   const { translate } = useLanguage();
   const [grid, setGrid] = useState<ProductPosition[]>([]);
   const [planogramName, setPlanogramName] = useState<string | null>(null);
@@ -163,27 +168,82 @@ export const OrderPlanogramView: React.FC<OrderPlanogramViewProps> = ({ order })
         });
         const getProduct = (id: string) => productMap.get(id) || productMap.get(String(Number(id)));
 
-        const orderItemsByProductId = new Map<string, { productName: string; sku: string; quantity: number; price: number }>();
+        const orderItemsByProductId = new Map<
+          string,
+          { productName: string; sku: string; quantity: number; price: number }
+        >();
         const items = apiOrder.items ?? [];
-        for (const item of items) {
-          const id = String(item.productId ?? item.ProductId ?? item.product_id ?? '');
-          if (id) {
+
+        if (quantitySource === 'invoice') {
+          const invHint =
+            (apiOrder as any).invoiceId ?? (order as any).invoiceId ?? undefined;
+          const invDisplay = await ordersApi.getInvoiceDisplayForOrder(orderId, invHint);
+          const qtyByNormCode = new Map<string, number>();
+          const amountByNormCode = new Map<string, number>();
+          for (const line of invDisplay?.items ?? []) {
+            const raw = String(line.code || '').trim();
+            const norm = raw.replace(/-/g, '').toLowerCase();
+            if (!norm) continue;
+            const q = Number(line.qty) || 0;
+            qtyByNormCode.set(norm, (qtyByNormCode.get(norm) ?? 0) + q);
+            const amt = Number(line.amount) || q * (Number(line.price) || 0);
+            amountByNormCode.set(norm, (amountByNormCode.get(norm) ?? 0) + amt);
+          }
+          for (const item of items) {
+            const id = String(item.productId ?? item.ProductId ?? item.product_id ?? '');
+            if (!id) continue;
+            const prod = getProduct(id);
+            const skuRaw = String(item.sku ?? prod?.code ?? prod?.sku ?? '').trim();
+            const normSku = skuRaw.replace(/-/g, '').toLowerCase();
+            const normId = id.replace(/-/g, '').toLowerCase();
+            let qty =
+              (normSku ? qtyByNormCode.get(normSku) : undefined) ??
+              qtyByNormCode.get(normId) ??
+              0;
             let price = Number(item.price ?? item.unitPrice ?? 0) || 0;
-            if (!price) {
+            if (!(price > 0) && qty > 0) {
+              const amt =
+                (normSku ? amountByNormCode.get(normSku) : undefined) ??
+                amountByNormCode.get(normId) ??
+                0;
+              price = qty > 0 ? Number(amt) / qty : 0;
+            }
+            if (!(price > 0)) {
               try {
                 const latest = await histpricesApi.getLatest(id);
-                if (latest?.price != null) price = latest.price;
+                if (latest?.price != null) price = Number(latest.price) || 0;
               } catch (_) {}
             }
-            const name = (item.productName ?? item.sku ?? getProduct(id)?.name ?? '').trim();
-            const sku = item.sku ?? getProduct(id)?.code ?? getProduct(id)?.sku ?? '';
-            const qty = item.quantity ?? item.toOrder ?? item.Quantity ?? 0;
+            const name = (item.productName ?? item.sku ?? prod?.name ?? '').trim();
+            const sku = item.sku ?? prod?.code ?? prod?.sku ?? '';
             orderItemsByProductId.set(id, {
               productName: name,
               sku: sku || name,
-              quantity: Number(qty) || 0,
+              quantity: qty,
               price,
             });
+          }
+        } else {
+          for (const item of items) {
+            const id = String(item.productId ?? item.ProductId ?? item.product_id ?? '');
+            if (id) {
+              let price = Number(item.price ?? item.unitPrice ?? 0) || 0;
+              if (!price) {
+                try {
+                  const latest = await histpricesApi.getLatest(id);
+                  if (latest?.price != null) price = latest.price;
+                } catch (_) {}
+              }
+              const name = (item.productName ?? item.sku ?? getProduct(id)?.name ?? '').trim();
+              const sku = item.sku ?? getProduct(id)?.code ?? getProduct(id)?.sku ?? '';
+              const qty = item.quantity ?? item.toOrder ?? item.Quantity ?? 0;
+              orderItemsByProductId.set(id, {
+                productName: name,
+                sku: sku || name,
+                quantity: Number(qty) || 0,
+                price,
+              });
+            }
           }
         }
 
@@ -217,7 +277,7 @@ export const OrderPlanogramView: React.FC<OrderPlanogramViewProps> = ({ order })
       }
     })();
     return () => { mounted = false; };
-  }, [order.id, order.planogramId]);
+  }, [order.id, order.planogramId, quantitySource]);
 
   const getCellStyle = (item: ProductPosition): React.CSSProperties => {
     if (!item.productId) return { backgroundColor: '#94a3b8', borderColor: '#64748b', borderWidth: 1, borderStyle: 'solid' };
@@ -287,7 +347,11 @@ export const OrderPlanogramView: React.FC<OrderPlanogramViewProps> = ({ order })
       </div>
 
       <div className="px-4 py-4">
-        <p className="text-sm text-slate-600 mb-3">{translate('planogramViewReadOnly')}</p>
+        <p className="text-sm text-slate-600 mb-3">
+          {quantitySource === 'invoice'
+            ? translate('planogramViewInvoiceReadOnly')
+            : translate('planogramViewReadOnly')}
+        </p>
         <div className="bg-white rounded-xl p-3 shadow-sm border border-slate-200 overflow-x-auto">
           <div
             style={{
