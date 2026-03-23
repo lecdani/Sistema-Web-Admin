@@ -1,6 +1,7 @@
 import { apiClient, API_BASE_URL } from '@/shared/config/api';
 import { histpricesApi } from '@/shared/services/histprices-api';
 import { productsApi } from '@/shared/services/products-api';
+import type { Product } from '@/shared/types';
 
 /**
  * Tipos ligeros para pedidos obtenidos desde la API real.
@@ -37,6 +38,202 @@ export interface OrderDiscrepancyItem {
   difference: number;
 }
 
+function normDiscrepancyKey(s: string): string {
+  return String(s || '')
+    .trim()
+    .replace(/-/g, '')
+    .toLowerCase();
+}
+
+/**
+ * Si el endpoint de discrepancias no devuelve filas, calcula faltantes comparando
+ * líneas del pedido con líneas de factura (mismas claves que en la vista de factura).
+ */
+export function computeOrderInvoiceShortfall(
+  orderItems: Array<{
+    productId?: string;
+    ProductId?: string;
+    productName?: string;
+    sku?: string;
+    quantity?: number;
+    toOrder?: number;
+  }>,
+  invoiceLines: Array<{ qty: number; code: string; description: string }>
+): OrderDiscrepancyItem[] {
+  if (!orderItems?.length || !invoiceLines?.length) return [];
+
+  const deliveredByCode = new Map<string, number>();
+  for (const line of invoiceLines) {
+    const c = String(line.code || '').trim();
+    if (!c || c === '—') continue;
+    const k = normDiscrepancyKey(c);
+    const q = Number(line.qty) || 0;
+    deliveredByCode.set(k, (deliveredByCode.get(k) ?? 0) + q);
+  }
+
+  const out: OrderDiscrepancyItem[] = [];
+  for (const it of orderItems) {
+    /** Cantidades del pedido inicial (líneas del pedido al crearse / order details). */
+    const ordered =
+      Number(
+        (it as any).quantity ??
+          (it as any).toOrder ??
+          (it as any).Quantity ??
+          (it as any).ToOrder ??
+          (it as any).originalQuantity ??
+          (it as any).OriginalQuantity ??
+          (it as any).requestedQuantity ??
+          (it as any).RequestedQuantity ??
+          0
+      ) || 0;
+    if (ordered <= 0) continue;
+
+    const pid = String((it as any).productId ?? (it as any).ProductId ?? '').trim();
+    const sku = String(
+      (it as any).sku ??
+        (it as any).Sku ??
+        (it as any).code ??
+        (it as any).Code ??
+        (it as any).productCode ??
+        (it as any).ProductCode ??
+        ''
+    ).trim();
+
+    const extraCodes = [
+      sku,
+      pid,
+      String((it as any).barcode ?? (it as any).Barcode ?? '').trim(),
+    ].filter(Boolean);
+
+    let delivered = 0;
+    for (const raw of extraCodes) {
+      const k = normDiscrepancyKey(raw);
+      if (!k) continue;
+      const v = deliveredByCode.get(k) ?? 0;
+      if (v > delivered) delivered = v;
+    }
+
+    if (ordered > delivered) {
+      const diff = ordered - delivered;
+      out.push({
+        productId: pid,
+        sku: sku || undefined,
+        productName: String((it as any).productName ?? '').trim() || undefined,
+        orderedQty: ordered,
+        deliveredQty: delivered,
+        difference: diff,
+      });
+    }
+  }
+  return out;
+}
+
+function mapRawDiscrepancyRow(r: any): OrderDiscrepancyItem {
+  const row = r?.line ?? r?.Line ?? r?.item ?? r?.Item ?? r;
+
+  const shortFallRaw = Number(
+    row?.shortFall ??
+      row?.shortfall ??
+      row?.ShortFall ??
+      row?.missingQty ??
+      row?.MissingQty ??
+      row?.shortQty ??
+      row?.ShortQty ??
+      row?.quantityShort ??
+      row?.QuantityShort ??
+      Number.NaN
+  );
+
+  let orderedQty = Number(
+    row?.orderedQty ??
+      row?.OrderedQty ??
+      row?.orderQty ??
+      row?.OrderQty ??
+      row?.quantityOrdered ??
+      row?.QuantityOrdered ??
+      row?.ordered_qty ??
+      row?.qtyOrdered ??
+      row?.QtyOrdered ??
+      row?.requested ??
+      row?.Requested ??
+      row?.orderQuantity ??
+      row?.OrderQuantity ??
+      0
+  );
+  let deliveredQty = Number(
+    row?.deliveredQty ??
+      row?.DeliveredQty ??
+      row?.invoiceQty ??
+      row?.InvoiceQty ??
+      row?.quantityDelivered ??
+      row?.QuantityDelivered ??
+      row?.delivered_qty ??
+      row?.qtyDelivered ??
+      row?.QtyDelivered ??
+      row?.billedQty ??
+      row?.BilledQty ??
+      row?.invoicedQty ??
+      row?.InvoicedQty ??
+      row?.received ??
+      row?.Received ??
+      0
+  );
+
+  if (!Number.isFinite(orderedQty)) orderedQty = 0;
+  if (!Number.isFinite(deliveredQty)) deliveredQty = 0;
+
+  if (Number.isFinite(shortFallRaw) && shortFallRaw > 0) {
+    if (orderedQty <= 0 && deliveredQty >= 0) {
+      orderedQty = deliveredQty + shortFallRaw;
+    }
+    if (orderedQty > 0 && deliveredQty === 0 && shortFallRaw <= orderedQty) {
+      deliveredQty = orderedQty - shortFallRaw;
+    }
+  }
+
+  const differenceRaw = Number(
+    row?.difference ?? row?.Difference ?? row?.delta ?? row?.Delta ?? row?.diff ?? row?.Diff ?? Number.NaN
+  );
+  const difference = Number.isFinite(differenceRaw)
+    ? differenceRaw
+    : orderedQty - deliveredQty;
+
+  const prod = row?.product ?? row?.Product ?? {};
+
+  return {
+    productId: String(
+      row?.productId ?? row?.ProductId ?? prod?.id ?? prod?.Id ?? row?.id ?? row?.Id ?? ''
+    ).trim(),
+    sku:
+      String(
+        row?.sku ??
+          row?.Sku ??
+          row?.code ??
+          row?.Code ??
+          row?.productCode ??
+          row?.ProductCode ??
+          prod?.sku ??
+          prod?.Sku ??
+          prod?.code ??
+          prod?.Code ??
+          ''
+      ).trim() || undefined,
+    productName:
+      String(
+        row?.productName ??
+          row?.ProductName ??
+          prod?.name ??
+          prod?.Name ??
+          row?.description ??
+          row?.Description ??
+          ''
+      ).trim() || undefined,
+    orderedQty,
+    deliveredQty,
+    difference,
+  };
+}
+
 // Igual que PWA: list?.data ?? list?.items ?? []
 function normalizeOrderListResponse(raw: any): any[] {
   if (Array.isArray(raw)) return raw;
@@ -51,6 +248,71 @@ function normalizeOrderListResponse(raw: any): any[] {
   if (raw?.items && Array.isArray(raw.items)) return raw.items;
   if (raw?.value && Array.isArray(raw.value)) return raw.value;
   return [];
+}
+
+/** Mismo contrato que el backend .NET: 1=Creado, 2=Facturado, 3=Cancelado */
+export const ORDER_STATUS_CODE = {
+  created: 1,
+  invoiced: 2,
+  cancelled: 3,
+} as const;
+
+/**
+ * Normaliza status de API (número o texto) a etiquetas de UI alineadas con la PWA.
+ */
+function normalizeBackendOrderStatus(raw: any): string {
+  const inner = raw?.data ?? raw?.order ?? raw?.Order ?? raw?.value ?? raw?.result ?? raw;
+  const v =
+    inner?.status ??
+    inner?.Status ??
+    inner?.isInvoiced ??
+    inner?.IsInvoiced ??
+    inner?.orderStatus ??
+    inner?.OrderStatus ??
+    inner?.state ??
+    inner?.State ??
+    raw?.status ??
+    raw?.Status ??
+    raw?.isInvoiced ??
+    raw?.IsInvoiced ??
+    raw?.orderStatus ??
+    raw?.OrderStatus ??
+    raw?.state ??
+    raw?.State;
+  if (v === true) return 'invoiced';
+  if (v === false) return 'initial';
+  if (typeof v === 'number' && Number.isFinite(v)) {
+    if (v === ORDER_STATUS_CODE.cancelled) return 'cancelled';
+    if (v === ORDER_STATUS_CODE.invoiced) return 'invoiced';
+    if (v === ORDER_STATUS_CODE.created) return 'initial';
+  }
+  const sTrim = String(v ?? '').trim();
+  if (/^\d+$/.test(sTrim)) {
+    const n = Number(sTrim);
+    if (n === 3) return 'cancelled';
+    if (n === 2) return 'invoiced';
+    if (n === 1) return 'initial';
+  }
+  const s = sTrim.toLowerCase();
+  if (s === 'cancelled' || s === 'canceled' || s === 'cancelado' || s === 'anulado' || s === 'void') {
+    return 'cancelled';
+  }
+  if (
+    s === 'invoiced' ||
+    s === 'facturado' ||
+    s === 'invoice' ||
+    s === 'billed' ||
+    s === 'facturada' ||
+    s === 'delivered'
+  ) {
+    return 'invoiced';
+  }
+  if (s === 'created' || s === 'creado' || s === 'pending' || s === 'initial' || s === 'new') {
+    return 'initial';
+  }
+  // Legacy: tratar como facturado (backend oficial: 1 creado, 2 facturado, 3 cancelado)
+  if (s === 'completed' || s === 'confirmado' || s === 'confirmed') return 'invoiced';
+  return sTrim || 'initial';
 }
 
 function generateUuidV4(): string {
@@ -139,7 +401,7 @@ function mapRawOrderToAdmin(raw: any): AdminOrderSummary | null {
         ? createdAt.toISOString()
         : new Date().toISOString(),
     deliveryDate: raw?.deliveryDate ?? raw?.DeliveryDate,
-    status: String(raw?.status ?? raw?.Status ?? raw?.orderStatus ?? raw?.OrderStatus ?? raw?.state ?? raw?.State ?? 'pending').trim() || 'pending',
+    status: normalizeBackendOrderStatus(raw),
     subtotal,
     tax,
     total,
@@ -186,7 +448,12 @@ export async function fetchCompletedOrdersBySalespersonId(userId: string): Promi
   const all = await fetchOrdersBySalespersonId(userId);
   return all.filter((o) => {
     const s = (o.status || '').toLowerCase();
-    return s === 'completed' || s === 'invoiced' || s === 'delivered';
+    return (
+      s === 'completed' ||
+      s === 'invoiced' ||
+      s === 'delivered' ||
+      s === '2'
+    );
   });
 }
 
@@ -368,12 +635,42 @@ async function safePost<T>(endpoint: string, body: unknown): Promise<T | null> {
 
 async function safePut<T>(endpoint: string, body: unknown): Promise<T | null> {
   try {
+    if (typeof body === 'string') {
+      return await apiClient.putBody<T>(endpoint, body);
+    }
     return await apiClient.put<T>(endpoint, body);
   } catch (error) {
     const err = error as ApiError;
     console.error('[orders-api] PUT', endpoint, 'failed:', err.message || err);
     return null;
   }
+}
+
+/** UpdateStatusCommand: orderId + newStatus (camelCase o PascalCase; número o nombre enum C#). */
+function orderStatusEnumNameAdmin(code: 1 | 2 | 3): 'Created' | 'Invoiced' | 'Canceled' {
+  if (code === 1) return 'Created';
+  if (code === 2) return 'Invoiced';
+  return 'Canceled';
+}
+
+async function putOrderStatusUntilOkAdmin(orderId: string, statusCode: 1 | 2 | 3): Promise<boolean> {
+  const id = String(orderId).trim();
+  if (!id) return false;
+  const n = Number(statusCode);
+  if (!Number.isInteger(n) || n < 1 || n > 3) return false;
+  const name = orderStatusEnumNameAdmin(statusCode);
+  const path = `/orders/order/${encodeURIComponent(id)}/status`;
+  const candidates = [
+    JSON.stringify({ orderId: id, newStatus: n }),
+    JSON.stringify({ OrderId: id, NewStatus: n }),
+    JSON.stringify({ orderId: id, newStatus: name }),
+    JSON.stringify({ OrderId: id, NewStatus: name }),
+  ];
+  for (const payload of candidates) {
+    const res = await safePut<any>(path, payload);
+    if (res !== null) return true;
+  }
+  return false;
 }
 
 async function safePatch<T>(endpoint: string, body: unknown): Promise<T | null> {
@@ -652,6 +949,128 @@ function detailProductName(d: any): string {
   return (typeof fromDetail === 'string' ? fromDetail : '').trim();
 }
 
+/** ¿Parece línea de pedido/factura? (misma lógica que PWA orders-api). */
+function isLineLikeRecord(el: any): boolean {
+  if (el == null || typeof el !== 'object' || Array.isArray(el)) return false;
+  const pid = detailProductId(el);
+  const sku = String(el?.sku ?? el?.Sku ?? '').trim();
+  return pid.length > 0 || sku.length > 0;
+}
+
+function isInvoiceLineCandidate(el: any): boolean {
+  if (el == null || typeof el !== 'object' || Array.isArray(el)) return false;
+  if (isLineLikeRecord(el)) return true;
+  if (el?.product && typeof el.product === 'object') return true;
+  if (el?.Product && typeof el.Product === 'object') return true;
+  const nm = (
+    detailProductName(el) ||
+    String(el?.code ?? el?.Code ?? el?.itemCode ?? el?.ItemCode ?? el?.description ?? el?.Description ?? '').trim()
+  );
+  const sub = detailSubtotal(el);
+  const q = detailQuantity(el);
+  if (nm.length > 0 && (sub > 0 || q > 0)) return true;
+  const lineId = String(
+    el?.invoiceDetailId ??
+      el?.InvoiceDetailId ??
+      el?.orderDetailId ??
+      el?.OrderDetailId ??
+      el?.lineNumber ??
+      el?.LineNumber ??
+      ''
+  ).trim();
+  if (lineId.length > 0 && (sub > 0 || q > 0)) return true;
+  if (q > 0 && sub > 0) return true;
+  return false;
+}
+
+/** Barrido del JSON de factura para encontrar el array de líneas (como PWA). */
+function findBestInvoiceDetailsArray(raw: any): any[] {
+  if (raw == null) return [];
+  const buckets: any[][] = [];
+  const seenNodes = new WeakSet<object>();
+  const seenArrays = new Set<any>();
+
+  function visit(obj: any, depth: number) {
+    if (obj == null || depth > 16) return;
+    if (typeof obj !== 'object') return;
+    if (seenNodes.has(obj)) return;
+    seenNodes.add(obj);
+    if (Array.isArray(obj)) {
+      for (const el of obj) visit(el, depth + 1);
+      return;
+    }
+    for (const v of Object.values(obj)) {
+      if (!Array.isArray(v) || v.length === 0 || seenArrays.has(v)) continue;
+      const first = v[0];
+      if (first && typeof first === 'object' && !Array.isArray(first) && isInvoiceLineCandidate(first)) {
+        seenArrays.add(v);
+        buckets.push(v);
+      }
+    }
+    for (const v of Object.values(obj)) {
+      if (v != null && typeof v === 'object') visit(v, depth + 1);
+    }
+  }
+
+  visit(raw, 0);
+  if (buckets.length === 0) return [];
+  buckets.sort((a, b) => b.length - a.length);
+  return buckets[0];
+}
+
+function extractOrderDetailsFromRaw(raw: any): any[] {
+  if (!raw) return [];
+  const nested =
+    raw?.orderDetails ??
+    raw?.OrderDetails ??
+    raw?.details ??
+    raw?.Details ??
+    raw?.items ??
+    raw?.Items;
+  return Array.isArray(nested) ? nested : [];
+}
+
+/**
+ * Subtotal/total desde líneas del pedido en el listado (pedidos sin factura o total 0), con histprices por familia.
+ */
+async function computeMonetaryTotalsFromOrderRaw(raw: any): Promise<{ subtotal: number; total: number } | null> {
+  const details = extractOrderDetailsFromRaw(raw);
+  if (!details.length) return null;
+  const tax = Number(raw?.tax ?? raw?.Tax ?? 0);
+  let sub = 0;
+  for (const d of details) {
+    const qty = Number(d?.quantity ?? d?.Quantity ?? 0);
+    if (qty <= 0) continue;
+    let price = Number(
+      d?.unitPrice ??
+        d?.UnitPrice ??
+        d?.price ??
+        d?.Price ??
+        d?.product?.unitPrice ??
+        d?.Product?.UnitPrice ??
+        0
+    );
+    const subRow = Number(d?.subtotal ?? d?.Subtotal ?? d?.SubTotal ?? 0);
+    if (!(price > 0) && subRow > 0) price = subRow / qty;
+    const pid = String(d?.productId ?? d?.ProductId ?? '').trim();
+    if (!(price > 0) && pid) {
+      try {
+        const product = await productsApi.getById(pid);
+        const fid = String((product as any)?.familyId ?? product?.categoryId ?? '').trim();
+        if (fid) {
+          const hp = await histpricesApi.getLatest(fid);
+          price = hp?.price ?? 0;
+        }
+      } catch {
+        /* ignore */
+      }
+    }
+    sub += qty * price;
+  }
+  if (!(sub > 0)) return null;
+  return { subtotal: sub, total: sub + tax };
+}
+
 function normalizeDetailList(raw: any): any[] {
   if (raw == null) return [];
   if (Array.isArray(raw)) return raw;
@@ -705,7 +1124,10 @@ async function enrichOrderItemsWithProductNames(
     if (!cached) {
       const product = await productsApi.getById(pid);
       cached = product
-        ? { name: product.name || '', sku: product.sku || '' }
+        ? {
+            name: product.name || '',
+            sku: String(product.sku || (product as any).code || '').trim() || '',
+          }
         : { name: currentName, sku: currentSku };
       productNameCache.set(pid, cached);
     }
@@ -759,7 +1181,17 @@ function mapRawOrderToUI(raw: any, details: any[] = []): OrderForUI {
           ''
       ).trim(),
       sku: String(
-        d?.sku ?? d?.Sku ?? d?.product?.sku ?? d?.Product?.Sku ?? ''
+        d?.sku ??
+          d?.Sku ??
+          d?.product?.sku ??
+          d?.Product?.Sku ??
+          d?.code ??
+          d?.Code ??
+          d?.productCode ??
+          d?.ProductCode ??
+          d?.product?.code ??
+          d?.Product?.Code ??
+          ''
       ),
       toOrder: qty,
       quantity: qty,
@@ -828,7 +1260,7 @@ function mapRawOrderToUI(raw: any, details: any[] = []): OrderForUI {
         ? date.toISOString()
         : new Date().toISOString(),
     deliveryDate: raw?.deliveryDate ?? raw?.DeliveryDate,
-    status: String(raw?.status ?? raw?.Status ?? raw?.orderStatus ?? raw?.OrderStatus ?? raw?.state ?? raw?.State ?? 'pending').trim() || 'pending',
+    status: normalizeBackendOrderStatus(raw),
     items,
     totalUnits,
     subtotal,
@@ -911,39 +1343,50 @@ export const ordersApi = {
       return t;
     };
 
-    const result: OrderForUI[] = [];
-    for (const raw of ordersArr) {
-      const summary = mapRawOrderToAdmin(raw);
-      if (!summary) continue;
+    const mapped = await Promise.all(
+      ordersArr.map(async (raw) => {
+        const summary = mapRawOrderToAdmin(raw);
+        if (!summary) return null;
 
-      const oid = String(summary.id);
-      const rawInv =
-        byOrderId.get(oid) ??
-        byOrderId.get(String(Number(oid))) ??
-        (summary.invoiceId != null ? byInvoiceId.get(String(summary.invoiceId)) : null);
-      const totalFromInv = rawInv ? getTotalFromInv(rawInv) : 0;
-      const total = Number(summary.total) > 0 ? summary.total : totalFromInv;
+        const oid = String(summary.id);
+        const rawInv =
+          byOrderId.get(oid) ??
+          byOrderId.get(String(Number(oid))) ??
+          (summary.invoiceId != null ? byInvoiceId.get(String(summary.invoiceId)) : null);
+        const totalFromInv = rawInv ? getTotalFromInv(rawInv) : 0;
+        let total = Number(summary.total) > 0 ? summary.total : totalFromInv;
+        let subtotal = Number(summary.subtotal) > 0 ? summary.subtotal : total;
 
-      result.push({
-        id: summary.id,
-        backendOrderId: summary.backendOrderId ?? summary.id,
-        storeId: summary.storeId,
-        storeName: summary.storeName,
-        storeAddress: summary.storeAddress,
-        date: summary.date,
-        deliveryDate: summary.deliveryDate,
-        status: summary.status,
-        items: [],
-        totalUnits: 0,
-        subtotal: summary.subtotal || total,
-        tax: summary.tax,
-        total,
-        salespersonId: summary.salespersonId,
-        invoiceId: summary.invoiceId,
-        po: summary.po,
-      });
-    }
-    return result;
+        if (total <= 0 && !rawInv) {
+          const fromLines = await computeMonetaryTotalsFromOrderRaw(raw);
+          if (fromLines) {
+            subtotal = fromLines.subtotal;
+            total = fromLines.total;
+          }
+        }
+
+        return {
+          id: summary.id,
+          backendOrderId: summary.backendOrderId ?? summary.id,
+          storeId: summary.storeId,
+          storeName: summary.storeName,
+          storeAddress: summary.storeAddress,
+          date: summary.date,
+          deliveryDate: summary.deliveryDate,
+          status: summary.status,
+          items: [] as OrderForUI['items'],
+          totalUnits: 0,
+          subtotal: subtotal || total,
+          tax: summary.tax,
+          total,
+          salespersonId: summary.salespersonId,
+          invoiceId: summary.invoiceId,
+          po: summary.po,
+          planogramId: summary.planogramId,
+        } satisfies OrderForUI;
+      })
+    );
+    return mapped.filter((o): o is OrderForUI => o != null);
   },
   /**
    * Crea un pedido con Unit of Work (header + detalles en un solo POST /orders/orders).
@@ -1203,7 +1646,9 @@ export const ordersApi = {
   /** Igual que PWA: datos de factura para pantalla (invoiceNumber, date, total, items). */
   async getInvoiceDisplayForOrder(
     orderId: string,
-    optionalInvoiceId?: string | number
+    optionalInvoiceId?: string | number,
+    /** Pedido ya cargado: evita GET duplicado y alinea cruce SKU/productId con líneas de factura. */
+    orderForLines?: OrderForUI | null
   ): Promise<{
     subtotal: number;
     invoiceNumber: string;
@@ -1219,44 +1664,40 @@ export const ordersApi = {
       amount: number;
     }>;
   } | null> {
-    const order = await ordersApi.getOrderById(orderId);
     let invId = '';
     let invoice: any = null;
+    let rawInvoice: any = null;
 
-    if (order?.invoiceId != null) invId = String(order.invoiceId);
-    if (!invId && optionalInvoiceId != null) invId = String(optionalInvoiceId);
+    if (optionalInvoiceId != null && String(optionalInvoiceId).trim()) {
+      invId = String(optionalInvoiceId).trim();
+    }
+    if (!invId) {
+      const idFromList = await ordersApi.getInvoiceIdForOrder(orderId);
+      if (idFromList != null) invId = String(idFromList);
+    }
     if (!invId) {
       const fromList = await ordersApi.getInvoiceForOrder(orderId);
       invoice = fromList;
-      if (invoice?.data && typeof invoice.data === 'object')
-        invoice = invoice.data;
-      if (invoice?.invoice && typeof invoice.invoice === 'object')
-        invoice = invoice.invoice;
-      invId =
-        invoice != null
-          ? String(
-              invoice?.id ??
-                invoice?.Id ??
-                invoice?.invoiceId ??
-                invoice?.InvoiceId ??
-                ''
-            )
-          : '';
+      rawInvoice = fromList;
+      if (invoice?.data && typeof invoice.data === 'object') invoice = invoice.data;
+      if (invoice?.invoice && typeof invoice.invoice === 'object') invoice = invoice.invoice;
+      if (invoice != null) {
+        invId = String(
+          invoice?.id ?? invoice?.Id ?? invoice?.invoiceId ?? invoice?.InvoiceId ?? ''
+        ).trim();
+      }
     }
-    if (!invId) {
-      const idFromList =
-        (await ordersApi.getInvoiceIdForOrder(orderId)) ??
-        (order?.backendOrderId != null
-          ? await ordersApi.getInvoiceIdForOrder(
-              String(order.backendOrderId)
-            )
-          : null);
-      if (idFromList != null) invId = String(idFromList);
+
+    const order = orderForLines ?? (await ordersApi.getOrderById(orderId));
+    if (!invId && order?.invoiceId != null) invId = String(order.invoiceId);
+    if (!invId && order?.backendOrderId != null) {
+      const byBackend = await ordersApi.getInvoiceIdForOrder(String(order.backendOrderId));
+      if (byBackend != null) invId = String(byBackend);
     }
     if (!invId) return null;
 
     const invoiceById = await getInvoiceById(invId);
-    const rawForInvoice = invoiceById ?? invoice;
+    const rawForInvoice = invoiceById ?? rawInvoice ?? invoice;
     if (rawForInvoice == null) return null;
     const layers = peelInvoiceLayers(rawForInvoice);
     invoice =
@@ -1270,8 +1711,8 @@ export const ordersApi = {
       rawForInvoice;
 
     let details = normalizeDetailList(rawForInvoice);
-    if (details.length === 0)
-      details = await ordersApi.getInvoiceDetailsByInvoiceId(invId);
+    if (details.length === 0) details = findBestInvoiceDetailsArray(rawForInvoice);
+    if (details.length === 0) details = await ordersApi.getInvoiceDetailsByInvoiceId(invId);
 
     const orderItemsByProduct = new Map<
       string,
@@ -1300,27 +1741,38 @@ export const ordersApi = {
         let price = qty > 0 ? amount / qty : 0;
         const pid = detailProductId(d);
         const orderItem = orderItemsByProduct.get(pid);
+        let product: Product | null = null;
+        if (pid) {
+          try {
+            product = await productsApi.getById(pid);
+          } catch {
+            product = null;
+          }
+        }
         let description = (
           detailProductName(d) ||
           orderItem?.productName ||
           orderItem?.sku ||
           ''
         ).trim();
-        if (!description && pid) {
-          const product = await productsApi.getById(pid);
-          description = (product?.name || product?.sku || '').trim();
+        if (!description && product) {
+          description = (product.name || product.sku || '').trim();
         }
         description = description || '—';
-        const code =
-          orderItem?.sku ||
-          (d?.sku ?? d?.Sku ?? d?.product?.sku ?? d?.Product?.Sku ?? pid) ||
-          '—';
+        // SKU comercial preferente; si falta todo, usar productId para cruzar planograma/factura (misma línea útil que UUID en PWA).
+        const codeFromSku =
+          String(orderItem?.sku || '').trim() ||
+          String(product?.sku || '').trim() ||
+          String(d?.sku ?? d?.Sku ?? d?.product?.sku ?? d?.Product?.Sku ?? '').trim() ||
+          String(product?.code || '').trim() ||
+          '';
+        const code = codeFromSku || (pid ? String(pid) : '—');
         if ((price === 0 || amount === 0) && pid) {
           let latestPrice = orderItem?.price && orderItem.price > 0 ? orderItem.price : 0;
           if (!(latestPrice > 0)) {
-            const product = await productsApi.getById(pid);
-            const familyId = String((product as any)?.familyId ?? product?.categoryId ?? '').trim();
-            latestPrice = familyId ? await histpricesApi.getLatest(familyId).then((p) => p?.price ?? 0) : 0;
+            const p = product ?? (await productsApi.getById(pid).catch(() => null));
+            const familyId = String((p as any)?.familyId ?? p?.categoryId ?? '').trim();
+            latestPrice = familyId ? await histpricesApi.getLatest(familyId).then((pr) => pr?.price ?? 0) : 0;
           }
           price = latestPrice;
           amount = qty * price;
@@ -1412,16 +1864,21 @@ export const ordersApi = {
   },
 
   /**
-   * Obtiene discrepancias entre lo pedido (Order) y lo entregado (Invoice).
-   * Prueba GET /orders/dicrepancies/{id} (typo histórico) y /orders/discrepancies/{id}.
+   * Discrepancias pedido vs factura.
+   * Prueba GET /orders/orders/dicrepancies/{id}, /orders/dicrepancies/{id} (typo histórico) y /orders/discrepancies/{id}.
    */
   async getOrderDiscrepancies(orderId: string): Promise<OrderDiscrepancyItem[]> {
     const id = String(orderId || '').trim();
     if (!id) return [];
 
     let raw = await safeGet<any>(
-      `/orders/dicrepancies/${encodeURIComponent(id)}`
+      `/orders/orders/dicrepancies/${encodeURIComponent(id)}`
     );
+    if (raw == null) {
+      raw = await safeGet<any>(
+        `/orders/dicrepancies/${encodeURIComponent(id)}`
+      );
+    }
     if (raw == null) {
       raw = await safeGet<any>(
         `/orders/discrepancies/${encodeURIComponent(id)}`
@@ -1429,7 +1886,7 @@ export const ordersApi = {
     }
     if (!raw) return [];
 
-    const list = Array.isArray(raw)
+    let list: any[] = Array.isArray(raw)
       ? raw
       : raw?.results ??
         raw?.Results ??
@@ -1439,61 +1896,29 @@ export const ordersApi = {
         raw?.Items ??
         raw?.value ??
         raw?.Value ??
+        raw?.discrepancies ??
+        raw?.Discrepancies ??
+        raw?.orderDiscrepancies ??
+        raw?.OrderDiscrepancies ??
+        raw?.lines ??
+        raw?.Lines ??
         [];
+
+    if (!Array.isArray(list) || list.length === 0) {
+      const nested =
+        raw?.order?.discrepancies ??
+        raw?.Order?.Discrepancies ??
+        raw?.invoice?.lines ??
+        raw?.Invoice?.Lines;
+      if (Array.isArray(nested) && nested.length) list = nested;
+    }
+    if (!Array.isArray(list) || list.length === 0) {
+      const extracted = extractFirstArray(raw);
+      if (extracted && extracted.length) list = extracted;
+    }
+
     const rows = Array.isArray(list) ? list : [];
-
-    return rows.map((r: any) => {
-      const orderedQty = Number(
-        r?.orderedQty ??
-          r?.OrderedQty ??
-          r?.orderQty ??
-          r?.OrderQty ??
-          r?.quantityOrdered ??
-          r?.QuantityOrdered ??
-          r?.requested ??
-          r?.Requested ??
-          0
-      ) || 0;
-      const deliveredQty = Number(
-        r?.deliveredQty ??
-          r?.DeliveredQty ??
-          r?.invoiceQty ??
-          r?.InvoiceQty ??
-          r?.quantityDelivered ??
-          r?.QuantityDelivered ??
-          r?.received ??
-          r?.Received ??
-          0
-      ) || 0;
-      const differenceRaw = Number(
-        r?.difference ??
-          r?.Difference ??
-          r?.delta ??
-          r?.Delta ??
-          Number.NaN
-      );
-      const difference = Number.isFinite(differenceRaw)
-        ? differenceRaw
-        : orderedQty - deliveredQty;
-
-      return {
-        productId: String(
-          r?.productId ?? r?.ProductId ?? r?.id ?? r?.Id ?? ''
-        ).trim(),
-        sku: String(r?.sku ?? r?.Sku ?? '').trim() || undefined,
-        productName:
-          String(
-            r?.productName ??
-              r?.ProductName ??
-              r?.description ??
-              r?.Description ??
-              ''
-          ).trim() || undefined,
-        orderedQty,
-        deliveredQty,
-        difference,
-      };
-    });
+    return rows.map((r: any) => mapRawDiscrepancyRow(r));
   },
 
   /**
@@ -1547,19 +1972,16 @@ export const ordersApi = {
   },
 
   /**
-   * Actualiza el estado del pedido a facturado/entregado (como en la PWA).
-   * PUT /orders/order/{id}/status con body { orderId, isInvoiced: true }
+   * Actualiza el estado del pedido (como en la PWA).
+   * PUT /orders/order/{id}/status — body Swagger: { orderId, newStatus } (1=Creado, 2=Facturado, 3=Cancelado).
+   * isInvoiced === false: no-op (evita PUT con newStatus=1 si el backend rechaza 1→1).
    */
   async updateOrderStatus(orderId: string | number, isInvoiced: boolean = true): Promise<boolean> {
     const idStr = String(orderId).trim();
-    const body = {
-      orderId: idStr,
-      OrderId: idStr,
-      isInvoiced,
-      IsInvoiced: isInvoiced,
-    };
-    const res = await safePut<any>(`/orders/order/${encodeURIComponent(idStr)}/status`, body);
-    return res !== null;
+    if (!isInvoiced) {
+      return true;
+    }
+    return putOrderStatusUntilOkAdmin(idStr, ORDER_STATUS_CODE.invoiced);
   },
 
   /**

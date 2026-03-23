@@ -406,24 +406,80 @@ html {
   display: none;
 }
 
-/* Al imprimir: solo la factura (#invoice-print), resto de la página oculto */
+/* Imprimir factura o planograma / pedido inicial desde el modal: contenido visible, resto oculto */
 @media print {
+  @page {
+    size: A4 portrait;
+    margin: 6mm;
+  }
+
+  html,
+  body {
+    overflow: visible !important;
+    height: auto !important;
+  }
+
   body * {
     visibility: hidden;
   }
+
   #invoice-print,
-  #invoice-print * {
+  #invoice-print *,
+  #admin-planogram-print-root,
+  #admin-planogram-print-root *,
+  #admin-order-initial-print-root,
+  #admin-order-initial-print-root * {
     visibility: visible;
   }
+
   #invoice-print {
     position: absolute;
     left: 0;
     top: 0;
     width: 100%;
-    max-width: 100%;
+    max-width: 100% !important;
     margin: 0;
     padding: 0;
     box-shadow: none;
     border: none;
+    overflow: visible !important;
+  }
+
+  #admin-planogram-print-root,
+  #admin-order-initial-print-root {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    max-width: 100% !important;
+    overflow: visible !important;
+  }
+
+  /* Una sola página A4: encoger planograma (Chrome/Edge: zoom) */
+  #admin-planogram-print-root .admin-planogram-print-compact,
+  #admin-order-initial-print-root .admin-planogram-print-compact {
+    zoom: 0.52;
+  }
+
+  /* Modal detalle pedido: quitar recorte por max-height/overflow */
+  .fixed.inset-0.z-50.flex.items-center.justify-center:has(> .order-detail-dialog-inner) {
+    position: static !important;
+    inset: auto !important;
+    height: auto !important;
+    display: block !important;
+    background: transparent !important;
+  }
+
+  .fixed.inset-0.z-50.flex.items-center.justify-center:has(> .order-detail-dialog-inner) > div.fixed.inset-0 {
+    display: none !important;
+  }
+
+  .order-detail-dialog-inner {
+    max-height: none !important;
+    overflow: visible !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    box-shadow: none !important;
+    position: static !important;
   }
 }

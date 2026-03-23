@@ -20,6 +20,105 @@ function getProductImageUrl(product: Product | null | undefined): string {
   return '';
 }
 
+type LineItem = { qty: number; code: string; description: string; price: number; amount: number };
+
+function normKey(s: string): string {
+  return String(s || '')
+    .trim()
+    .replace(/-/g, '')
+    .toLowerCase();
+}
+
+/**
+ * Cantidades desde líneas de factura (PWA + refuerzos admin: code/sku/id/nombre en catálogo).
+ */
+function buildQuantitiesMapFromInvoiceLines(
+  invoiceItems: LineItem[],
+  orderItems: Array<{ productId?: string; ProductId?: string; productName?: string; sku?: string; price?: number }>,
+  getProduct: (id: string) =>
+    | { id: string; name?: string; sku?: string; familyId?: string; categoryId?: string; currentPrice?: number }
+    | undefined,
+  catalogProducts: Product[]
+): Map<string, { productName: string; sku: string; quantity: number; price: number }> {
+  const map = new Map<string, { productName: string; sku: string; quantity: number; price: number }>();
+
+  const resolveProductId = (line: LineItem): string => {
+    const code = String(line.code || '').trim();
+    if (!code || code === '—') return '';
+    const normCode = normKey(code);
+    const desc = String(line.description || '').trim();
+
+    const oi =
+      orderItems.find((x: any) => String(x.sku || '').trim() === code) ||
+      orderItems.find((x: any) => String(x.productId ?? x.ProductId ?? '') === code) ||
+      (code.length >= 8
+        ? orderItems.find((x: any) => {
+            const pid = normKey(String(x.productId ?? x.ProductId ?? ''));
+            return pid && (pid === normCode || String(x.productId ?? x.ProductId) === code);
+          })
+        : undefined);
+
+    let productId = oi ? String(oi.productId ?? oi.ProductId ?? '') : '';
+
+    if (!productId && /^[0-9a-f-]{36}$/i.test(code)) {
+      productId = code;
+    }
+
+    if (!productId) {
+      const hit = catalogProducts.find((p) => {
+        const skuT = String(p.sku || '').trim();
+        const codeT = String(p.code || '').trim();
+        return (
+          skuT === code ||
+          codeT === code ||
+          normKey(skuT) === normCode ||
+          normKey(codeT) === normCode ||
+          normKey(String(p.id)) === normCode
+        );
+      });
+      if (hit) productId = String(hit.id);
+    }
+
+    if (!productId && desc.length > 2) {
+      const lower = desc.toLowerCase();
+      const nameHits = catalogProducts.filter((p) => (p.name || '').trim().toLowerCase() === lower);
+      if (nameHits.length === 1) productId = String(nameHits[0].id);
+    }
+
+    return productId;
+  };
+
+  for (const line of invoiceItems) {
+    const code = String(line.code || '').trim();
+    const productId = resolveProductId(line);
+    if (!productId) continue;
+
+    const oi =
+      orderItems.find((x: any) => String(x.productId ?? x.ProductId ?? '') === productId) ||
+      orderItems.find((x: any) => normKey(String(x.productId ?? x.ProductId ?? '')) === normKey(productId));
+
+    const prod = getProduct(productId);
+    const qty = Number(line.qty) || 0;
+    const price = Number(line.price) || 0;
+    const name = (line.description || (oi as any)?.productName || prod?.name || code).trim();
+    const sku = String(
+      (oi as any)?.sku || prod?.sku || (prod as Product | undefined)?.code || code
+    ).trim();
+    const prev = map.get(productId);
+    if (prev) {
+      map.set(productId, {
+        productName: name || prev.productName,
+        sku: sku || prev.sku,
+        quantity: prev.quantity + qty,
+        price: price > 0 ? price : prev.price,
+      });
+    } else {
+      map.set(productId, { productName: name, sku, quantity: qty, price });
+    }
+  }
+  return map;
+}
+
 interface OrderPlanogramViewProps {
   order: Order;
   /** Cantidades del pedido (orden) o de la factura (líneas facturadas). */
@@ -175,71 +274,97 @@ export const OrderPlanogramView: React.FC<OrderPlanogramViewProps> = ({
         const items = apiOrder.items ?? [];
 
         if (quantitySource === 'invoice') {
-          const invHint =
-            (apiOrder as any).invoiceId ?? (order as any).invoiceId ?? undefined;
-          const invDisplay = await ordersApi.getInvoiceDisplayForOrder(orderId, invHint);
-          const qtyByNormCode = new Map<string, number>();
-          const amountByNormCode = new Map<string, number>();
-          for (const line of invDisplay?.items ?? []) {
-            const raw = String(line.code || '').trim();
-            const norm = raw.replace(/-/g, '').toLowerCase();
-            if (!norm) continue;
-            const q = Number(line.qty) || 0;
-            qtyByNormCode.set(norm, (qtyByNormCode.get(norm) ?? 0) + q);
-            const amt = Number(line.amount) || q * (Number(line.price) || 0);
-            amountByNormCode.set(norm, (amountByNormCode.get(norm) ?? 0) + amt);
+          const invHint = (apiOrder as any).invoiceId ?? (order as any).invoiceId ?? undefined;
+          const invDisplay = await ordersApi.getInvoiceDisplayForOrder(orderId, invHint, apiOrder);
+          let usedInvoiceQuantities = false;
+
+          if (invDisplay?.items?.length) {
+            const fromInv = buildQuantitiesMapFromInvoiceLines(
+              invDisplay.items,
+              items as any[],
+              (pid) => {
+                const p = getProduct(pid);
+                if (!p) return undefined;
+                return {
+                  id: String(p.id),
+                  name: p.name,
+                  sku: p.sku,
+                  familyId: p.familyId,
+                  categoryId: p.categoryId,
+                  currentPrice: p.currentPrice,
+                };
+              },
+              productsData
+            );
+            if (fromInv.size > 0) {
+              fromInv.forEach((v, k) => orderItemsByProductId.set(k, { ...v }));
+              usedInvoiceQuantities = true;
+            }
           }
-          for (const item of items) {
-            const id = String(item.productId ?? item.ProductId ?? item.product_id ?? '');
-            if (!id) continue;
-            const prod = getProduct(id);
-            const skuRaw = String(item.sku ?? prod?.code ?? prod?.sku ?? '').trim();
-            const normSku = skuRaw.replace(/-/g, '').toLowerCase();
-            const normId = id.replace(/-/g, '').toLowerCase();
-            let qty =
-              (normSku ? qtyByNormCode.get(normSku) : undefined) ??
-              qtyByNormCode.get(normId) ??
-              0;
-            let price = Number(item.price ?? item.unitPrice ?? 0) || 0;
-            if (!(price > 0) && qty > 0) {
-              const amt =
-                (normSku ? amountByNormCode.get(normSku) : undefined) ??
-                amountByNormCode.get(normId) ??
-                0;
-              price = qty > 0 ? Number(amt) / qty : 0;
+
+          /**
+           * Si hay líneas de factura pero no hubo cruce, NO usar cantidades del pedido inicial (comportamiento PWA).
+           * Solo rellenar desde el pedido si no hay factura usable.
+           */
+          if (!usedInvoiceQuantities && !(invDisplay?.items?.length)) {
+            for (const item of items) {
+              const id = String(item.productId ?? item.ProductId ?? item.product_id ?? '');
+              if (!id) continue;
+              let price = Number(item.price ?? item.unitPrice ?? 0) || 0;
+              const p = getProduct(id);
+              if (!price) {
+                const familyId = String(p?.familyId ?? p?.categoryId ?? '').trim();
+                if (familyId) {
+                  try {
+                    const hp = await histpricesApi.getLatest(familyId);
+                    price = hp?.price ?? 0;
+                  } catch (_) {}
+                }
+              }
+              const name = (item.productName ?? item.sku ?? p?.name ?? '').trim();
+              const sku = String(item.sku ?? p?.sku ?? p?.code ?? '').trim();
+              const qty = Number(item.quantity ?? item.toOrder ?? item.Quantity ?? 0) || 0;
+              orderItemsByProductId.set(id, { productName: name, sku, quantity: qty, price });
             }
-            if (!(price > 0)) {
-              try {
-                const latest = await histpricesApi.getLatest(id);
-                if (latest?.price != null) price = Number(latest.price) || 0;
-              } catch (_) {}
+          } else if (usedInvoiceQuantities) {
+            for (const [id, row] of orderItemsByProductId.entries()) {
+              if (row.price > 0) continue;
+              const oi = items.find((x: any) => String(x.productId ?? x.ProductId) === id);
+              let price = Number(oi?.price ?? oi?.unitPrice ?? 0) || 0;
+              if (!price) {
+                const productForPrice = getProduct(id);
+                const familyId = String(productForPrice?.familyId ?? productForPrice?.categoryId ?? '').trim();
+                if (familyId) {
+                  try {
+                    const hp = await histpricesApi.getLatest(familyId);
+                    price = hp?.price ?? 0;
+                  } catch (_) {}
+                }
+              }
+              orderItemsByProductId.set(id, { ...row, price });
             }
-            const name = (item.productName ?? item.sku ?? prod?.name ?? '').trim();
-            const sku = item.sku ?? prod?.code ?? prod?.sku ?? '';
-            orderItemsByProductId.set(id, {
-              productName: name,
-              sku: sku || name,
-              quantity: qty,
-              price,
-            });
           }
         } else {
           for (const item of items) {
             const id = String(item.productId ?? item.ProductId ?? item.product_id ?? '');
             if (id) {
               let price = Number(item.price ?? item.unitPrice ?? 0) || 0;
+              const p = getProduct(id);
               if (!price) {
-                try {
-                  const latest = await histpricesApi.getLatest(id);
-                  if (latest?.price != null) price = latest.price;
-                } catch (_) {}
+                const familyId = String(p?.familyId ?? p?.categoryId ?? '').trim();
+                if (familyId) {
+                  try {
+                    const hp = await histpricesApi.getLatest(familyId);
+                    price = hp?.price ?? 0;
+                  } catch (_) {}
+                }
               }
-              const name = (item.productName ?? item.sku ?? getProduct(id)?.name ?? '').trim();
-              const sku = item.sku ?? getProduct(id)?.code ?? getProduct(id)?.sku ?? '';
+              const name = (item.productName ?? item.sku ?? p?.name ?? '').trim();
+              const sku = String(item.sku ?? p?.sku ?? p?.code ?? '').trim();
               const qty = item.quantity ?? item.toOrder ?? item.Quantity ?? 0;
               orderItemsByProductId.set(id, {
                 productName: name,
-                sku: sku || name,
+                sku,
                 quantity: Number(qty) || 0,
                 price,
               });
@@ -259,8 +384,11 @@ export const OrderPlanogramView: React.FC<OrderPlanogramViewProps> = ({
               row,
               col,
               productId: product?.id ?? '',
-              productName: orderItem?.productName ?? product?.name ?? product?.code ?? product?.sku ?? '',
-              sku: orderItem?.sku ?? product?.code ?? product?.sku ?? '',
+              productName: orderItem?.productName ?? product?.name ?? '',
+              sku:
+                String(orderItem?.sku || '').trim() ||
+                String(product?.sku || '').trim() ||
+                String(product?.code || '').trim(),
               category: resolveCategory(product ?? null),
               toOrder: orderItem?.quantity ?? 0,
               price: orderItem?.price ?? product?.currentPrice ?? 0,
@@ -279,10 +407,15 @@ export const OrderPlanogramView: React.FC<OrderPlanogramViewProps> = ({
     return () => { mounted = false; };
   }, [order.id, order.planogramId, quantitySource]);
 
-  const getCellStyle = (item: ProductPosition): React.CSSProperties => {
-    if (!item.productId) return { backgroundColor: '#94a3b8', borderColor: '#64748b', borderWidth: 1, borderStyle: 'solid' };
-    if (item.toOrder > 0) return { backgroundColor: '#eff6ff', borderColor: '#93c5fd', borderWidth: 1, borderStyle: 'solid' };
-    return { backgroundColor: '#f1f5f9', borderColor: '#e2e8f0', borderWidth: 1, borderStyle: 'solid' };
+  /** Colores hex iguales a Tailwind PWA (slate-400/500, indigo-50/300, slate-100/200). */
+  const getCellSurface = (item: ProductPosition): React.CSSProperties => {
+    if (!item.productId) {
+      return { backgroundColor: '#94a3b8', borderColor: '#64748b' };
+    }
+    if (item.toOrder > 0) {
+      return { backgroundColor: '#eef2ff', borderColor: '#a5b4fc' };
+    }
+    return { backgroundColor: '#f1f5f9', borderColor: '#e2e8f0' };
   };
 
   if (loading) {
@@ -311,121 +444,124 @@ export const OrderPlanogramView: React.FC<OrderPlanogramViewProps> = ({
   const totalValue = grid.reduce((s, i) => s + i.toOrder * i.price, 0);
   const productsWithQty = grid.filter((i) => i.productId && i.toOrder > 0).length;
 
-  // Celdas un poco más grandes para buena lectura
-  const cellSize = 56;
-  const gap = 8;
-  const gridTotal = 10 * cellSize + 9 * gap;
+  /** Grilla 10×10 fija (misma idea que antes en admin + proporción PWA): evita que el modal rompa `grid-cols-10`. */
+  const cellSize = 72;
+  const cellGap = 8;
+  const gridWidthPx = 10 * cellSize + 9 * cellGap;
 
   return (
-    <div className="bg-slate-50">
-      <div className="bg-white border-b border-slate-200 px-4 py-3 sticky top-0 z-10">
-        <div className="flex items-center justify-between mb-3">
-          <div className="flex items-center gap-3">
-            <div>
-              <h2 className="text-slate-900 text-sm">{planogramName ?? translate('planogram')}</h2>
+    <div className="admin-planogram-print-compact bg-slate-50 print:bg-white">
+      <div className="bg-white border-b border-slate-200 px-4 py-3 sticky top-0 z-10 print:static print:border-0 print:shadow-none print:py-2 print:px-2">
+        <div className="flex items-center justify-between mb-3 gap-2 print:mb-2">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="min-w-0">
+              <h2 className="text-slate-900 text-sm print:text-xs">{planogramName ?? translate('planogram')}</h2>
               {planogramDescription && (
-                <p className="text-xs text-slate-500 mt-0.5">{planogramDescription}</p>
+                <p className="text-xs text-slate-500 mt-0.5 print:text-[10px] print:leading-tight">{planogramDescription}</p>
               )}
             </div>
           </div>
-          <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200">{translate('readOnly')}</Badge>
+          <div className="flex flex-col items-end gap-1 shrink-0">
+            <Badge variant="outline" className="bg-indigo-50 text-indigo-700 border-indigo-200 print:hidden">
+              {translate('readOnly')}
+            </Badge>
+          </div>
         </div>
-        <div className="grid grid-cols-3 gap-2">
-          <div className="bg-slate-50 rounded-lg p-2 text-center">
-            <p className="text-xs text-slate-500 mb-0.5">{translate('productsLabel')}</p>
-            <p className="text-sm text-slate-900">{productsWithQty}</p>
+        <div className="grid grid-cols-3 gap-2 print:gap-1">
+          <div className="bg-slate-50 rounded-lg p-2 text-center print:p-1.5">
+            <p className="text-xs text-slate-500 mb-0.5 print:text-[9px] print:mb-0">{translate('productsLabel')}</p>
+            <p className="text-sm text-slate-900 print:text-xs">{productsWithQty}</p>
           </div>
-          <div className="bg-blue-50 rounded-lg p-2 text-center">
-            <p className="text-xs text-blue-600 mb-0.5">{translate('quantityUnits')}</p>
-            <p className="text-sm text-blue-900">{totalToOrder}</p>
+          <div className="bg-indigo-50 rounded-lg p-2 text-center print:p-1.5">
+            <p className="text-xs text-indigo-600 mb-0.5 print:text-[9px] print:mb-0">{translate('quantityUnits')}</p>
+            <p className="text-sm text-indigo-900 print:text-xs">{totalToOrder}</p>
           </div>
-          <div className="bg-green-50 rounded-lg p-2 text-center">
-            <p className="text-xs text-green-600 mb-0.5">{translate('totalLabel')}</p>
-            <p className="text-sm text-green-900">${totalValue.toFixed(2)}</p>
+          <div className="bg-green-50 rounded-lg p-2 text-center print:p-1.5">
+            <p className="text-xs text-green-600 mb-0.5 print:text-[9px] print:mb-0">{translate('totalLabel')}</p>
+            <p className="text-sm text-green-900 print:text-xs">${totalValue.toFixed(2)}</p>
           </div>
         </div>
       </div>
 
-      <div className="px-4 py-4">
-        <p className="text-sm text-slate-600 mb-3">
-          {quantitySource === 'invoice'
-            ? translate('planogramViewInvoiceReadOnly')
-            : translate('planogramViewReadOnly')}
-        </p>
-        <div className="bg-white rounded-xl p-3 shadow-sm border border-slate-200 overflow-x-auto">
+      <div className="px-4 py-4 print:py-2 print:px-2">
+        <div className="bg-white rounded-xl p-3 shadow-sm border border-slate-200 overflow-x-auto print:shadow-none print:overflow-visible print:border print:break-inside-avoid print:p-1.5">
           <div
+            className="mx-auto print:mx-0"
             style={{
+              width: gridWidthPx,
+              minWidth: gridWidthPx,
               display: 'grid',
               gridTemplateColumns: `repeat(10, ${cellSize}px)`,
-              gap: `${gap}px`,
-              width: `${gridTotal}px`,
-              margin: '0 auto',
+              gridTemplateRows: `repeat(10, ${cellSize}px)`,
+              gap: cellGap,
+              boxSizing: 'content-box',
             }}
           >
             {grid.map((item) => (
               <div
                 key={`${item.row}-${item.col}`}
+                className="rounded-lg border border-solid flex flex-col items-center justify-center text-center min-h-0 min-w-0 overflow-hidden box-border"
                 style={{
                   width: cellSize,
                   height: cellSize,
-                  borderRadius: 8,
-                  ...getCellStyle(item),
-                  display: 'flex',
-                  flexDirection: 'column',
-                  alignItems: 'center',
-                  justifyContent: 'center',
                   padding: 2,
-                  textAlign: 'center',
-                  minHeight: 0,
-                  overflow: 'hidden',
+                  boxSizing: 'border-box',
+                  ...getCellSurface(item),
                 }}
+                title={item.productName ? `${item.productName}` : item.sku}
               >
                 {item.productId ? (
-                  <>
-                    <div className="flex items-center justify-center gap-1 w-full">
+                  <div className="flex flex-col items-center justify-center gap-0 w-full h-full min-h-0 min-w-0">
+                    <div className="flex flex-row items-center justify-center gap-0.5 w-full shrink-0 min-h-0 px-0.5">
                       {item.imageUrl ? (
-                        <img
-                          src={item.imageUrl}
-                          alt=""
-                          className="w-5 h-5 rounded object-cover flex-shrink-0"
-                          style={{ minWidth: 18, minHeight: 18 }}
-                        />
+                        <img src={item.imageUrl} alt="" className="w-7 h-7 rounded object-cover shrink-0" />
                       ) : (
-                        <div className="w-5 h-5 rounded bg-slate-200 flex items-center justify-center flex-shrink-0">
-                          <Package className="h-2.5 w-2.5 text-slate-500" />
+                        <div className="w-7 h-7 rounded bg-slate-200 flex items-center justify-center shrink-0">
+                          <Package className="h-3.5 w-3.5 text-slate-500" />
                         </div>
                       )}
                       <span
-                        className="text-[10px] leading-tight font-bold text-slate-900 truncate max-w-[44px]"
-                        title={item.sku}
+                        className="text-[6.5px] leading-tight font-semibold text-slate-900 truncate min-w-0 max-w-[34px] text-center"
+                        title={item.sku || undefined}
                       >
                         {item.sku || '—'}
                       </span>
                     </div>
-                    <span
-                      className="text-[7px] leading-tight font-normal text-slate-600 break-words line-clamp-2 w-full mt-0.5"
-                      title={item.productName}
-                    >
-                      {item.productName || ''}
-                    </span>
-                    {item.toOrder > 0 && (
-                      <span style={{ fontSize: 10, fontWeight: 600, color: '#1d4ed8', marginTop: 1 }}>{item.toOrder} u</span>
-                    )}
-                  </>
+                    {(item.productName || '').trim() ? (
+                      <span
+                        className="block w-full text-center text-slate-600 font-normal overflow-hidden line-clamp-2 mt-0.5 px-0.5"
+                        style={{ fontSize: '12px', lineHeight: 1.2, maxHeight: '18px' }}
+                        title={item.productName}
+                      >
+                        {item.productName}
+                      </span>
+                    ) : null}
+                    {item.toOrder > 0 ? (
+                      <span className="text-[10px] font-bold text-indigo-700 leading-none text-center mt-px">
+                        {item.toOrder} {translate('unitsSuffix')}
+                      </span>
+                    ) : null}
+                  </div>
                 ) : null}
               </div>
             ))}
           </div>
         </div>
-        <div className="mt-4 flex flex-wrap gap-4 text-xs text-slate-500">
-          <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-slate-400" />{translate('noQuantity')}</span>
-          <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-blue-50 border border-blue-300" />{translate('withQuantity')}</span>
+        <div className="mt-4 flex flex-wrap gap-4 text-xs text-slate-500 print:hidden">
+          <span className="flex items-center gap-1.5">
+            <span className="w-3 h-3 rounded bg-slate-400" />
+            {translate('noQuantity')}
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span className="w-3 h-3 rounded bg-indigo-50 border border-indigo-300" />
+            {translate('withQuantity')}
+          </span>
         </div>
 
-        {/* Resumen por categoría: todas las registradas, con Pcs (0 o suma del pedido) */}
+        {/* Resumen por familia/categoría: visible también al imprimir pedido inicial */}
         {allCategories.length > 0 && (
-          <div className="mt-6 border border-slate-200 rounded-lg overflow-hidden bg-slate-50/50">
-            <table className="w-full text-sm">
+          <div className="mt-6 border border-slate-200 rounded-lg overflow-hidden bg-slate-50/50 print:mt-3 print:border-slate-300 print:break-inside-avoid">
+            <table className="w-full text-sm print:text-xs">
               <thead>
                 <tr className="bg-slate-200 text-slate-800">
                   <th className="text-left py-2 px-3 font-semibold">{translate('familyCol') || 'Family'}</th>

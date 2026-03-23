@@ -91,6 +91,8 @@ interface FamilyFormData {
   sku: string;
   volume: string;
   unit: string;
+  /** Solo al crear: precio inicial (histórico). */
+  price: string;
 }
 interface FamilyFormErrors {
   name?: string;
@@ -98,6 +100,7 @@ interface FamilyFormErrors {
   sku?: string;
   volume?: string;
   unit?: string;
+  price?: string;
 }
 
 /** Clave estable para mapa precio↔familia (evita fallos string vs number en ids). */
@@ -159,7 +162,8 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
     code: '',
     sku: '',
     volume: '',
-    unit: ''
+    unit: '',
+    price: '',
   });
   const [familyFormErrors, setFamilyFormErrors] = useState<FamilyFormErrors>({});
   const [brandSearchTerm, setBrandSearchTerm] = useState('');
@@ -682,6 +686,25 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
       toast.error(translate('duplicateFamilyCode'));
       return;
     }
+
+    let initialPriceForCreate = 0;
+    if (!editingCategory) {
+      const priceRaw = familyForm.price.trim().replace(',', '.');
+      initialPriceForCreate = Number(priceRaw);
+      if (
+        !familyForm.price.trim() ||
+        !Number.isFinite(initialPriceForCreate) ||
+        initialPriceForCreate <= 0
+      ) {
+        setFamilyFormErrors((prev) => ({
+          ...prev,
+          price: translate('priceMustBePositive'),
+        }));
+        toast.error(translate('familyInitialPriceRequired'));
+        return;
+      }
+    }
+
     setFamilyFormErrors({});
     try {
       if (editingCategory) {
@@ -707,12 +730,39 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
         toast.success(translate('familyUpdated'));
       } else {
         const created = await categoriesApi.create(payload as any);
+        const fid = familyPriceKey(created.id);
+        let histPriceSaved = false;
+        try {
+          await histpricesApi.create({
+            familyId: fid,
+            price: initialPriceForCreate,
+            startDate: new Date(),
+          });
+          histPriceSaved = true;
+        } catch (hpErr: any) {
+          console.error('[ProductManagement] histprice tras crear familia:', hpErr);
+          toast.error(
+            hpErr?.data?.message ??
+              hpErr?.message ??
+              translate('familyCreatedPriceFailed')
+          );
+        }
         setCategories((prev) => [...prev, created]);
-        await refreshOneFamilyPrice(created.id);
-        toast.success(translate('familyCreated'));
+        if (histPriceSaved) {
+          setFamilyLatestPrices((prev) => ({ ...prev, [fid]: initialPriceForCreate }));
+        }
+        await loadProducts({
+          quiet: true,
+          ...(histPriceSaved
+            ? { forceFamilyPrice: { familyId: fid, price: initialPriceForCreate } }
+            : {}),
+        });
+        if (histPriceSaved) {
+          toast.success(translate('familyCreated'));
+        }
         setCategorySearchTerm(created.name);
       }
-      setFamilyForm({ name: '', code: '', sku: '', volume: '', unit: '' });
+      setFamilyForm({ name: '', code: '', sku: '', volume: '', unit: '', price: '' });
       setFamilyFormErrors({});
       setEditingCategory(null);
       setShowCategoryDialog(false);
@@ -1402,7 +1452,7 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
                     type="button"
                     onClick={() => {
                       setEditingCategory(null);
-                      setFamilyForm({ name: '', code: '', sku: '', volume: '', unit: '' });
+                      setFamilyForm({ name: '', code: '', sku: '', volume: '', unit: '', price: '' });
                       setFamilyFormErrors({});
                       setShowCategoryDialog(true);
                     }}
@@ -1501,7 +1551,8 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
                               code: String((c as any).code ?? ''),
                               sku: String((c as any).sku ?? ''),
                               volume: (c as any).volume != null ? String((c as any).volume) : '',
-                              unit: String((c as any).unit ?? '')
+                              unit: String((c as any).unit ?? ''),
+                              price: '',
                             });
                             setFamilyFormErrors({});
                             setShowCategoryDialog(true);
@@ -1852,7 +1903,9 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>{editingCategory ? translate('editFamily') : translate('newFamily')}</DialogTitle>
-            <DialogDescription>{editingCategory ? translate('editFamilyDesc') : translate('newFamilyDesc')}</DialogDescription>
+            <DialogDescription>
+              {editingCategory ? translate('editFamilyDesc') : translate('newFamilyDescWithPrice')}
+            </DialogDescription>
           </DialogHeader>
           <div className="space-y-5 px-6 py-4">
             <Label htmlFor="familyName">{translate('name')} *</Label>
@@ -1930,11 +1983,34 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
                 {familyFormErrors.unit && <p className="text-sm text-red-600 mt-1">{familyFormErrors.unit}</p>}
               </div>
             </div>
+            {!editingCategory ? (
+              <div>
+                <Label htmlFor="familyInitialPrice">{translate('familyInitialPriceLabel')}</Label>
+                <Input
+                  id="familyInitialPrice"
+                  type="text"
+                  inputMode="decimal"
+                  value={familyForm.price}
+                  onChange={(e) => {
+                    setFamilyForm((prev) => ({ ...prev, price: e.target.value }));
+                    if (familyFormErrors.price) {
+                      setFamilyFormErrors((prev) => ({ ...prev, price: undefined }));
+                    }
+                  }}
+                  placeholder="0.00"
+                  className={familyFormErrors.price ? 'border-red-500' : ''}
+                />
+                <p className="text-xs text-gray-500 mt-1">{translate('familyInitialPriceHint')}</p>
+                {familyFormErrors.price && (
+                  <p className="text-sm text-red-600 mt-1">{familyFormErrors.price}</p>
+                )}
+              </div>
+            ) : null}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => {
               setShowCategoryDialog(false);
-              setFamilyForm({ name: '', code: '', sku: '', volume: '', unit: '' });
+              setFamilyForm({ name: '', code: '', sku: '', volume: '', unit: '', price: '' });
               setFamilyFormErrors({});
               setEditingCategory(null);
             }}>{translate('cancel')}</Button>

@@ -138,7 +138,7 @@ export interface Order {
   storeId: string;
   createdAt: Date;
   po: string;
-  status: 'initial' | 'confirmed' | 'invoiced' | 'completed' | 'pending' | 'delivered';
+  status: 'initial' | 'confirmed' | 'invoiced' | 'completed' | 'pending' | 'delivered' | 'cancelled';
   storeName?: string;
   sellerName?: string;
   planogramId?: string;
@@ -149,6 +149,8 @@ export interface Order {
   updatedAt: Date;
   completedAt?: Date;
   items: OrderItem[];
+  /** Factura asociada (API admin) */
+  invoiceId?: string | number;
 }
 
 export interface OrderItem {

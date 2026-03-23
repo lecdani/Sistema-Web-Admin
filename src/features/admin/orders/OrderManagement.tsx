@@ -14,13 +14,10 @@ import {
   ArrowLeft,
   ShoppingCart,
   Eye,
-  FileText,
   Search,
   Filter,
   Download,
   Calendar,
-  Package,
-  DollarSign,
   User as UserIcon,
   Store as StoreIcon,
   AlertCircle,
@@ -32,7 +29,6 @@ import {
   ExternalLink,
   Printer,
   Upload,
-  Edit,
   Trash2,
   MoreHorizontal,
 } from 'lucide-react';
@@ -75,19 +71,6 @@ export function OrderManagement({ onBack }: OrderManagementProps) {
   const [planogramDialogMode, setPlanogramDialogMode] = useState<'view' | 'edit'>('view');
   const [orderToDelete, setOrderToDelete] = useState<Order | null>(null);
   const [deletingOrderId, setDeletingOrderId] = useState<string | null>(null);
-  const [shortageStats, setShortageStats] = useState<{
-    affectedOrders: number;
-    affectedLines: number;
-    totalOrdered: number;
-    totalDelivered: number;
-    totalMissing: number;
-  }>({
-    affectedOrders: 0,
-    affectedLines: 0,
-    totalOrdered: 0,
-    totalDelivered: 0,
-    totalMissing: 0,
-  });
 
   const [filters, setFilters] = useState<OrderFilters>({
     dateFrom: '',
@@ -105,13 +88,23 @@ export function OrderManagement({ onBack }: OrderManagementProps) {
     applyFilters();
   }, [orders, searchTerm, filters]);
 
+  /** Alineado con backend: 1=creado, 2=facturado, 3=cancelado (sin estado "confirmado" separado). */
   const getOrderLifecycleStatus = (orderLike: {
     status?: string;
     invoiceId?: string | number;
-  }): 'initial' | 'confirmed' | 'invoiced' => {
+  }): 'initial' | 'invoiced' | 'cancelled' => {
     const s = String(orderLike?.status || '').toLowerCase().trim();
-    if (s === 'invoiced' || s === 'delivered') return 'invoiced';
-    if (s === 'completed' || s === 'confirmed') return 'confirmed';
+    if (s === 'cancelled' || s === 'canceled' || s === 'cancelado' || s === '3') return 'cancelled';
+    if (
+      s === 'invoiced' ||
+      s === 'delivered' ||
+      s === '2' ||
+      s === 'completed' ||
+      s === 'confirmed' ||
+      s === 'confirmado'
+    ) {
+      return 'invoiced';
+    }
     return 'initial';
   };
 
@@ -142,31 +135,38 @@ export function OrderManagement({ onBack }: OrderManagementProps) {
       // Mapear al tipo Order del Admin (total/subtotal ya vienen de getAllOrders)
       const mappedOrders: Order[] = apiOrders.map((o) => {
         const rawStatus = (o.status || '').toLowerCase();
-        const normalizedStatus: 'initial' | 'confirmed' | 'invoiced' =
-          rawStatus === 'invoiced' || rawStatus === 'delivered'
+        const normalizedStatus: Order['status'] =
+          rawStatus === 'invoiced' ||
+          rawStatus === 'delivered' ||
+          rawStatus === '2' ||
+          rawStatus === 'completed' ||
+          rawStatus === 'confirmed' ||
+          rawStatus === 'confirmado'
             ? 'invoiced'
-            : rawStatus === 'completed' || rawStatus === 'confirmed'
-            ? 'confirmed'
+            : rawStatus === 'cancelled' || rawStatus === 'canceled' || rawStatus === 'cancelado' || rawStatus === '3'
+            ? 'cancelled'
             : 'initial';
         const total = Number(o.total) || 0;
         const subtotal = Number(o.subtotal) || 0 || total;
 
+        const ui = o as import('@/shared/services/orders-api').OrderForUI;
         return {
           id: o.id,
           salespersonId: o.salespersonId || '',
           storeId: o.storeId,
           createdAt: new Date(o.date),
-          po: ((o as import('@/shared/services/orders-api').OrderForUI).po ?? '').trim(),
+          po: (ui.po ?? '').trim(),
           status: normalizedStatus,
           storeName: o.storeName,
           sellerName: undefined,
-          planogramId: undefined,
+          planogramId: ui.planogramId,
           planogramName: undefined,
           subtotal,
           total,
           notes: undefined,
           updatedAt: new Date(o.date),
           completedAt: normalizedStatus !== 'initial' ? new Date(o.date) : undefined,
+          invoiceId: ui.invoiceId,
           items: [],
         };
       });
@@ -236,50 +236,6 @@ export function OrderManagement({ onBack }: OrderManagementProps) {
       setUsers(allUsers.filter((u: User) => u.role === 'user')); // Solo vendedores
       setProducts(productsData);
       setPlanograms(planogramsData);
-
-      const invoicedForDiscrepancies = enrichedOrders.filter((o) => {
-        const lifecycle = getOrderLifecycleStatus(o);
-        return lifecycle === 'invoiced' || !!(o as any).invoiceId;
-      });
-      if (invoicedForDiscrepancies.length > 0) {
-        const rowsByOrder = await Promise.all(
-          invoicedForDiscrepancies.map(async (o) => {
-            const rows = await ordersApi.getOrderDiscrepancies(o.id);
-            return { orderId: o.id, rows };
-          })
-        );
-        let affectedOrders = 0;
-        let affectedLines = 0;
-        let totalOrdered = 0;
-        let totalDelivered = 0;
-        let totalMissing = 0;
-        rowsByOrder.forEach(({ rows }) => {
-          const nonZero = rows.filter((r) => Number(r.difference) !== 0);
-          if (nonZero.length > 0) affectedOrders += 1;
-          affectedLines += nonZero.length;
-          rows.forEach((r) => {
-            totalOrdered += Number(r.orderedQty || 0);
-            totalDelivered += Number(r.deliveredQty || 0);
-            const diff = Number(r.difference || 0);
-            if (diff > 0) totalMissing += diff;
-          });
-        });
-        setShortageStats({
-          affectedOrders,
-          affectedLines,
-          totalOrdered,
-          totalDelivered,
-          totalMissing,
-        });
-      } else {
-        setShortageStats({
-          affectedOrders: 0,
-          affectedLines: 0,
-          totalOrdered: 0,
-          totalDelivered: 0,
-          totalMissing: 0,
-        });
-      }
     } catch (error) {
       console.error('Error cargando datos:', error);
       toast.error(translate('errorLoadData'));
@@ -341,10 +297,11 @@ export function OrderManagement({ onBack }: OrderManagementProps) {
           </Badge>
         );
       case 'confirmed':
+      case 'completed':
         return (
-          <Badge className="bg-blue-100 text-blue-800 border-blue-200">
-            <FileText className="h-3 w-3 mr-1" />
-            {translate('confirmedStatus')}
+          <Badge className="bg-green-100 text-green-800 border-green-200">
+            <CheckCircle className="h-3 w-3 mr-1" />
+            {translate('statusInvoiced')}
           </Badge>
         );
       case 'initial':
@@ -352,6 +309,13 @@ export function OrderManagement({ onBack }: OrderManagementProps) {
           <Badge className="bg-yellow-100 text-yellow-800 border-yellow-200">
             <Clock className="h-3 w-3 mr-1" />
             {translate('initialStatus')}
+          </Badge>
+        );
+      case 'cancelled':
+        return (
+          <Badge className="bg-slate-200 text-slate-800 border-slate-300">
+            <AlertCircle className="h-3 w-3 mr-1" />
+            {translate('cancelled') || 'Cancelado'}
           </Badge>
         );
       default:
@@ -364,9 +328,12 @@ export function OrderManagement({ onBack }: OrderManagementProps) {
       case 'invoiced':
         return <CheckCircle className="h-4 w-4" />;
       case 'confirmed':
-        return <FileText className="h-4 w-4" />;
+      case 'completed':
+        return <CheckCircle className="h-4 w-4" />;
       case 'initial':
         return <Clock className="h-4 w-4" />;
+      case 'cancelled':
+        return <AlertCircle className="h-4 w-4" />;
       default:
         return <AlertCircle className="h-4 w-4" />;
     }
@@ -387,13 +354,10 @@ export function OrderManagement({ onBack }: OrderManagementProps) {
     }
   };
 
-  const handleEditDisabled = () => {
-    toast.error('La edicion de pedidos esta bloqueada.');
-  };
-
   const handleDeleteOrderClick = (order: Order, e: React.MouseEvent) => {
     e.stopPropagation();
-    if ((order.status || '').toLowerCase() !== 'initial') {
+    const life = getOrderLifecycleStatus(order);
+    if (life !== 'initial' && life !== 'cancelled') {
       toast.error(translate('onlyDeletePendingOrders'));
       return;
     }
@@ -486,8 +450,8 @@ export function OrderManagement({ onBack }: OrderManagementProps) {
         const statusLabel =
           lifecycle === 'invoiced'
             ? translate('statusInvoiced')
-            : lifecycle === 'confirmed'
-            ? translate('confirmedStatus')
+            : lifecycle === 'cancelled'
+            ? translate('cancelled') || 'Cancelado'
             : translate('initialStatus');
         ws.getCell(row, 1).value = (o as any).po ?? o.id ?? '';
         ws.getCell(row, 2).value = o.id ?? '';
@@ -512,11 +476,11 @@ export function OrderManagement({ onBack }: OrderManagementProps) {
       ws.getCell(row, 1).value = translate('initialStatus');
       ws.getCell(row, 2).value = exportRows.filter((o) => getOrderLifecycleStatus(o) === 'initial').length;
       row += 1;
-      ws.getCell(row, 1).value = translate('confirmedStatus');
-      ws.getCell(row, 2).value = exportRows.filter((o) => getOrderLifecycleStatus(o) === 'confirmed').length;
-      row += 1;
       ws.getCell(row, 1).value = translate('statusInvoiced');
       ws.getCell(row, 2).value = exportRows.filter((o) => getOrderLifecycleStatus(o) === 'invoiced').length;
+      row += 1;
+      ws.getCell(row, 1).value = translate('cancelled') || 'Cancelado';
+      ws.getCell(row, 2).value = exportRows.filter((o) => getOrderLifecycleStatus(o) === 'cancelled').length;
       row += 1;
       ws.getCell(row, 1).value = translate('ordersSumSubtotals');
       ws.getCell(row, 2).value = Number(sumSubtotal.toFixed(2));
@@ -577,25 +541,15 @@ export function OrderManagement({ onBack }: OrderManagementProps) {
     const source = filteredOrders.length > 0 ? filteredOrders : orders;
     const totalOrders = source.length;
     const initialCount = source.filter((o) => getOrderLifecycleStatus(o) === 'initial').length;
-    const confirmedCount = source.filter((o) => getOrderLifecycleStatus(o) === 'confirmed').length;
     const invoicedCount = source.filter((o) => getOrderLifecycleStatus(o) === 'invoiced').length;
-    const totalValue = source.reduce((sum, o) => sum + (Number(o.total) || 0), 0);
-    const avgTicket = totalOrders > 0 ? totalValue / totalOrders : 0;
-    const deliveryRate =
-      shortageStats.totalOrdered > 0
-        ? (shortageStats.totalDelivered / shortageStats.totalOrdered) * 100
-        : 0;
+    const cancelledCount = source.filter((o) => getOrderLifecycleStatus(o) === 'cancelled').length;
     return {
       totalOrders,
       initialCount,
-      confirmedCount,
       invoicedCount,
-      totalValue,
-      avgTicket,
-      deliveryRate,
-      missingUnits: shortageStats.totalMissing,
+      cancelledCount,
     };
-  }, [orders, filteredOrders, shortageStats]);
+  }, [orders, filteredOrders]);
 
   return (
     <div className="space-y-6">
@@ -630,8 +584,8 @@ export function OrderManagement({ onBack }: OrderManagementProps) {
         </div>
       </div>
 
-      {/* Metrics */}
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+      {/* Métricas (estados backend: creado / facturado / cancelado) */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
         <Card className="border-slate-200">
           <CardContent className="pt-4">
             <div className="flex items-center justify-between">
@@ -662,19 +616,6 @@ export function OrderManagement({ onBack }: OrderManagementProps) {
           <CardContent className="pt-4">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-xs font-medium text-slate-500">{translate('confirmedStatus')}</p>
-                <p className="text-2xl font-bold text-blue-700">{orderMetrics.confirmedCount}</p>
-              </div>
-              <div className="rounded-lg bg-blue-100 p-2.5">
-                <FileText className="h-5 w-5 text-blue-600" />
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-        <Card className="border-slate-200">
-          <CardContent className="pt-4">
-            <div className="flex items-center justify-between">
-              <div>
                 <p className="text-xs font-medium text-slate-500">{translate('statusInvoiced')}</p>
                 <p className="text-2xl font-bold text-green-700">{orderMetrics.invoicedCount}</p>
               </div>
@@ -688,50 +629,11 @@ export function OrderManagement({ onBack }: OrderManagementProps) {
           <CardContent className="pt-4">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-xs font-medium text-slate-500">{translate('totalValue')}</p>
-                <p className="text-2xl font-bold text-slate-900">${orderMetrics.totalValue.toFixed(2)}</p>
+                <p className="text-xs font-medium text-slate-500">{translate('cancelled') || 'Cancelados'}</p>
+                <p className="text-2xl font-bold text-slate-700">{orderMetrics.cancelledCount}</p>
               </div>
-              <div className="rounded-lg bg-slate-100 p-2.5">
-                <Package className="h-5 w-5 text-slate-700" />
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-        <Card className="border-slate-200">
-          <CardContent className="pt-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-xs font-medium text-slate-500">Ticket promedio</p>
-                <p className="text-2xl font-bold text-slate-900">${orderMetrics.avgTicket.toFixed(2)}</p>
-              </div>
-              <div className="rounded-lg bg-violet-100 p-2.5">
-                <DollarSign className="h-5 w-5 text-violet-700" />
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-        <Card className="border-slate-200">
-          <CardContent className="pt-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-xs font-medium text-slate-500">Nivel de entrega</p>
-                <p className="text-2xl font-bold text-teal-700">{orderMetrics.deliveryRate.toFixed(1)}%</p>
-              </div>
-              <div className="rounded-lg bg-teal-100 p-2.5">
-                <CheckCircle className="h-5 w-5 text-teal-700" />
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-        <Card className="border-slate-200">
-          <CardContent className="pt-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-xs font-medium text-slate-500">Unidades faltantes</p>
-                <p className="text-2xl font-bold text-red-700">{orderMetrics.missingUnits}</p>
-              </div>
-              <div className="rounded-lg bg-red-100 p-2.5">
-                <AlertCircle className="h-5 w-5 text-red-600" />
+              <div className="rounded-lg bg-slate-200 p-2.5">
+                <X className="h-5 w-5 text-slate-700" />
               </div>
             </div>
           </CardContent>
@@ -795,42 +697,17 @@ export function OrderManagement({ onBack }: OrderManagementProps) {
                   <SelectValue placeholder={translate('filterByStatus')}>
                     {filters.status === 'all' && translate('allStatuses')}
                     {filters.status === 'initial' && translate('initialStatus')}
-                    {filters.status === 'confirmed' && translate('confirmedStatus')}
                     {filters.status === 'invoiced' && translate('statusInvoiced')}
+                    {filters.status === 'cancelled' && (translate('cancelled') || 'Cancelado')}
                   </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">{translate('allStatuses')}</SelectItem>
                   <SelectItem value="initial">{translate('initialStatus')}</SelectItem>
-                  <SelectItem value="confirmed">{translate('confirmedStatus')}</SelectItem>
                   <SelectItem value="invoiced">{translate('statusInvoiced')}</SelectItem>
+                  <SelectItem value="cancelled">{translate('cancelled') || 'Cancelado'}</SelectItem>
                 </SelectContent>
               </Select>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
-      <Card className="border-slate-200">
-        <CardContent className="pt-4">
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 text-sm">
-            <div>
-              <p className="text-slate-500">Pedidos con faltantes</p>
-              <p className="text-lg font-semibold text-slate-900">{shortageStats.affectedOrders}</p>
-            </div>
-            <div>
-              <p className="text-slate-500">Lineas con diferencia</p>
-              <p className="text-lg font-semibold text-amber-700">{shortageStats.affectedLines}</p>
-            </div>
-            <div>
-              <p className="text-slate-500">Pedido vs entregado</p>
-              <p className="text-lg font-semibold text-slate-900">
-                {shortageStats.totalOrdered} / {shortageStats.totalDelivered}
-              </p>
-            </div>
-            <div>
-              <p className="text-slate-500">Faltante neto</p>
-              <p className="text-lg font-semibold text-red-700">{shortageStats.totalMissing}</p>
             </div>
           </div>
         </CardContent>
@@ -914,11 +791,8 @@ export function OrderManagement({ onBack }: OrderManagementProps) {
                                 <Eye className="h-4 w-4 shrink-0" />
                                 <span>{translate('viewOrderDetails')}</span>
                               </DropdownMenuItem>
-                              <DropdownMenuItem onClick={handleEditDisabled} className="gap-3 py-3 px-4 text-base text-slate-500 hover:bg-slate-100 cursor-not-allowed">
-                                <Edit className="h-4 w-4 shrink-0" />
-                                <span>{translate('editOrder')} ({translate('inactive') || 'Bloqueado'})</span>
-                              </DropdownMenuItem>
-                              {getOrderLifecycleStatus(order) === 'initial' && (
+                              {(getOrderLifecycleStatus(order) === 'initial' ||
+                                getOrderLifecycleStatus(order) === 'cancelled') && (
                                 <DropdownMenuItem
                                   onClick={(e) => handleDeleteOrderClick(order, e as unknown as React.MouseEvent)}
                                   className="gap-3 py-3 px-4 text-base text-red-600 hover:bg-red-50 cursor-pointer"
@@ -957,7 +831,7 @@ export function OrderManagement({ onBack }: OrderManagementProps) {
 
       {/* Order Detail Dialog */}
       <Dialog open={showOrderDetail} onOpenChange={setShowOrderDetail}>
-        <DialogContent className="!w-[65vw] !max-w-[1200px] max-h-[90vh] overflow-y-auto p-0">
+        <DialogContent className="order-detail-dialog-inner !w-[65vw] !max-w-[1200px] max-h-[90vh] overflow-y-auto p-0">
           {selectedOrder && (
             <OrderDetailView
               orderId={selectedOrder.id}

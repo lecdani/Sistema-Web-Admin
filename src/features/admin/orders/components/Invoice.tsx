@@ -56,7 +56,21 @@ export function Invoice({
     <>
       <style>{`
         #invoice-print tbody tr:hover { background-color: rgba(248, 250, 252, 0.5); }
-        @media print { #invoice-print { box-shadow: none !important; } }
+        @media print {
+          #invoice-print {
+            box-shadow: none !important;
+            max-width: none !important;
+            overflow: visible !important;
+            page-break-inside: auto;
+          }
+          #invoice-print .invoice-inner {
+            max-width: none !important;
+            padding: 1rem 1.5rem 2rem !important;
+          }
+          #invoice-print .invoice-table-wrap {
+            overflow: visible !important;
+          }
+        }
       `}</style>
     <div
       id="invoice-print"
@@ -71,7 +85,10 @@ export function Invoice({
       }}
       className="print:shadow-none"
     >
-      <div style={{ padding: '2.5rem 2.5rem 3.5rem 2.5rem', maxWidth: '48rem', marginLeft: 'auto', marginRight: 'auto' }} className="md:!px-12 md:!py-14">
+      <div
+        className="invoice-inner md:!px-12 md:!py-14"
+        style={{ padding: '2.5rem 2.5rem 3.5rem 2.5rem', maxWidth: '48rem', marginLeft: 'auto', marginRight: 'auto' }}
+      >
         <div
           style={{
             borderBottomWidth: 2,
@@ -176,7 +193,10 @@ export function Invoice({
           </div>
         </div>
 
-        <div style={{ overflow: 'hidden', border: `1px solid ${s.slate200}`, marginBottom: '2.5rem' }}>
+        <div
+          className="invoice-table-wrap"
+          style={{ overflow: 'hidden', border: `1px solid ${s.slate200}`, marginBottom: '2.5rem' }}
+        >
           <table style={{ width: '100%', fontSize: '0.875rem', borderCollapse: 'collapse' }}>
             <thead>
               <tr style={{ backgroundColor: s.slate800, color: s.white }}>

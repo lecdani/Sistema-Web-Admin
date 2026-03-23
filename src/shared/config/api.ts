@@ -241,6 +241,7 @@ export class ApiClient {
           endpoint.startsWith('/orders/orders/user/');
         /** Sin factura / sin datos / ruta aún no desplegada: el front trata como lista vacía. */
         const isOrderDiscrepanciesEndpoint =
+          endpoint.includes('/orders/orders/dicrepancies/') ||
           endpoint.includes('/orders/dicrepancies/') ||
           endpoint.includes('/orders/discrepancies/');
         const isExpected404 =
@@ -344,6 +345,14 @@ export class ApiClient {
     return this.request<T>(endpoint, {
       method: 'PUT',
       body: data ? JSON.stringify(data) : undefined
+    });
+  }
+
+  /** PUT con JSON ya serializado (payload exacto para DTO .NET). */
+  async putBody<T = any>(endpoint: string, jsonBody: string): Promise<T> {
+    return this.request<T>(endpoint, {
+      method: 'PUT',
+      body: jsonBody
     });
   }
 

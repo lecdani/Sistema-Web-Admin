@@ -16,8 +16,10 @@ import {
   RefreshCw,
   X,
   ArrowLeft,
+  Clock,
   ChevronLeft,
-  ChevronRight
+  ChevronRight,
+  AlertTriangle
 } from 'lucide-react';
 import { getBackendAssetUrl } from '@/shared/config/api';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/shared/components/base/Card';
@@ -47,7 +49,13 @@ import { getFromLocalStorage } from '@/shared/services/database';
 import { useLanguage } from '@/shared/hooks/useLanguage';
 import { Order, Invoice, Product, Store, City, User } from '@/shared/types';
 import { toast } from 'sonner';
-import { ordersApi, fetchAllOrderSummaries } from '@/shared/services/orders-api';
+import { ordersApi, fetchAllOrderSummaries, type AdminOrderSummary } from '@/shared/services/orders-api';
+import {
+  appendReportOrdersAndShortageSheets,
+  computeShortageAnalytics,
+  getOrderLifecycleFromStatus,
+  type ShortageAnalyticsResult,
+} from '@/features/admin/reports/reportOrdersExcel';
 import { productsApi } from '@/shared/services/products-api';
 import { storesApi } from '@/shared/services/stores-api';
 import { citiesApi } from '@/shared/services/cities-api';
@@ -97,6 +105,23 @@ function getProductImageUrl(product: Product | null | undefined): string {
   return '';
 }
 
+/** Nombre legible de tienda: catálogo cargado en reportes o texto del pedido. */
+function resolveStoreLabelFromList(
+  stores: Store[],
+  storeId: string | undefined,
+  fallbackName: string
+): string {
+  const id = storeId?.trim();
+  if (id) {
+    const st =
+      stores.find((s) => String(s.id) === id) ??
+      stores.find((s) => !Number.isNaN(Number(id)) && Number(s.id) === Number(id));
+    if (st?.name?.trim()) return st.name.trim();
+  }
+  const fb = (fallbackName || '').trim();
+  return fb || '—';
+}
+
 export function ReportsManagement({ onBack }: ReportsManagementProps) {
   const router = useRouter();
   const { translate, locale } = useLanguage();
@@ -106,6 +131,11 @@ export function ReportsManagement({ onBack }: ReportsManagementProps) {
   const [cities, setCities] = useState<City[]>([]);
   const [sellers, setSellers] = useState<User[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  /** Resumen de pedidos desde API (pipeline: pendientes / facturados / cancelados). */
+  const [orderSummaries, setOrderSummaries] = useState<AdminOrderSummary[]>([]);
+  /** Análisis pedido vs factura (faltantes), según pedidos facturados en el ámbito de filtros. */
+  const [shortageAnalytics, setShortageAnalytics] = useState<ShortageAnalyticsResult | null>(null);
+  const [shortageLoading, setShortageLoading] = useState(false);
 
   const [filters, setFilters] = useState<FilterState>({
     dateFrom: '',
@@ -154,6 +184,8 @@ export function ReportsManagement({ onBack }: ReportsManagementProps) {
 
         const orderIdToPo = new Map<string, string>();
         const orderIdToSummary = new Map<string, { storeName?: string; storeId?: string; salespersonId?: string; salespersonName?: string }>();
+        setOrderSummaries(Array.isArray(ordersSummaries) ? (ordersSummaries as AdminOrderSummary[]) : []);
+
         (ordersSummaries as any[]).forEach((o: any) => {
           const id = String(o?.id ?? o?.backendOrderId ?? '');
           if (id) {
@@ -336,6 +368,23 @@ export function ReportsManagement({ onBack }: ReportsManagementProps) {
       } catch (apiError) {
         console.warn('Reportes: API no disponible, usando datos locales.', apiError);
         const ordersData = getFromLocalStorage('app-orders') || [];
+        setOrderSummaries(
+          (ordersData as Order[]).map(
+            (o): AdminOrderSummary => ({
+              id: o.id,
+              storeId: o.storeId,
+              storeName: o.storeName ?? '',
+              date: o.createdAt instanceof Date ? o.createdAt.toISOString() : String(o.createdAt),
+              status: o.status,
+              subtotal: o.subtotal ?? 0,
+              tax: 0,
+              total: o.total ?? 0,
+              po: o.po,
+              invoiceId: (o as any).invoiceId,
+              salespersonId: o.salespersonId,
+            })
+          )
+        );
         const invoicesData = getFromLocalStorage('app-invoices') || [];
         productsData = getFromLocalStorage('app-products') || [];
         storesData = getFromLocalStorage('app-stores') || [];
@@ -393,6 +442,7 @@ export function ReportsManagement({ onBack }: ReportsManagementProps) {
       toast.success(translate('reportDataLoaded'));
     } catch (error) {
       console.error('Error cargando datos de reportes:', error);
+      setOrderSummaries([]);
       toast.error(translate('errorLoadReports'));
     } finally {
       setIsLoading(false);
@@ -416,6 +466,127 @@ export function ReportsManagement({ onBack }: ReportsManagementProps) {
       return true;
     });
   }, [salesData, filters]);
+
+  /** Pedidos filtrados por los mismos criterios de fecha / tienda / vendedor (sin filtro por producto). */
+  const filteredOrderSummaries = useMemo(() => {
+    return orderSummaries.filter((o) => {
+      const d = new Date(o.date);
+      if (filters.dateFrom && d < new Date(filters.dateFrom)) return false;
+      if (filters.dateTo && d > new Date(`${filters.dateTo}T23:59:59.999`)) return false;
+      if (filters.storeId !== 'all' && String(o.storeId) !== String(filters.storeId)) return false;
+      if (filters.sellerId !== 'all' && String(o.salespersonId ?? '') !== String(filters.sellerId))
+        return false;
+      return true;
+    });
+  }, [orderSummaries, filters.dateFrom, filters.dateTo, filters.storeId, filters.sellerId]);
+
+  const invoicedOrderSummaries = useMemo(
+    () => filteredOrderSummaries.filter((o) => getOrderLifecycleFromStatus(o.status) === 'invoiced'),
+    [filteredOrderSummaries]
+  );
+
+  useEffect(() => {
+    if (isLoading) return;
+    let cancelled = false;
+    const empty: ShortageAnalyticsResult = {
+      analyzed: 0,
+      ordersWithShort: 0,
+      totalShortUnits: 0,
+      totalShortLines: 0,
+      topProducts: [],
+      topStores: [],
+      shortUnitsByMonth: [],
+      detailSample: [],
+    };
+    setShortageLoading(true);
+    setShortageAnalytics(null);
+    (async () => {
+      try {
+        if (invoicedOrderSummaries.length === 0) {
+          if (!cancelled) setShortageAnalytics(empty);
+          return;
+        }
+        const data = await computeShortageAnalytics(invoicedOrderSummaries);
+        if (!cancelled) setShortageAnalytics(data);
+      } catch (e) {
+        console.error(e);
+        if (!cancelled) {
+          toast.error(translate('reportsShortageErrorCompute'));
+          setShortageAnalytics(empty);
+        }
+      } finally {
+        if (!cancelled) setShortageLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- datos numéricos; no recargar al cambiar idioma
+  }, [isLoading, invoicedOrderSummaries]);
+
+  const shortageMonthChart = useMemo(() => {
+    if (!shortageAnalytics?.shortUnitsByMonth?.length) return [];
+    return shortageAnalytics.shortUnitsByMonth.map((m) => ({
+      mes: new Date(`${m.monthKey}-01T12:00:00`).toLocaleDateString(locale, { year: 'numeric', month: 'short' }),
+      unidades: m.units,
+    }));
+  }, [shortageAnalytics, locale]);
+
+  const shortageProductChart = useMemo(() => {
+    if (!shortageAnalytics?.topProducts?.length) return [];
+    return shortageAnalytics.topProducts.slice(0, 12).map((p) => ({
+      label:
+        `${(p.sku || '—').slice(0, 14)}${p.name ? ` · ${p.name.slice(0, 24)}` : ''}`.trim() || '—',
+      unidades: p.units,
+    }));
+  }, [shortageAnalytics]);
+
+  const shortageStoreChart = useMemo(() => {
+    if (!shortageAnalytics?.topStores?.length) return [];
+    return shortageAnalytics.topStores.slice(0, 10).map((s) => ({
+      label: resolveStoreLabelFromList(stores, s.storeId, s.name),
+      unidades: s.units,
+    }));
+  }, [shortageAnalytics, stores]);
+
+  const shortagePieData = useMemo(() => {
+    if (!shortageAnalytics || shortageAnalytics.analyzed === 0) return [];
+    const complete = shortageAnalytics.analyzed - shortageAnalytics.ordersWithShort;
+    return [
+      { name: translate('reportsShortagePieComplete'), value: complete },
+      { name: translate('reportsShortagePieWithGap'), value: shortageAnalytics.ordersWithShort },
+    ].filter((x) => x.value > 0);
+  }, [shortageAnalytics, translate]);
+
+  const orderPipelineMetrics = useMemo(() => {
+    const initial = filteredOrderSummaries.filter((o) => getOrderLifecycleFromStatus(o.status) === 'initial');
+    const invoiced = filteredOrderSummaries.filter((o) => getOrderLifecycleFromStatus(o.status) === 'invoiced');
+    const cancelled = filteredOrderSummaries.filter((o) => getOrderLifecycleFromStatus(o.status) === 'cancelled');
+    const pendingValue = initial.reduce(
+      (s, o) => s + (Number(o.total) > 0 ? Number(o.total) : Number(o.subtotal) || 0),
+      0
+    );
+    const pendingSorted = [...initial].sort(
+      (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()
+    );
+    return {
+      initialCount: initial.length,
+      invoicedCount: invoiced.length,
+      cancelledCount: cancelled.length,
+      pendingValue,
+      totalInScope: filteredOrderSummaries.length,
+      pendingList: pendingSorted.slice(0, 25),
+    };
+  }, [filteredOrderSummaries]);
+
+  const ordersPipelineChartData = useMemo(
+    () => [
+      { name: translate('reportsPendingOrdersCard'), cantidad: orderPipelineMetrics.initialCount },
+      { name: translate('reportsInvoicedCountCard'), cantidad: orderPipelineMetrics.invoicedCount },
+      { name: translate('reportsCancelledCountCard'), cantidad: orderPipelineMetrics.cancelledCount },
+    ],
+    [orderPipelineMetrics, translate]
+  );
 
   // Transacciones ordenadas por fecha (más reciente primero) para la tabla de detalle
   const filteredSalesDataSorted = useMemo(() => {
@@ -726,6 +897,22 @@ export function ReportsManagement({ onBack }: ReportsManagementProps) {
         { width: 8 }, { width: 12 }, { width: 12 }, { width: 12 }, { width: 12 }
       ];
 
+      const headerFill = { type: 'pattern' as const, pattern: 'solid' as const, fgColor: { argb: 'FF1E293B' } };
+      const headerFont = { color: { argb: 'FFFFFFFF' as const }, bold: true };
+      const loadingShort = toast.loading(translate('ordersShortageGenerating'));
+      try {
+        await appendReportOrdersAndShortageSheets(wb, {
+          summaries: filteredOrderSummaries,
+          translate,
+          locale,
+          sectionFont: { bold: true, size: 11 },
+          headerFill,
+          headerFont,
+        });
+      } finally {
+        toast.dismiss(loadingShort);
+      }
+
       const buffer = await wb.xlsx.writeBuffer();
       const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
       const url = URL.createObjectURL(blob);
@@ -1022,14 +1209,84 @@ ${salesMetrics.topSellers.map((s, i) =>
         </Card>
       </div>
 
+      {/* Pipeline de pedidos (pendientes / facturados / cancelados) — respeta filtros de fecha, tienda y vendedor */}
+      <p className="text-sm text-gray-500 -mt-2">{translate('reportsOrdersHintFilters')}</p>
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+        <Card className="border-amber-100 bg-amber-50/40 hover:shadow-md transition-all duration-200">
+          <div className="p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-xs font-medium text-amber-800">{translate('reportsPendingOrdersCard')}</p>
+                <p className="text-2xl font-bold text-amber-950 mt-1">
+                  {orderPipelineMetrics.initialCount.toLocaleString(locale)}
+                </p>
+              </div>
+              <div className="p-2.5 bg-amber-100 rounded-lg flex items-center justify-center">
+                <Clock className="h-5 w-5 text-amber-700" />
+              </div>
+            </div>
+          </div>
+        </Card>
+        <Card className="hover:shadow-md transition-all duration-200">
+          <div className="p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-xs font-medium text-gray-500">{translate('reportsPendingValueCard')}</p>
+                <p className="text-2xl font-bold text-gray-900 mt-1">
+                  ${orderPipelineMetrics.pendingValue.toFixed(2)}
+                </p>
+              </div>
+              <div className="p-2.5 bg-slate-100 rounded-lg flex items-center justify-center">
+                <DollarSign className="h-5 w-5 text-slate-600" />
+              </div>
+            </div>
+          </div>
+        </Card>
+        <Card className="hover:shadow-md transition-all duration-200">
+          <div className="p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-xs font-medium text-gray-500">{translate('reportsInvoicedCountCard')}</p>
+                <p className="text-2xl font-bold text-green-700 mt-1">
+                  {orderPipelineMetrics.invoicedCount.toLocaleString(locale)}
+                </p>
+              </div>
+              <div className="p-2.5 bg-green-100 rounded-lg flex items-center justify-center">
+                <ShoppingCart className="h-5 w-5 text-green-600" />
+              </div>
+            </div>
+          </div>
+        </Card>
+        <Card className="hover:shadow-md transition-all duration-200">
+          <div className="p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-xs font-medium text-gray-500">{translate('reportsCancelledCountCard')}</p>
+                <p className="text-2xl font-bold text-slate-700 mt-1">
+                  {orderPipelineMetrics.cancelledCount.toLocaleString(locale)}
+                </p>
+              </div>
+              <div className="p-2.5 bg-slate-200 rounded-lg flex items-center justify-center">
+                <X className="h-5 w-5 text-slate-600" />
+              </div>
+            </div>
+          </div>
+        </Card>
+      </div>
+
       {/* Tabs de Reportes */}
       <Tabs defaultValue="overview" className="space-y-6">
         <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
-          <TabsList className="grid w-full lg:w-auto grid-cols-4">
+          <TabsList className="grid w-full lg:w-auto grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-1 h-auto">
             <TabsTrigger value="overview">{translate('overview')}</TabsTrigger>
             <TabsTrigger value="products">{translate('tabProducts')}</TabsTrigger>
             <TabsTrigger value="stores">{translate('stores')}</TabsTrigger>
             <TabsTrigger value="sellers">{translate('sellers')}</TabsTrigger>
+            <TabsTrigger value="orders">{translate('reportsTabOrders')}</TabsTrigger>
+            <TabsTrigger value="orderVsInvoice" className="gap-1">
+              <AlertTriangle className="h-3.5 w-3.5 shrink-0 hidden sm:inline" />
+              {translate('reportsTabOrderVsInvoice')}
+            </TabsTrigger>
           </TabsList>
           
           <div className="flex items-center gap-2">
@@ -1240,6 +1497,319 @@ ${salesMetrics.topSellers.map((s, i) =>
                   </div>
                 )}
               </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* Tab: Pedidos (pipeline y pendientes) */}
+        <TabsContent value="orders" className="space-y-6">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <Card>
+              <CardHeader>
+                <CardTitle>{translate('reportsOrdersPipelineChartTitle')}</CardTitle>
+                <CardDescription>{translate('reportsOrdersHintFilters')}</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <ResponsiveContainer width="100%" height={300}>
+                  <BarChart data={ordersPipelineChartData}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis dataKey="name" tick={{ fontSize: 11 }} interval={0} angle={-12} textAnchor="end" height={70} />
+                    <YAxis allowDecimals={false} />
+                    <Tooltip />
+                    <Bar dataKey="cantidad" fill="#d97706" name={translate('transactions')} radius={[4, 4, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader>
+                <CardTitle>{translate('reportsPendingOrdersListSection')}</CardTitle>
+                <CardDescription>
+                  {orderPipelineMetrics.initialCount}{' '}
+                  {translate('reportsPendingOrdersCard').toLowerCase()}
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="overflow-x-auto max-h-[320px] overflow-y-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>{translate('poNumber')}</TableHead>
+                        <TableHead>{translate('storeHeader')}</TableHead>
+                        <TableHead>{translate('dateCol')}</TableHead>
+                        <TableHead className="text-right">{translate('totalCol')}</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {orderPipelineMetrics.pendingList.length === 0 ? (
+                        <TableRow>
+                          <TableCell colSpan={4} className="text-center text-gray-500 py-8">
+                            {translate('noDataWithFilters')}
+                          </TableCell>
+                        </TableRow>
+                      ) : (
+                        orderPipelineMetrics.pendingList.map((o) => (
+                          <TableRow key={o.id}>
+                            <TableCell className="font-medium">{o.po ?? o.id}</TableCell>
+                            <TableCell>{o.storeName || o.storeId}</TableCell>
+                            <TableCell>
+                              {new Date(o.date).toLocaleDateString(locale, {
+                                day: '2-digit',
+                                month: 'short',
+                                year: 'numeric',
+                              })}
+                            </TableCell>
+                            <TableCell className="text-right">
+                              ${(Number(o.total) > 0 ? Number(o.total) : Number(o.subtotal) || 0).toFixed(2)}
+                            </TableCell>
+                          </TableRow>
+                        ))
+                      )}
+                    </TableBody>
+                  </Table>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        </TabsContent>
+
+        {/* Tab: Pedido inicial vs facturado (faltantes) */}
+        <TabsContent value="orderVsInvoice" className="space-y-6">
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <AlertTriangle className="h-5 w-5 text-amber-600" />
+                {translate('reportsOrderVsInvoiceTitle')}
+              </CardTitle>
+              <CardDescription>{translate('reportsOrderVsInvoiceDesc')}</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {shortageLoading && (
+                <div className="flex items-center gap-2 text-muted-foreground text-sm">
+                  <RefreshCw className="h-4 w-4 animate-spin" />
+                  {translate('reportsShortageLoading')}
+                </div>
+              )}
+              {!shortageLoading && invoicedOrderSummaries.length === 0 && (
+                <p className="text-sm text-muted-foreground">{translate('reportsShortageNoInvoiced')}</p>
+              )}
+              {!shortageLoading &&
+                invoicedOrderSummaries.length > 0 &&
+                shortageAnalytics &&
+                shortageAnalytics.analyzed === 0 && (
+                  <p className="text-sm text-muted-foreground">{translate('reportsShortageNoneComparable')}</p>
+                )}
+              {!shortageLoading && shortageAnalytics && shortageAnalytics.analyzed > 0 && (
+                <>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                    <div className="rounded-lg border bg-card p-4">
+                      <p className="text-xs font-medium text-muted-foreground">
+                        {translate('reportsShortageKpiUnits')}
+                      </p>
+                      <p className="text-2xl font-bold text-amber-700 mt-1">
+                        {shortageAnalytics.totalShortUnits.toLocaleString(locale)}
+                      </p>
+                    </div>
+                    <div className="rounded-lg border bg-card p-4">
+                      <p className="text-xs font-medium text-muted-foreground">
+                        {translate('reportsShortageKpiLines')}
+                      </p>
+                      <p className="text-2xl font-bold mt-1">
+                        {shortageAnalytics.totalShortLines.toLocaleString(locale)}
+                      </p>
+                    </div>
+                    <div className="rounded-lg border bg-card p-4">
+                      <p className="text-xs font-medium text-muted-foreground">
+                        {translate('reportsShortageKpiOrders')}
+                      </p>
+                      <p className="text-2xl font-bold mt-1">
+                        {shortageAnalytics.ordersWithShort.toLocaleString(locale)}
+                      </p>
+                    </div>
+                    <div className="rounded-lg border bg-card p-4">
+                      <p className="text-xs font-medium text-muted-foreground">
+                        {translate('reportsShortageKpiAnalyzed')}
+                      </p>
+                      <p className="text-2xl font-bold text-green-700 mt-1">
+                        {shortageAnalytics.analyzed.toLocaleString(locale)}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    <Card>
+                      <CardHeader>
+                        <CardTitle className="text-base">{translate('reportsShortagePieTitle')}</CardTitle>
+                      </CardHeader>
+                      <CardContent>
+                        {shortagePieData.length === 0 ? (
+                          <p className="text-sm text-muted-foreground">{translate('noDataWithFilters')}</p>
+                        ) : (
+                          <ResponsiveContainer width="100%" height={280}>
+                            <RechartsPieChart>
+                              <Pie
+                                data={shortagePieData}
+                                dataKey="value"
+                                nameKey="name"
+                                cx="50%"
+                                cy="50%"
+                                outerRadius={100}
+                                label={(e) => `${e.name}: ${e.value}`}
+                              >
+                                {shortagePieData.map((_, i) => (
+                                  <Cell key={i} fill={COLORS[i % COLORS.length]} />
+                                ))}
+                              </Pie>
+                              <Tooltip />
+                            </RechartsPieChart>
+                          </ResponsiveContainer>
+                        )}
+                      </CardContent>
+                    </Card>
+                    <Card>
+                      <CardHeader>
+                        <CardTitle className="text-base">{translate('reportsShortageChartTrend')}</CardTitle>
+                      </CardHeader>
+                      <CardContent>
+                        {shortageMonthChart.length === 0 ? (
+                          <p className="text-sm text-muted-foreground">{translate('noDataWithFilters')}</p>
+                        ) : (
+                          <ResponsiveContainer width="100%" height={280}>
+                            <LineChart data={shortageMonthChart}>
+                              <CartesianGrid strokeDasharray="3 3" />
+                              <XAxis dataKey="mes" tick={{ fontSize: 11 }} />
+                              <YAxis allowDecimals={false} />
+                              <Tooltip />
+                              <Line
+                                type="monotone"
+                                dataKey="unidades"
+                                stroke="#d97706"
+                                strokeWidth={2}
+                                name={translate('reportsShortageKpiUnits')}
+                              />
+                            </LineChart>
+                          </ResponsiveContainer>
+                        )}
+                      </CardContent>
+                    </Card>
+                  </div>
+
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    <Card>
+                      <CardHeader>
+                        <CardTitle className="text-base">{translate('reportsShortageChartProducts')}</CardTitle>
+                      </CardHeader>
+                      <CardContent>
+                        {shortageProductChart.length === 0 ? (
+                          <p className="text-sm text-muted-foreground">{translate('noDataWithFilters')}</p>
+                        ) : (
+                          <ResponsiveContainer width="100%" height={Math.max(280, shortageProductChart.length * 36)}>
+                            <BarChart data={shortageProductChart} layout="vertical" margin={{ left: 8, right: 16 }}>
+                              <CartesianGrid strokeDasharray="3 3" />
+                              <XAxis type="number" allowDecimals={false} />
+                              <YAxis dataKey="label" type="category" width={148} tick={{ fontSize: 10 }} />
+                              <Tooltip />
+                              <Bar dataKey="unidades" fill="#ea580c" name={translate('reportsShortageColMissing')} radius={[0, 4, 4, 0]} />
+                            </BarChart>
+                          </ResponsiveContainer>
+                        )}
+                      </CardContent>
+                    </Card>
+                    <Card>
+                      <CardHeader>
+                        <CardTitle className="text-base">{translate('reportsShortageChartStores')}</CardTitle>
+                      </CardHeader>
+                      <CardContent>
+                        {shortageStoreChart.length === 0 ? (
+                          <p className="text-sm text-muted-foreground">{translate('noDataWithFilters')}</p>
+                        ) : (
+                          <ResponsiveContainer width="100%" height={Math.max(300, shortageStoreChart.length * 44)}>
+                            <BarChart data={shortageStoreChart} layout="vertical" margin={{ left: 4, right: 16 }}>
+                              <CartesianGrid strokeDasharray="3 3" />
+                              <XAxis type="number" allowDecimals={false} />
+                              <YAxis
+                                dataKey="label"
+                                type="category"
+                                width={Math.min(340, Math.max(200, ...shortageStoreChart.map((r) => String(r.label).length * 7)))}
+                                tick={{ fontSize: 11 }}
+                                interval={0}
+                              />
+                              <Tooltip />
+                              <Bar dataKey="unidades" fill="#ca8a04" name={translate('reportsShortageColMissing')} radius={[0, 4, 4, 0]} />
+                            </BarChart>
+                          </ResponsiveContainer>
+                        )}
+                      </CardContent>
+                    </Card>
+                  </div>
+
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="text-base">{translate('reportsShortageDetailTable')}</CardTitle>
+                      <CardDescription>
+                        {(() => {
+                          const total = shortageAnalytics.detailSample.length;
+                          const shown = Math.min(30, total);
+                          return translate('reportsShortageRowsNote')
+                            .replace('{shown}', String(shown))
+                            .replace('{total}', String(total));
+                        })()}
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent className="overflow-x-auto">
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>{translate('poNumber')}</TableHead>
+                            <TableHead>{translate('storeHeader')}</TableHead>
+                            <TableHead>{translate('productLabel')}</TableHead>
+                            <TableHead className="text-right">{translate('reportsShortageColOrdered')}</TableHead>
+                            <TableHead className="text-right">{translate('reportsShortageColInvoiced')}</TableHead>
+                            <TableHead className="text-right">{translate('reportsShortageColMissing')}</TableHead>
+                            <TableHead>{translate('dateCol')}</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {shortageAnalytics.detailSample.length === 0 ? (
+                            <TableRow>
+                              <TableCell colSpan={7} className="text-center text-muted-foreground py-8">
+                                {translate('noDataWithFilters')}
+                              </TableCell>
+                            </TableRow>
+                          ) : (
+                            shortageAnalytics.detailSample.slice(0, 30).map((row, idx) => (
+                              <TableRow key={`${row.orderId}-${row.sku}-${idx}`}>
+                                <TableCell className="font-medium whitespace-nowrap">{row.po}</TableCell>
+                                <TableCell className="min-w-[160px] max-w-[280px]">
+                                  <p className="font-medium leading-snug break-words">
+                                    {resolveStoreLabelFromList(stores, row.storeId, row.storeName)}
+                                  </p>
+                                </TableCell>
+                                <TableCell>
+                                  <div>
+                                    <p className="font-medium">{row.productName}</p>
+                                    <p className="text-xs text-muted-foreground">{row.sku}</p>
+                                  </div>
+                                </TableCell>
+                                <TableCell className="text-right">{row.ordered}</TableCell>
+                                <TableCell className="text-right">{row.delivered}</TableCell>
+                                <TableCell className="text-right font-semibold text-amber-700">{row.diff}</TableCell>
+                                <TableCell className="whitespace-nowrap">
+                                  {new Date(row.orderDateIso).toLocaleDateString(locale, {
+                                    day: '2-digit',
+                                    month: 'short',
+                                    year: 'numeric',
+                                  })}
+                                </TableCell>
+                              </TableRow>
+                            ))
+                          )}
+                        </TableBody>
+                      </Table>
+                    </CardContent>
+                  </Card>
+                </>
+              )}
             </CardContent>
           </Card>
         </TabsContent>

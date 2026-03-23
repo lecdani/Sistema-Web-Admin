@@ -3,6 +3,7 @@ import { Package } from 'lucide-react';
 import { useLanguage } from '@/shared/hooks/useLanguage';
 import type { Order, Product } from '@/shared/types';
 import { productsApi } from '@/shared/services/products-api';
+import { categoriesApi } from '@/shared/services/categories-api';
 import { getBackendAssetUrl } from '@/shared/config/api';
 
 interface OrderCatalogGridViewProps {
@@ -16,32 +17,43 @@ function getProductImageUrl(product: Product | null | undefined): string {
   return '';
 }
 
+/** Misma lógica de color que OrderPlanogramView (lectura visual idéntica). */
+function getCatalogCellSurface(hasProduct: boolean, qty: number): React.CSSProperties {
+  if (!hasProduct) {
+    return { backgroundColor: '#94a3b8', borderColor: '#64748b' };
+  }
+  if (qty > 0) {
+    return { backgroundColor: '#eef2ff', borderColor: '#a5b4fc' };
+  }
+  return { backgroundColor: '#f1f5f9', borderColor: '#e2e8f0' };
+}
+
+const CELL_SIZE = 72;
+const CELL_GAP = 8;
+const COLS = 10;
+const ROWS = 10;
+const SLOTS = COLS * ROWS;
+const UNCATEGORIZED_KEY = '__uncategorized__';
+
 export const OrderCatalogGridView: React.FC<OrderCatalogGridViewProps> = ({ order }) => {
   const { translate } = useLanguage();
   const [page, setPage] = useState(0);
   const [productMap, setProductMap] = useState<Map<string, Product>>(new Map());
+  const [allCategories, setAllCategories] = useState<{ id: string; name: string }[]>([]);
 
   const items = Array.isArray(order.items) ? order.items : [];
 
-  const sortedItems = useMemo(() => {
-    const copy = [...items].sort((a: any, b: any) => {
-      const aSku = String(a.sku ?? a.productId ?? '').toLowerCase();
-      const bSku = String(b.sku ?? b.productId ?? '').toLowerCase();
-      if (aSku && bSku && aSku !== bSku) return aSku.localeCompare(bSku);
-      const aName = String(a.productName ?? '').toLowerCase();
-      const bName = String(b.productName ?? '').toLowerCase();
-      return aName.localeCompare(bName);
-    });
-    // Ya están en orden por filas (React recorre en orden lineal),
-    // solo nos aseguramos de trabajar con una copia independiente.
-    return copy;
-  }, [items]);
+  /** Orden de lectura: mismo orden que en el pedido (sin reordenar por SKU). */
+  const orderedItems = useMemo(() => [...items], [items]);
 
   useEffect(() => {
     let mounted = true;
     (async () => {
       try {
-        const products = await productsApi.fetchAll();
+        const [products, categoriesList] = await Promise.all([
+          productsApi.fetchAll(),
+          categoriesApi.fetchAll().catch(() => [] as { id: string; name: string }[]),
+        ]);
         if (!mounted) return;
         const map = new Map<string, Product>();
         products.forEach((p: any) => {
@@ -53,8 +65,14 @@ export const OrderCatalogGridView: React.FC<OrderCatalogGridViewProps> = ({ orde
           }
         });
         setProductMap(map);
+        setAllCategories(
+          (categoriesList || []).map((c: any) => ({
+            id: String(c.id),
+            name: String(c.name ?? '').trim() || String(c.id),
+          }))
+        );
       } catch {
-        // en caso de error, simplemente no mostramos imagen
+        // sin datos extra si falla
       }
     })();
     return () => {
@@ -62,27 +80,61 @@ export const OrderCatalogGridView: React.FC<OrderCatalogGridViewProps> = ({ orde
     };
   }, []);
 
-  const PAGE_SIZE = 100;
-  const totalPages = Math.max(1, Math.ceil(sortedItems.length / PAGE_SIZE));
+  const categoryById = useMemo(() => {
+    const m = new Map<string, string>();
+    allCategories.forEach((c) => {
+      m.set(c.id, c.name);
+      m.set(String(Number(c.id)), c.name);
+    });
+    return m;
+  }, [allCategories]);
+
+  const resolveCategoryName = (product: Product | null | undefined, lineCategory?: string): string => {
+    const fromLine = String(lineCategory ?? '').trim();
+    if (fromLine) return fromLine;
+    if (!product) return '';
+    const name = String((product as any).category ?? '').trim();
+    if (name) return name;
+    const id = product.categoryId != null ? String(product.categoryId) : '';
+    if (!id) return '';
+    return categoryById.get(id) ?? categoryById.get(String(Number(id))) ?? '';
+  };
+
+  /** Pcs por familia (todo el pedido, no solo la página de la grilla) — igual criterio que planograma. */
+  const pcsByFamily = useMemo(() => {
+    const acc = new Map<string, number>();
+    for (const raw of orderedItems) {
+      const it = raw as any;
+      const pid = String(it.productId ?? it.ProductId ?? '').trim();
+      if (!pid) continue;
+      const qty = Number(it.quantity ?? it.toOrder ?? 0) || 0;
+      const product = productMap.get(pid) || productMap.get(String(Number(pid)));
+      const fam = resolveCategoryName(product ?? null, it.category ?? it.productBrand);
+      const key = fam.trim() || UNCATEGORIZED_KEY;
+      acc.set(key, (acc.get(key) ?? 0) + qty);
+    }
+    return acc;
+  }, [orderedItems, productMap, categoryById]);
+
+  const totalPages = Math.max(1, Math.ceil(orderedItems.length / SLOTS));
   const currentPage = Math.min(page, totalPages - 1);
-  const pageItems = sortedItems.slice(
-    currentPage * PAGE_SIZE,
-    currentPage * PAGE_SIZE + PAGE_SIZE
-  );
+  const pageItems = orderedItems.slice(currentPage * SLOTS, currentPage * SLOTS + SLOTS);
 
   const filledGrid: (any | null)[] =
-    pageItems.length < PAGE_SIZE
-      ? [...pageItems, ...Array(PAGE_SIZE - pageItems.length).fill(null)]
+    pageItems.length < SLOTS
+      ? [...pageItems, ...Array(SLOTS - pageItems.length).fill(null)]
       : pageItems;
 
+  const gridWidthPx = COLS * CELL_SIZE + (COLS - 1) * CELL_GAP;
+
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 admin-planogram-print-compact">
       <div className="flex items-center justify-between">
         <h3 className="font-semibold text-gray-900 text-sm">
           {translate('catalogView') || 'Vista de catálogo'}
         </h3>
         {totalPages > 1 && (
-          <div className="flex items-center gap-2 text-xs text-gray-600">
+          <div className="flex items-center gap-2 text-xs text-gray-600 print:hidden">
             <span>
               {(translate('page') || 'Página')} {currentPage + 1} / {totalPages}
             </span>
@@ -106,64 +158,145 @@ export const OrderCatalogGridView: React.FC<OrderCatalogGridViewProps> = ({ orde
         )}
       </div>
 
-      <div className="bg-white rounded-xl p-3 shadow-sm border border-slate-200 overflow-x-auto flex justify-start md:justify-center">
-        <div className="inline-grid grid-cols-10 grid-flow-row gap-2 w-[960px] flex-none">
-          {filledGrid.map((item, index) =>
-            item ? (
+      <div className="bg-white rounded-xl p-3 shadow-sm border border-slate-200 overflow-x-auto flex justify-start md:justify-center print:shadow-none print:border print:break-inside-avoid print:p-1.5">
+        <div
+          className="mx-auto print:mx-0 flex-none"
+          style={{
+            width: gridWidthPx,
+            minWidth: gridWidthPx,
+            display: 'grid',
+            gridTemplateColumns: `repeat(${COLS}, ${CELL_SIZE}px)`,
+            gridTemplateRows: `repeat(${ROWS}, ${CELL_SIZE}px)`,
+            gap: CELL_GAP,
+            boxSizing: 'content-box',
+          }}
+        >
+          {filledGrid.map((item, index) => {
+            if (!item) {
+              return (
+                <div
+                  key={`empty-${currentPage}-${index}`}
+                  className="rounded-lg border border-solid min-h-0 min-w-0 overflow-hidden box-border"
+                  style={{
+                    width: CELL_SIZE,
+                    height: CELL_SIZE,
+                    padding: 2,
+                    boxSizing: 'border-box',
+                    ...getCatalogCellSurface(false, 0),
+                  }}
+                />
+              );
+            }
+
+            const qty = Number((item as any).quantity ?? (item as any).toOrder ?? 0) || 0;
+            const productId = String((item as any).productId ?? (item as any).sku ?? '');
+            const product =
+              productMap.get(productId) || productMap.get(String(Number(productId))) || undefined;
+            const imageUrl = getProductImageUrl(product);
+            const skuLabel = String(
+              product?.code ?? (item as any).sku ?? (item as any).code ?? (item as any).productId ?? '—'
+            );
+            const nameLabel = String((item as any).productName ?? '').trim();
+
+            return (
               <div
                 key={
-                  (item.id && String(item.id)) ||
-                  (item.productId && `prod-${item.productId}-${index}`) ||
+                  ((item as any).id && String((item as any).id)) ||
+                  (productId && `prod-${productId}-${index}`) ||
                   `item-${index}`
                 }
-                className="aspect-square min-w-[64px] min-h-[64px] rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 transition-colors flex flex-col items-center justify-center p-1.5 text-center"
+                className="rounded-lg border border-solid flex flex-col items-center justify-center text-center min-h-0 min-w-0 overflow-hidden box-border"
+                style={{
+                  width: CELL_SIZE,
+                  height: CELL_SIZE,
+                  padding: 2,
+                  boxSizing: 'border-box',
+                  ...getCatalogCellSurface(true, qty),
+                }}
+                title={nameLabel || skuLabel}
               >
-                {(() => {
-                  const productId = String(item.productId ?? item.sku ?? '');
-                  const product = productMap.get(productId) || productMap.get(String(Number(productId)));
-                  const imageUrl = getProductImageUrl(product);
-                  return (
-                    <div className="flex items-center justify-center gap-1 w-full mb-0.5">
-                      {imageUrl ? (
-                        <img
-                          src={imageUrl}
-                          alt=""
-                          className="w-5 h-5 rounded object-cover flex-shrink-0"
-                        />
-                      ) : (
-                        <div className="w-5 h-5 rounded bg-slate-200 flex items-center justify-center flex-shrink-0">
-                          <Package className="h-2.5 w-2.5 text-slate-500" />
-                        </div>
-                      )}
-                      <span
-                        className="text-[10px] leading-tight font-bold text-slate-900 truncate max-w-[44px]"
-                        title={String(product?.code ?? item.sku ?? item.productId ?? '')}
-                      >
-                        {product?.code ?? item.sku ?? item.productId ?? '—'}
-                      </span>
-                    </div>
-                  );
-                })()}
-                <span
-                  className="text-[7px] leading-tight font-normal text-slate-600 break-words line-clamp-2 w-full"
-                  title={item.productName ?? ''}
-                >
-                  {item.productName ?? ''}
-                </span>
-                <span className="text-[8px] text-indigo-600 mt-0.5">
-                  ${Number(item.price ?? 0).toFixed(2)}
-                </span>
+                <div className="flex flex-col items-center justify-center gap-0 w-full h-full min-h-0 min-w-0">
+                  <div className="flex flex-row items-center justify-center gap-0.5 w-full shrink-0 min-h-0 px-0.5">
+                    {imageUrl ? (
+                      <img src={imageUrl} alt="" className="w-7 h-7 rounded object-cover shrink-0" />
+                    ) : (
+                      <div className="w-7 h-7 rounded bg-slate-200 flex items-center justify-center shrink-0">
+                        <Package className="h-3.5 w-3.5 text-slate-500" />
+                      </div>
+                    )}
+                    <span
+                      className="text-[6.5px] leading-tight font-semibold text-slate-900 truncate min-w-0 max-w-[34px] text-center"
+                      title={skuLabel}
+                    >
+                      {skuLabel}
+                    </span>
+                  </div>
+                  {nameLabel ? (
+                    <span
+                      className="block w-full text-center text-slate-600 font-normal overflow-hidden line-clamp-2 mt-0.5 px-0.5"
+                      style={{ fontSize: '12px', lineHeight: 1.2, maxHeight: '18px' }}
+                      title={nameLabel}
+                    >
+                      {nameLabel}
+                    </span>
+                  ) : null}
+                  {qty > 0 ? (
+                    <span className="text-[10px] font-bold text-indigo-700 leading-none text-center mt-px">
+                      {qty} {translate('unitsSuffix')}
+                    </span>
+                  ) : null}
+                </div>
               </div>
-            ) : (
-              <div
-                key={`empty-${index}`}
-                className="aspect-square min-w-[64px] min-h-[64px] rounded-lg border border-transparent bg-transparent"
-              />
-            )
-          )}
+            );
+          })}
         </div>
       </div>
+
+      {/* Resumen por familia (catálogo): visible en pantalla e impresión */}
+      {(allCategories.length > 0 || pcsByFamily.size > 0) && (
+        <div className="mt-6 border border-slate-200 rounded-lg overflow-hidden bg-slate-50/50 print:mt-3 print:border-slate-300 print:break-inside-avoid">
+          <h4 className="bg-slate-200 text-slate-800 px-3 py-2 text-xs font-semibold print:text-[10px]">
+            {translate('familySummaryCatalog')}
+          </h4>
+          <table className="w-full text-sm print:text-xs">
+            <thead>
+              <tr className="bg-slate-100 text-slate-700">
+                <th className="text-left py-2 px-3 font-semibold">{translate('familyCol')}</th>
+                <th className="text-right py-2 px-3 font-semibold w-16">{translate('pcsCol')}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(() => {
+                let displayRows: { id: string; name: string }[];
+                if (allCategories.length > 0) {
+                  displayRows = [...allCategories].sort((a, b) => a.name.localeCompare(b.name));
+                  if ((pcsByFamily.get(UNCATEGORIZED_KEY) ?? 0) > 0) {
+                    displayRows = [
+                      ...displayRows,
+                      { id: UNCATEGORIZED_KEY, name: UNCATEGORIZED_KEY },
+                    ];
+                  }
+                } else {
+                  displayRows = [...pcsByFamily.keys()]
+                    .sort((a, b) => a.localeCompare(b))
+                    .map((name) => ({ id: name, name }));
+                }
+                return displayRows.map((cat) => {
+                  const rowName =
+                    cat.name === UNCATEGORIZED_KEY ? translate('withoutCategory') : cat.name;
+                  const pcs = pcsByFamily.get(cat.name) ?? 0;
+                  return (
+                    <tr key={cat.id} className="border-t border-slate-200 bg-white">
+                      <td className="py-2 px-3 text-slate-900">{rowName}</td>
+                      <td className="py-2 px-3 text-right font-medium text-slate-800">{pcs}</td>
+                    </tr>
+                  );
+                });
+              })()}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
-}
-
+};
