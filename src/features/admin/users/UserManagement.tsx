@@ -50,8 +50,9 @@ import { useLanguage } from '@/shared/hooks/useLanguage';
 import { usersApi } from '@/shared/services/users-api';
 import { storesApi } from '@/shared/services/stores-api';
 import { assignmentsApi } from '@/shared/services/assignments-api';
+import { citiesApi } from '@/shared/services/cities-api';
 import { toast } from '@/shared/components/base/Toast';
-import type { Assignment, Store } from '@/shared/types';
+import type { Assignment, City, Store } from '@/shared/types';
 
 interface UserManagementProps {
   onBack?: () => void;
@@ -64,6 +65,7 @@ interface UserFormData {
   phone: string;
   role: 'admin' | 'user';
   password: string;
+  baseCityId: string;
 }
 
 export const UserManagement: React.FC<UserManagementProps> = ({ onBack }) => {
@@ -80,6 +82,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onBack }) => {
   const [isLoading, setIsLoading] = useState(true);
   const [editingUser, setEditingUser] = useState<User | null>(null);
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
+  const [selectedUserBaseCityName, setSelectedUserBaseCityName] = useState<string>('');
   const [showAddDialog, setShowAddDialog] = useState(false);
   const [showDetailDialog, setShowDetailDialog] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
@@ -88,6 +91,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onBack }) => {
   const [showRoutesDialog, setShowRoutesDialog] = useState(false);
   const [routesUser, setRoutesUser] = useState<User | null>(null);
   const [stores, setStores] = useState<Store[]>([]);
+  const [cities, setCities] = useState<City[]>([]);
   const [assignments, setAssignments] = useState<Assignment[]>([]);
   const [routesLoading, setRoutesLoading] = useState(false);
   const [selectedStoreToAdd, setSelectedStoreToAdd] = useState<string>('');
@@ -99,13 +103,48 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onBack }) => {
     phone: '',
     role: 'user',
     password: '',
+    baseCityId: '',
   });
   const [formErrors, setFormErrors] = useState<Partial<Record<keyof UserFormData, string>>>({});
   const [passwordErrors, setPasswordErrors] = useState<string[]>([]);
 
   useEffect(() => {
     loadUsers();
+    loadCities();
   }, []);
+
+  useEffect(() => {
+    const loadSelectedUserCity = async () => {
+      try {
+        const baseCityId = String(selectedUser?.baseCityId || '').trim();
+        if (!baseCityId) {
+          setSelectedUserBaseCityName('');
+          return;
+        }
+        // Primero intentar resolver del catálogo ya cargado
+        const fromList = cityNameById(baseCityId);
+        if (fromList) {
+          setSelectedUserBaseCityName(fromList);
+          return;
+        }
+        const city = await citiesApi.getById(baseCityId);
+        setSelectedUserBaseCityName(city?.name ?? '');
+      } catch {
+        setSelectedUserBaseCityName('');
+      }
+    };
+    loadSelectedUserCity();
+  }, [selectedUser?.id, selectedUser?.baseCityId, cities]);
+
+  const loadCities = async () => {
+    try {
+      const data = await citiesApi.fetchAll();
+      setCities(data);
+    } catch (e) {
+      console.error('Error cargando ciudades:', e);
+      setCities([]);
+    }
+  };
 
   const loadRoutesData = async (user: User) => {
     setRoutesLoading(true);
@@ -136,6 +175,21 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onBack }) => {
   const sellerAssignments = (uid: string) => assignments.filter((a) => String(a.userId) === String(uid));
   const assignedStoreIdsByOthers = (uid: string) =>
     new Set(assignments.filter((a) => String(a.userId) !== String(uid)).map((a) => String(a.storeId)));
+
+  const cityNameById = (id: string | undefined) => {
+    const key = String(id ?? '').trim();
+    if (!key) return '';
+    const c = cities.find((x) => String(x.id) === key);
+    return c?.name || '';
+  };
+
+  const resolveBaseCityName = (u: User) => {
+    const fromObj = String((u as any)?.baseCity?.name || '').trim();
+    if (fromObj) return fromObj;
+    const id = String((u as any).baseCityId || '').trim();
+    if (!id) return '';
+    return cityNameById(id) || id;
+  };
 
   useEffect(() => {
     applyFilters();
@@ -193,6 +247,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onBack }) => {
       phone: '',
       role: 'user',
       password: '',
+      baseCityId: '',
     });
     setFormErrors({});
     setPasswordErrors([]);
@@ -216,6 +271,9 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onBack }) => {
     if (!formData.email.trim()) err.email = translate('emailRequiredShort');
     else if (!/\S+@\S+\.\S+/.test(formData.email)) err.email = translate('emailInvalid');
     if (!formData.phone.trim()) err.phone = translate('phoneRequired');
+    if (formData.role === 'user' && !String(formData.baseCityId || '').trim()) {
+      err.baseCityId = translate('baseCityRequired');
+    }
 
     const emailNorm = formData.email.trim().toLowerCase();
     const existingEmail = users.find(
@@ -251,7 +309,8 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onBack }) => {
         lastName: formData.lastName.trim(),
         email: formData.email.toLowerCase().trim(),
         phone: formData.phone.trim(),
-        role: formData.role
+        role: formData.role,
+        baseCityId: formData.role === 'user' ? String(formData.baseCityId || '').trim() || undefined : undefined,
       };
 
       if (editingUser) {
@@ -291,7 +350,8 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onBack }) => {
       email: user.email,
       phone: user.phone || '',
       role: user.role,
-      password: ''
+      password: '',
+      baseCityId: String(user.baseCityId || ''),
     });
     setFormErrors({});
     setPasswordErrors([]);
@@ -500,6 +560,44 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onBack }) => {
                 </SelectContent>
               </Select>
             </div>
+
+            {formData.role === 'user' && (
+              <div>
+                <Label htmlFor="baseCityId">{translate('baseCity')} *</Label>
+                {editingUser ? (
+                  <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-800">
+                    {resolveBaseCityName(editingUser) || '—'}
+                  </div>
+                ) : (
+                  <>
+                    <Select
+                      value={formData.baseCityId}
+                      onValueChange={(value) => {
+                        setFormData((prev) => ({ ...prev, baseCityId: value }));
+                        if (formErrors.baseCityId) setFormErrors((prev) => ({ ...prev, baseCityId: undefined }));
+                      }}
+                    >
+                      <SelectTrigger className={formErrors.baseCityId ? 'border-red-500' : ''}>
+                        <SelectValue placeholder={translate('selectCity')}>
+                          {(() => {
+                            const c = cities.find((x) => String(x.id) === String(formData.baseCityId));
+                            return c ? c.name : undefined;
+                          })()}
+                        </SelectValue>
+                      </SelectTrigger>
+                      <SelectContent>
+                        {cities.map((c) => (
+                          <SelectItem key={c.id} value={String(c.id)}>
+                            {c.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    {formErrors.baseCityId && <p className="text-sm text-red-600 mt-1">{formErrors.baseCityId}</p>}
+                  </>
+                )}
+              </div>
+            )}
 
             <div>
               <Label htmlFor="phone">{translate('phone')} *</Label>
@@ -725,10 +823,12 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onBack }) => {
                       if (!routesUser) return null;
                       const mine = new Set(sellerAssignments(routesUser.id).map((a) => String(a.storeId)));
                       const blocked = assignedStoreIdsByOthers(routesUser.id);
+                      const baseCityId = String((routesUser as any).baseCityId || '').trim();
                       const available = stores
                         .filter((s) => s.isActive)
                         .filter((s) => !mine.has(String(s.id)))
                         .filter((s) => !blocked.has(String(s.id)))
+                        .filter((s) => !baseCityId || String(s.cityId) === baseCityId)
                         .sort((a, b) => a.name.localeCompare(b.name));
                       return available.map((s) => (
                         <SelectItem key={s.id} value={String(s.id)}>
@@ -815,6 +915,9 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onBack }) => {
                     {translate('fullName')}
                   </th>
                   <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    {translate('sellerCode')}
+                  </th>
+                  <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                     {translate('email')}
                   </th>
                   <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -849,6 +952,9 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onBack }) => {
                           </div>
                         </div>
                       </div>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">
+                      {user.role === 'user' ? (String(user.sellerCode || '').trim() || '—') : '—'}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                       {user.email}
@@ -1008,6 +1114,23 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onBack }) => {
 
               <div className="bg-gray-50 rounded-lg border border-gray-200 p-4 space-y-3">
                 <div className="grid grid-cols-1 gap-3 text-sm">
+                  <div className="flex justify-between gap-4">
+                    <span className="text-gray-500 font-medium">{translate('sellerCode')}</span>
+                    <span className="text-gray-900">
+                      {selectedUser.role === 'user' ? (String(selectedUser.sellerCode || '').trim() || '-') : '-'}
+                    </span>
+                  </div>
+                  <div className="flex justify-between gap-4">
+                    <span className="text-gray-500 font-medium">{translate('baseCity')}</span>
+                    <span className="text-gray-900">
+                      {(() => {
+                        if (selectedUser.role !== 'user') return '-';
+                        const id = String(selectedUser.baseCityId || '').trim();
+                        if (!id) return '-';
+                        return selectedUserBaseCityName || resolveBaseCityName(selectedUser) || id || '-';
+                      })()}
+                    </span>
+                  </div>
                   <div className="flex justify-between gap-4">
                     <span className="text-gray-500 font-medium">{translate('firstName')}</span>
                     <span className="text-gray-900">{selectedUser.firstName || '-'}</span>

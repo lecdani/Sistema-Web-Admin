@@ -6,6 +6,7 @@ import { Input } from '@/shared/components/base/Input';
 export interface ProductPositionEdit {
   row: number;
   col: number;
+  orderDetailId?: string;
   productId: string;
   productName: string;
   sku: string;

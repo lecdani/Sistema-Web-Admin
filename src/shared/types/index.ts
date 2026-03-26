@@ -7,7 +7,14 @@ export interface User {
   lastName: string;
   phone?: string;
   role: 'admin' | 'user';
+  /** Ciudad legacy (no usar para SellerCode). */
   cityId?: string;
+  /** Ciudad base del vendedor (FK a City). */
+  baseCityId?: string;
+  /** Objeto ciudad base (cuando la API lo incluye). */
+  baseCity?: { id: string; name: string; prefix?: string };
+  /** Código del vendedor generado por backend (ej. FL-01). */
+  sellerCode?: string;
   isActive: boolean;
   createdAt: Date;
   updatedAt: Date;

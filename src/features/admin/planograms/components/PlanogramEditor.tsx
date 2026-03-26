@@ -126,12 +126,6 @@ export const PlanogramEditor: React.FC<PlanogramEditorProps> = ({
 
   // Manejar drop en celda
   const handleCellDrop = useCallback((x: number, y: number, product: Product) => {
-    // Verificar si el producto ya está en la grilla
-    if (isProductInGrid(product.id)) {
-      toast.error(translate('productAlreadyInPlanogram'));
-      return;
-    }
-
     // Verificar si la celda ya está ocupada
     if (grid[x][y].product) {
       toast.error(translate('cellAlreadyOccupied'));
@@ -198,10 +192,15 @@ export const PlanogramEditor: React.FC<PlanogramEditorProps> = ({
         for (const d of currentDist) {
           const cell = grid[d.xPosition]?.[d.yPosition];
           if (!cell?.product) {
-            const productElsewhere = grid.some((row, xi) =>
-              row.some((c, yi) => (xi !== d.xPosition || yi !== d.yPosition) && c.product?.id === d.productId)
-            );
-            if (!productElsewhere) await distributionsApi.toggleActive(d.id);
+            // Celda vacía: "desactivar" por update (backend no permite DELETE).
+            // Enviar también productId/planogramId/posiciones para no violar FKs.
+            await distributionsApi.update(d.id, {
+              planogramId: d.planogramId,
+              productId: d.productId,
+              xPosition: d.xPosition,
+              yPosition: d.yPosition,
+              isActive: false,
+            });
           } else if (cell.product.id !== d.productId) {
             await distributionsApi.update(d.id, {
               planogramId: planogram.id,
@@ -217,24 +216,13 @@ export const PlanogramEditor: React.FC<PlanogramEditorProps> = ({
             if (!cell?.product) continue;
             const existsAtCell = currentDist.some((d) => d.xPosition === x && d.yPosition === y);
             if (existsAtCell) continue;
-            const movedSameProduct = currentDist.find(
-              (d) => d.productId === cell.product!.id && (d.xPosition !== x || d.yPosition !== y)
-            );
-            if (movedSameProduct) {
-              await distributionsApi.update(movedSameProduct.id, {
-                planogramId: movedSameProduct.planogramId || planogramId,
-                productId: movedSameProduct.productId,
-                xPosition: x,
-                yPosition: y
-              });
-            } else {
-              await distributionsApi.create({
-                planogramId,
-                productId: cell.product.id,
-                xPosition: x,
-                yPosition: y
-              });
-            }
+            // Con duplicados permitidos, siempre crear una distribución nueva para esta celda
+            await distributionsApi.create({
+              planogramId,
+              productId: cell.product.id,
+              xPosition: x,
+              yPosition: y
+            });
           }
         }
         toast.success(translate('planogramSaved'));
@@ -459,7 +447,7 @@ export const PlanogramEditor: React.FC<PlanogramEditorProps> = ({
             <CardHeader className="pb-2 flex-shrink-0 p-2">
               <CardTitle className="text-xs flex items-center gap-1.5">
                 <Package className="h-3.5 w-3.5" />
-                {translate('productsLabel')} ({filteredProducts.filter(p => !isProductInGrid(p.id)).length})
+                {translate('productsLabel')} ({filteredProducts.length})
               </CardTitle>
               
               <Select value={categoryFilter} onValueChange={setCategoryFilter}>
@@ -479,18 +467,15 @@ export const PlanogramEditor: React.FC<PlanogramEditorProps> = ({
               <ScrollArea className="h-full">
                 <div className="p-2 space-y-1.5">
                   {filteredProducts.map((product) => {
-                    const isInGrid = isProductInGrid(product.id);
                     return (
                       <div
                         key={product.id}
-                        draggable={!isInGrid}
-                        onDragStart={(e) => !isInGrid && handleDragStart(e, product)}
-                        className={`p-1.5 border rounded cursor-pointer transition-all text-[10px] ${
-                          isInGrid 
-                            ? 'bg-gray-100 border-gray-300 text-gray-500 cursor-not-allowed' 
-                            : 'bg-white border-gray-200 hover:border-blue-300 hover:shadow-md hover:bg-blue-50'
-                        } ${selectedProduct?.id === product.id ? 'border-blue-500 bg-blue-50 shadow-md' : ''}`}
-                        onClick={() => !isInGrid && setSelectedProduct(product)}
+                        draggable
+                        onDragStart={(e) => handleDragStart(e, product)}
+                        className={`p-1.5 border rounded cursor-pointer transition-all text-[10px] bg-white border-gray-200 hover:border-blue-300 hover:shadow-md hover:bg-blue-50 ${
+                          selectedProduct?.id === product.id ? 'border-blue-500 bg-blue-50 shadow-md' : ''
+                        }`}
+                        onClick={() => setSelectedProduct(product)}
                       >
                         <div className="flex gap-2 items-start">
                           <div className="flex-shrink-0 w-9 h-9 rounded overflow-hidden bg-gray-100 flex items-center justify-center">
@@ -507,11 +492,6 @@ export const PlanogramEditor: React.FC<PlanogramEditorProps> = ({
                             <Badge variant="outline" className="text-[9px] py-0 px-1">
                               {product.category}
                             </Badge>
-                            {isInGrid && (
-                              <Badge className="bg-gray-500 text-white text-[9px] py-0 px-1">
-                                {translate('inUse')}
-                              </Badge>
-                            )}
                             </div>
                           </div>
                         </div>

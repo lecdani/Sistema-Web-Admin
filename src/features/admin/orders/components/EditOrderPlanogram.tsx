@@ -112,24 +112,42 @@ export function EditOrderPlanogram({ order, onClose, onSaved }: EditOrderPlanogr
         });
         const getProduct = (id: string) => productMap.get(id) || productMap.get(String(Number(id)));
 
-        const orderItemsByProductId = new Map<string, { productName: string; sku: string; quantity: number; price: number }>();
+        const rawDetails = await ordersApi.getOrderDetailsByOrderIdRaw(orderId);
+
+        // No agrupar por productId: si un producto se repite en varias celdas, el pedido puede tener múltiples líneas.
+        // Usamos cola por productId y consumimos una por cada celda.
+        const qtyQueueByProductId = new Map<
+          string,
+          Array<{ orderDetailId?: string; productName: string; sku: string; quantity: number; price: number; row?: number; col?: number }>
+        >();
         for (const item of apiOrder.items || []) {
           const id = String(item.productId ?? '');
-          if (id) {
-            let price = Number(item.price ?? 0) || 0;
-            if (!price) {
-              try {
-                const latest = await histpricesApi.getLatest(id);
-                if (latest?.price != null) price = latest.price;
-              } catch {}
-            }
-            orderItemsByProductId.set(id, {
-              productName: (item.productName ?? item.sku ?? getProduct(id)?.name ?? '').trim(),
-              sku: item.sku ?? getProduct(id)?.code ?? getProduct(id)?.sku ?? '',
-              quantity: item.quantity ?? item.toOrder ?? 0,
-              price,
-            });
+          if (!id) continue;
+          let price = Number(item.price ?? 0) || 0;
+          if (!price) {
+            try {
+              const latest = await histpricesApi.getLatest(id);
+              if (latest?.price != null) price = latest.price;
+            } catch {}
           }
+          const q = Number(item.quantity ?? item.toOrder ?? 0) || 0;
+          if (q <= 0) continue;
+          const arr = qtyQueueByProductId.get(id) ?? [];
+          const detailByPid = (rawDetails || []).find(
+            (d: any) =>
+              String(d?.productId ?? d?.ProductId ?? '') === id &&
+              Number(d?.quantity ?? d?.Quantity ?? 0) === q
+          );
+          arr.push({
+            orderDetailId: String(detailByPid?.orderDetailId ?? detailByPid?.OrderDetailId ?? detailByPid?.id ?? detailByPid?.Id ?? '').trim() || undefined,
+            productName: (item.productName ?? item.sku ?? getProduct(id)?.name ?? '').trim(),
+            sku: item.sku ?? getProduct(id)?.code ?? getProduct(id)?.sku ?? '',
+            quantity: q,
+            price,
+            row: detailByPid?.row ?? detailByPid?.Row ?? detailByPid?.xPosition ?? detailByPid?.XPosition,
+            col: detailByPid?.col ?? detailByPid?.Col ?? detailByPid?.yPosition ?? detailByPid?.YPosition,
+          });
+          qtyQueueByProductId.set(id, arr);
         }
 
         const grid: ProductPositionEdit[] = [];
@@ -137,17 +155,31 @@ export function EditOrderPlanogram({ order, onClose, onSaved }: EditOrderPlanogr
           for (let col = 0; col < 10; col++) {
             const dist = distList.find((d) => d.xPosition === row && d.yPosition === col);
             const product = dist ? getProduct(dist.productId) : null;
-            const orderItem = product
-              ? orderItemsByProductId.get(product.id) ?? orderItemsByProductId.get(String(Number(product.id)))
-              : null;
+            const pid = product ? String(product.id) : '';
+            const key = pid && qtyQueueByProductId.has(pid) ? pid : pid ? String(Number(pid)) : '';
+            const queue = key ? qtyQueueByProductId.get(key) : undefined;
+            let next:
+              | { orderDetailId?: string; productName: string; sku: string; quantity: number; price: number; row?: number; col?: number }
+              | null = null;
+            if (queue && queue.length > 0) {
+              const posIdx = queue.findIndex(
+                (q) => Number(q?.row) === row && Number(q?.col) === col
+              );
+              if (posIdx >= 0) {
+                next = queue.splice(posIdx, 1)[0];
+              } else {
+                next = queue.shift()!;
+              }
+            }
             grid.push({
               row,
               col,
+              orderDetailId: next?.orderDetailId,
               productId: product?.id ?? '',
-              productName: orderItem?.productName ?? product?.name ?? product?.code ?? product?.sku ?? '',
-              sku: orderItem?.sku ?? product?.code ?? product?.sku ?? '',
-              toOrder: orderItem?.quantity ?? 0,
-              price: orderItem?.price ?? product?.currentPrice ?? 0,
+              productName: next?.productName ?? product?.name ?? product?.code ?? product?.sku ?? '',
+              sku: next?.sku ?? product?.code ?? product?.sku ?? '',
+              toOrder: next?.quantity ?? 0,
+              price: next?.price ?? product?.currentPrice ?? 0,
               imageUrl: product ? getProductImageUrl(product) : undefined,
             });
           }
@@ -190,7 +222,7 @@ export function EditOrderPlanogram({ order, onClose, onSaved }: EditOrderPlanogr
     return { backgroundColor: '#f8fafc', borderColor: '#e2e8f0' };
   };
 
-  const orderItems = planogramData.filter((i) => i.productId && i.toOrder > 0);
+  const orderItems = planogramData.filter((i) => i.productId && (i.toOrder > 0 || !!i.orderDetailId));
   const totalToOrder = planogramData.reduce((s, i) => s + i.toOrder, 0);
   const totalValue = planogramData.reduce((s, i) => s + i.toOrder * i.price, 0);
 
@@ -207,6 +239,7 @@ export function EditOrderPlanogram({ order, onClose, onSaved }: EditOrderPlanogr
         storeAddress: store?.address ?? '',
         salespersonId: String(salespersonId),
         items: orderItems.map((item) => ({
+          orderDetailId: item.orderDetailId,
           productId: item.productId,
           sku: item.sku,
           productName: item.productName,

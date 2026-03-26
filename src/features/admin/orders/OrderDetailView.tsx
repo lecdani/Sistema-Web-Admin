@@ -44,6 +44,17 @@ function looksLikeId(name: string): boolean {
   return /^[0-9a-f-]{36}$/i.test(name.trim()) || /^\d+$/.test(name.trim());
 }
 
+function sameFamilyId(a: string | undefined, b: string | undefined): boolean {
+  const aa = String(a || '').trim();
+  const bb = String(b || '').trim();
+  if (!aa || !bb) return false;
+  if (aa === bb) return true;
+  const an = Number(aa);
+  const bn = Number(bb);
+  if (Number.isNaN(an) || Number.isNaN(bn)) return false;
+  return an === bn;
+}
+
 export function OrderDetailView({ orderId, onClose, onOrderUpdated }: OrderDetailViewProps) {
   const { translate, locale } = useLanguage();
   const [order, setOrder] = useState<OrderForUI | null>(null);
@@ -62,9 +73,12 @@ export function OrderDetailView({ orderId, onClose, onOrderUpdated }: OrderDetai
   const [storeCityDisplay, setStoreCityDisplay] = useState<string>('');
   const [sellerNameDisplay, setSellerNameDisplay] = useState<string>('');
   const [activeTab, setActiveTab] = useState('summary');
+  const [invoiceViewMode, setInvoiceViewMode] = useState<'product' | 'family'>('product');
+  const [invoicePrintLayout, setInvoicePrintLayout] = useState<'normal' | 'ticket'>('normal');
   const [storeHasPlanogram, setStoreHasPlanogram] = useState(true);
   const [discrepancies, setDiscrepancies] = useState<OrderDiscrepancyItem[]>([]);
   const [discrepanciesLoaded, setDiscrepanciesLoaded] = useState(false);
+  const [allCategories, setAllCategories] = useState<Array<{ id: string; name: string; sku?: string; code?: string }>>([]);
 
   useEffect(() => {
     const load = async () => {
@@ -75,6 +89,7 @@ export function OrderDetailView({ orderId, onClose, onOrderUpdated }: OrderDetai
         return;
       }
       const categoriesList = await categoriesApi.fetchAll();
+      setAllCategories(categoriesList.map((c) => ({ id: c.id, name: c.name, sku: c.sku, code: c.code })));
       const categoryById = new Map<string, string>();
       categoriesList.forEach((c) => {
         categoryById.set(c.id, c.name);
@@ -96,17 +111,22 @@ export function OrderDetailView({ orderId, onClose, onOrderUpdated }: OrderDetai
             let productName = (item.productName || item.sku || '').trim();
             let price = Number(item.price) || 0;
             let category = (item.category ?? '').trim();
+            let familyId = String(
+              item.familyId ?? item.FamilyId ?? item.categoryId ?? item.CategoryId ?? ''
+            ).trim();
             if (item.productId) {
               const product = await productsApi.getById(item.productId);
               if (product) {
                 if (!productName) productName = product.name || product.code || product.sku || '';
+                if (!familyId) {
+                  familyId = String((product as any).familyId ?? product.categoryId ?? '').trim();
+                }
                 if (!category && product.category) category = product.category.trim();
                 if (!category && product.categoryId != null) {
                   const id = String(product.categoryId);
                   category = categoryById.get(id) ?? categoryById.get(String(Number(id))) ?? '';
                 }
                 if (!price) {
-                  const familyId = String((product as any).familyId ?? product.categoryId ?? '').trim();
                   if (familyId) {
                     const latest = await histpricesApi.getLatest(familyId);
                     price = latest?.price ?? 0;
@@ -114,7 +134,14 @@ export function OrderDetailView({ orderId, onClose, onOrderUpdated }: OrderDetai
                 }
               }
             }
-            return { ...item, productName: productName || item.productName, price, category: category || item.category };
+            return {
+              ...item,
+              productName: productName || item.productName,
+              price,
+              category: category || item.category,
+              familyId: familyId || item.familyId,
+              categoryId: familyId || item.categoryId,
+            };
           })
         );
         const computedSubtotal = enrichedItems.reduce(
@@ -180,7 +207,10 @@ export function OrderDetailView({ orderId, onClose, onOrderUpdated }: OrderDetai
           const user = await usersApi.getById(orderToSet.salespersonId);
           if (user) {
             setSellerNameDisplay(
-              `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.email || '—'
+              String(user.sellerCode || '').trim() ||
+                `${user.firstName || ''} ${user.lastName || ''}`.trim() ||
+                user.email ||
+                '—'
             );
           } else {
             setSellerNameDisplay(orderToSet.salespersonId);
@@ -270,6 +300,19 @@ export function OrderDetailView({ orderId, onClose, onOrderUpdated }: OrderDetai
 
   const showInvoicedTabs = detailLifecycle === 'invoiced';
 
+  const displayPo = String((order as any)?.po ?? '').trim();
+  const displayInvoiceNumber = String(invoiceDisplay?.invoiceNumber ?? '').trim();
+  const headerMainNumber =
+    displayInvoiceNumber ||
+    (detailLifecycle !== 'invoiced' ? displayPo : '') ||
+    `${translate('orderNumber')} #${order?.id ?? (order as any)?.backendOrderId ?? '—'}`;
+  const headerStatusClass =
+    detailLifecycle === 'cancelled'
+      ? 'bg-slate-100 text-slate-700'
+      : detailLifecycle === 'invoiced'
+      ? 'bg-green-100 text-green-700'
+      : 'bg-amber-100 text-amber-700';
+
   useEffect(() => {
     setActiveTab('summary');
   }, [orderId]);
@@ -326,6 +369,8 @@ export function OrderDetailView({ orderId, onClose, onOrderUpdated }: OrderDetai
       delivered: translate('statusDelivered'),
       cancelled: translate('statusCancelled'),
       canceled: translate('statusCancelled'),
+      cancelado: translate('statusCancelled'),
+      '3': translate('statusCancelled'),
     };
     return map[s] || status || '—';
   };
@@ -340,9 +385,11 @@ export function OrderDetailView({ orderId, onClose, onOrderUpdated }: OrderDetai
       delivered: { label: translate('statusDelivered'), color: 'bg-green-100 text-green-800' },
       cancelled: { label: translate('statusCancelled'), color: 'bg-slate-200 text-slate-800' },
       canceled: { label: translate('statusCancelled'), color: 'bg-slate-200 text-slate-800' },
+      cancelado: { label: translate('statusCancelled'), color: 'bg-slate-200 text-slate-800' },
+      '3': { label: translate('statusCancelled'), color: 'bg-slate-200 text-slate-800' },
     };
     const config = statusConfig[s] || { label: status || '—', color: 'bg-gray-100 text-gray-800' };
-    return <Badge className={config.color}>{config.label}</Badge>;
+    return <Badge variant="secondary" className={config.color}>{config.label}</Badge>;
   };
 
   // Total y subtotal: factura → pedido → calculado desde items (siempre mostrar algo)
@@ -388,7 +435,9 @@ export function OrderDetailView({ orderId, onClose, onOrderUpdated }: OrderDetai
               <ShoppingCart className="h-6 w-6" />
             </div>
             <div>
-              <h2 className="text-2xl font-bold">{order.po ? `${order.po}` : `${translate('orderNumber')} #${order.id ?? order.backendOrderId ?? '—'}`}</h2>
+              <h2 className="text-2xl font-bold">
+                {headerMainNumber}
+              </h2>
               <p className="text-blue-100 text-sm mt-1">
                 {translate('createdOn')} {new Date(order.date || (order as any).createdAt).toLocaleDateString(locale, {
                   day: 'numeric',
@@ -405,7 +454,7 @@ export function OrderDetailView({ orderId, onClose, onOrderUpdated }: OrderDetai
               <CheckCircle className="h-5 w-5" />
               <span className="text-3xl font-bold">${displayTotal.toFixed(2)}</span>
             </div>
-            <div className="inline-flex bg-white/90 text-indigo-700 px-3 py-1 rounded-full text-sm font-semibold">
+            <div className={`inline-flex px-3 py-1 rounded-full text-sm font-semibold ${headerStatusClass}`}>
               {getStatusLabel(order.status)}
             </div>
           </div>
@@ -448,11 +497,18 @@ export function OrderDetailView({ orderId, onClose, onOrderUpdated }: OrderDetai
                 <h3 className="font-semibold text-gray-900">{translate('orderDetails')}</h3>
               </div>
               <div className="space-y-3">
-                {/* 1. Pedido (PO) — solo lectura */}
+                {/* 1. Factura (InvoiceNumber) o PO — solo lectura */}
                 <div className="flex justify-between items-start gap-2">
-                  <span className="text-gray-600 text-sm pt-0.5">{translate('poNumber')}:</span>
+                  <span className="text-gray-600 text-sm pt-0.5">
+                    {detailLifecycle === 'invoiced' ? translate('invoiceNumberCol') : translate('poNumber')}
+                    :
+                  </span>
                   <div className="flex-1 min-w-0 text-right">
-                    <span className="font-medium text-gray-900">{order.po ? `${order.po}` : '—'}</span>
+                    <span className="font-medium text-gray-900">
+                      {detailLifecycle === 'invoiced'
+                        ? (displayInvoiceNumber || '—')
+                        : (displayPo || '—')}
+                    </span>
                   </div>
                 </div>
                 {/* 2. Estado */}
@@ -576,6 +632,15 @@ export function OrderDetailView({ orderId, onClose, onOrderUpdated }: OrderDetai
               {translate('printOrderTab')}
             </Button>
           </div>
+          {!!displayPo && (
+            <div className="print:hidden">
+              <Alert className="border-slate-200 bg-white">
+                <AlertDescription className="text-slate-700">
+                  <span className="font-semibold">{translate('poNumber')}:</span> {displayPo}
+                </AlertDescription>
+              </Alert>
+            </div>
+          )}
           <div id="admin-order-initial-print-root">
           {storeHasPlanogram ? (
             <OrderPlanogramView
@@ -587,7 +652,8 @@ export function OrderDetailView({ orderId, onClose, onOrderUpdated }: OrderDetai
                   salespersonId: (order as any).salespersonId ?? '',
                   storeId: (order as any).storeId ?? '',
                   createdAt: order.date ? new Date(order.date) : new Date(),
-                  po: (order as any).po ?? order.id,
+                  // En pedido inicial/cancelado, se sigue mostrando PO.
+                  po: displayPo || undefined,
                   status: showInvoicedTabs ? 'completed' : 'pending',
                   storeName: order.storeName,
                   planogramId: (order as any).planogramId,
@@ -636,7 +702,7 @@ export function OrderDetailView({ orderId, onClose, onOrderUpdated }: OrderDetai
             const invFromOrder =
               order.items?.length && !invFromApi
                 ? {
-                    invoiceNumber: order.po ? `${order.po}` : (order.id ?? '—'),
+                    invoiceNumber: String((invoiceDisplay as any)?.invoiceNumber ?? '—'),
                     date: order.date,
                     total: displayTotal,
                     subtotal: displaySubtotal,
@@ -664,32 +730,133 @@ export function OrderDetailView({ orderId, onClose, onOrderUpdated }: OrderDetai
               );
             }
             const invoiceDateStr = typeof inv.date === 'string' ? inv.date : inv.date ? String(inv.date) : new Date().toISOString();
+            const toInvoiceRows = (inv.items || []).map((line: any, idx: number) => {
+              const code = String(line.code || '').trim();
+              const normCode = code.replace(/-/g, '').toLowerCase();
+              const oi =
+                order.items.find((x: any) => String(x.sku || '').trim() === code) ||
+                order.items.find((x: any) => String(x.productId) === code) ||
+                (code.length >= 8
+                  ? order.items.find((x: any) => {
+                      const pid = String(x.productId || '').replace(/-/g, '').toLowerCase();
+                      return pid && (pid === normCode || String(x.productId) === code);
+                    })
+                  : undefined);
+              return {
+                key: `line-${idx}`,
+                productId: String(oi?.productId || line?.productId || ''),
+                productName: String(line.description || oi?.productName || '—'),
+                sku: String(line.code || '').trim(),
+                qty: Number(line.qty) || 0,
+                price: Number(line.price) || 0,
+                lineTotal: Number(line.amount) || (Number(line.qty) || 0) * (Number(line.price) || 0),
+              };
+            });
+            const invoiceRowMatchesOrderItem = (row: (typeof toInvoiceRows)[0], item: any) => {
+              const code = String(row.sku || '').trim();
+              const norm = code.replace(/-/g, '').toLowerCase();
+              const pid = String(item.productId || '').replace(/-/g, '').toLowerCase();
+              if (String(item.sku || '').trim() === code) return true;
+              if (String(item.productId) === code) return true;
+              if (row.productId && String(item.productId) === row.productId) return true;
+              if (code.length >= 8 && pid && pid === norm) return true;
+              return false;
+            };
+            const invoiceItems = toInvoiceRows.map((row) => {
+              const matched = order.items.find((item: any) => invoiceRowMatchesOrderItem(row, item));
+              const familyId = String(
+                matched?.familyId ?? matched?.FamilyId ?? matched?.categoryId ?? matched?.CategoryId ?? ''
+              ).trim();
+              const categoryName = String(matched?.category ?? '').trim().toLowerCase();
+              const fam = familyId
+                ? allCategories.find((c) => sameFamilyId(String(c.id), familyId))
+                : allCategories.find((c) => String(c.name || '').trim().toLowerCase() === categoryName) || null;
+              const familyName = String(fam?.name || matched?.category || '').trim() || undefined;
+              const familyCode = String(fam?.code || '').trim() || undefined;
+              const familySku = String(fam?.sku || '').trim() || undefined;
+              return {
+                qty: row.qty,
+                code: row.sku,
+                description: row.productName,
+                price: row.price,
+                amount: row.lineTotal,
+                familyName,
+                familyCode,
+                familySku,
+              };
+            });
             return (
               <Card className="border-slate-200 shadow-sm overflow-hidden print:shadow-none print:border-0">
                 <CardHeader className="px-4 pt-4 pb-2 print:hidden">
                   <div className="flex items-center justify-between">
                     <CardTitle className="text-sm">{translate('invoiceLabel')}</CardTitle>
-                    <Button variant="outline" size="sm" onClick={() => window.print()} className="gap-2">
-                      <Download className="h-4 w-4" />
-                      {translate('printDownload')}
-                    </Button>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <div className="inline-flex rounded-md border border-slate-200 overflow-hidden">
+                        <button
+                          type="button"
+                          className={`px-3 py-1.5 text-xs font-medium ${
+                            invoiceViewMode === 'product' ? 'bg-slate-800 text-white' : 'bg-white text-slate-700'
+                          }`}
+                          onClick={() => setInvoiceViewMode('product')}
+                        >
+                          {translate('invoiceTabProducts')}
+                        </button>
+                        <button
+                          type="button"
+                          className={`px-3 py-1.5 text-xs font-medium border-l border-slate-200 ${
+                            invoiceViewMode === 'family' ? 'bg-slate-800 text-white' : 'bg-white text-slate-700'
+                          }`}
+                          onClick={() => setInvoiceViewMode('family')}
+                        >
+                          {translate('invoiceTabFamilies')}
+                        </button>
+                      </div>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          setInvoicePrintLayout('normal');
+                          window.print();
+                        }}
+                        className="gap-2"
+                      >
+                        <Download className="h-4 w-4" />
+                        {translate('printDownload')}
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          const prev = invoiceViewMode;
+                          setInvoiceViewMode('family');
+                          setInvoicePrintLayout('ticket');
+                          setTimeout(() => {
+                            window.print();
+                            setTimeout(() => {
+                              setInvoicePrintLayout('normal');
+                              setInvoiceViewMode(prev);
+                            }, 200);
+                          }, 60);
+                        }}
+                        className="gap-2"
+                      >
+                        <Printer className="h-4 w-4" />
+                        {translate('printTicket')}
+                      </Button>
+                    </div>
                   </div>
                 </CardHeader>
                 <CardContent className="p-0">
                   <Invoice
-                    invoiceNumber={order.po ? `${order.po}` : String(inv.invoiceNumber)}
+                    invoiceNumber={String(inv.invoiceNumber)}
                     date={formatInvoiceDate(invoiceDateStr)}
                     vendorName={sellerNameDisplay}
                     storeName={storeNameDisplay || order.storeName || '—'}
                     storeAddress={storeAddressDisplay || order.storeAddress || ''}
-                    items={inv.items.map((it: any) => ({
-                      qty: it.qty,
-                      code: it.code,
-                      description: it.description,
-                      price: Number(it.price) || 0,
-                      amount: Number(it.amount) ?? it.qty * (Number(it.price) || 0),
-                    }))}
+                    items={invoiceItems}
                     comments={order.comments}
+                    viewMode={invoiceViewMode}
+                    printLayout={invoicePrintLayout}
                   />
                 </CardContent>
               </Card>
@@ -730,7 +897,7 @@ export function OrderDetailView({ orderId, onClose, onOrderUpdated }: OrderDetai
                     salespersonId: (order as any).salespersonId ?? '',
                     storeId: (order as any).storeId ?? '',
                     createdAt: order.date ? new Date(order.date) : new Date(),
-                    po: (order as any).po ?? order.id,
+                    po: undefined,
                     status: showInvoicedTabs ? 'completed' : 'pending',
                     storeName: order.storeName,
                     planogramId: (order as any).planogramId,

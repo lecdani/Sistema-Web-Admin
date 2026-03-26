@@ -288,10 +288,11 @@ export function OrderManagement({ onBack }: OrderManagementProps) {
   };
 
   const getStatusBadge = (status: string) => {
-    switch (status) {
+    const s = String(status || '').toLowerCase().trim();
+    switch (s) {
       case 'invoiced':
         return (
-          <Badge className="bg-green-100 text-green-800 border-green-200">
+          <Badge variant="secondary" className="bg-green-100 text-green-800 border-green-200">
             <CheckCircle className="h-3 w-3 mr-1" />
             {translate('statusInvoiced')}
           </Badge>
@@ -299,27 +300,30 @@ export function OrderManagement({ onBack }: OrderManagementProps) {
       case 'confirmed':
       case 'completed':
         return (
-          <Badge className="bg-green-100 text-green-800 border-green-200">
+          <Badge variant="secondary" className="bg-green-100 text-green-800 border-green-200">
             <CheckCircle className="h-3 w-3 mr-1" />
             {translate('statusInvoiced')}
           </Badge>
         );
       case 'initial':
         return (
-          <Badge className="bg-yellow-100 text-yellow-800 border-yellow-200">
+          <Badge variant="secondary" className="bg-yellow-100 text-yellow-800 border-yellow-200">
             <Clock className="h-3 w-3 mr-1" />
             {translate('initialStatus')}
           </Badge>
         );
+      case 'canceled':
       case 'cancelled':
+      case 'cancelado':
+      case '3':
         return (
-          <Badge className="bg-slate-200 text-slate-800 border-slate-300">
+          <Badge variant="secondary" className="bg-slate-200 text-slate-800 border-slate-300">
             <AlertCircle className="h-3 w-3 mr-1" />
-            {translate('cancelled') || 'Cancelado'}
+            {translate('statusCancelled') || 'Cancelado'}
           </Badge>
         );
       default:
-        return <Badge>{status}</Badge>;
+        return <Badge variant="secondary" className="bg-gray-100 text-gray-800 border-gray-200">{status}</Badge>;
     }
   };
 
@@ -451,7 +455,7 @@ export function OrderManagement({ onBack }: OrderManagementProps) {
           lifecycle === 'invoiced'
             ? translate('statusInvoiced')
             : lifecycle === 'cancelled'
-            ? translate('cancelled') || 'Cancelado'
+            ? translate('statusCancelled') || 'Cancelado'
             : translate('initialStatus');
         ws.getCell(row, 1).value = (o as any).po ?? o.id ?? '';
         ws.getCell(row, 2).value = o.id ?? '';
@@ -479,7 +483,7 @@ export function OrderManagement({ onBack }: OrderManagementProps) {
       ws.getCell(row, 1).value = translate('statusInvoiced');
       ws.getCell(row, 2).value = exportRows.filter((o) => getOrderLifecycleStatus(o) === 'invoiced').length;
       row += 1;
-      ws.getCell(row, 1).value = translate('cancelled') || 'Cancelado';
+      ws.getCell(row, 1).value = translate('statusCancelled') || 'Cancelado';
       ws.getCell(row, 2).value = exportRows.filter((o) => getOrderLifecycleStatus(o) === 'cancelled').length;
       row += 1;
       ws.getCell(row, 1).value = translate('ordersSumSubtotals');
@@ -629,7 +633,7 @@ export function OrderManagement({ onBack }: OrderManagementProps) {
           <CardContent className="pt-4">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-xs font-medium text-slate-500">{translate('cancelled') || 'Cancelados'}</p>
+                <p className="text-xs font-medium text-slate-500">{translate('statusCancelled') || 'Cancelados'}</p>
                 <p className="text-2xl font-bold text-slate-700">{orderMetrics.cancelledCount}</p>
               </div>
               <div className="rounded-lg bg-slate-200 p-2.5">
@@ -698,14 +702,14 @@ export function OrderManagement({ onBack }: OrderManagementProps) {
                     {filters.status === 'all' && translate('allStatuses')}
                     {filters.status === 'initial' && translate('initialStatus')}
                     {filters.status === 'invoiced' && translate('statusInvoiced')}
-                    {filters.status === 'cancelled' && (translate('cancelled') || 'Cancelado')}
+                    {filters.status === 'cancelled' && (translate('statusCancelled') || 'Cancelado')}
                   </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">{translate('allStatuses')}</SelectItem>
                   <SelectItem value="initial">{translate('initialStatus')}</SelectItem>
                   <SelectItem value="invoiced">{translate('statusInvoiced')}</SelectItem>
-                  <SelectItem value="cancelled">{translate('cancelled') || 'Cancelado'}</SelectItem>
+                  <SelectItem value="cancelled">{translate('statusCancelled') || 'Cancelado'}</SelectItem>
                 </SelectContent>
               </Select>
             </div>

@@ -97,7 +97,7 @@ export async function createDistribution(data: {
 /** Actualiza una distribución (posición, producto, planograma). Incluir planogramId y productId para no violar FKs. */
 export async function updateDistribution(
   id: string,
-  data: { planogramId?: string; productId?: string; xPosition?: number; yPosition?: number }
+  data: { planogramId?: string; productId?: string; xPosition?: number; yPosition?: number; isActive?: boolean }
 ): Promise<Distribution> {
   const endpoint = E.UPDATE.replace('{id}', encodeURIComponent(id));
   const payload: any = { id };
@@ -131,6 +131,12 @@ export async function updateDistribution(
     payload.productId = data.productId;
     payload.ProductId = data.productId;
   }
+  if (typeof data.isActive === 'boolean') {
+    payload.isActive = data.isActive;
+    payload.IsActive = data.isActive;
+    payload.active = data.isActive;
+    payload.Active = data.isActive;
+  }
   const res = await apiClient.put<any>(endpoint, payload);
   if (typeof res === 'string' || res == null) {
     return { id, planogramId: '', productId: data.productId ?? '', xPosition: data.xPosition ?? 0, yPosition: data.yPosition ?? 0, createdAt: new Date(), ...data } as Distribution;
@@ -138,15 +144,20 @@ export async function updateDistribution(
   return toDistribution(res);
 }
 
-/** Desactiva una distribución (PUT /distributions/distributions/desactivate/{id}) */
+/**
+ * Desactiva una distribución.
+ * Backend real: PUT /distributions/distribution/{id}
+ */
 export async function toggleDistributionActive(id: string): Promise<void> {
-  const endpoint = E.DEACTIVATE.replace('{id}', encodeURIComponent(id));
-  await apiClient.put(endpoint, { id });
+  const endpoint = E.UPDATE.replace('{id}', encodeURIComponent(id));
+  // Algunos backends manejan el "desactivar" por update con flag.
+  // Enviar flags comunes para maximizar compatibilidad sin romper si se ignoran.
+  await apiClient.put(endpoint, { id, isActive: false, IsActive: false, active: false, Active: false });
 }
 
 export const distributionsApi = {
   getByPlanogram: fetchDistributionsByPlanogram,
   create: createDistribution,
   update: updateDistribution,
-  toggleActive: toggleDistributionActive
+  toggleActive: toggleDistributionActive,
 };

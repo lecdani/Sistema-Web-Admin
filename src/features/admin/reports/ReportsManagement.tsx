@@ -51,7 +51,6 @@ import { Order, Invoice, Product, Store, City, User } from '@/shared/types';
 import { toast } from 'sonner';
 import { ordersApi, fetchAllOrderSummaries, type AdminOrderSummary } from '@/shared/services/orders-api';
 import {
-  appendReportOrdersAndShortageSheets,
   computeShortageAnalytics,
   getOrderLifecycleFromStatus,
   type ShortageAnalyticsResult,
@@ -60,6 +59,7 @@ import { productsApi } from '@/shared/services/products-api';
 import { storesApi } from '@/shared/services/stores-api';
 import { citiesApi } from '@/shared/services/cities-api';
 import { usersApi } from '@/shared/services/users-api';
+import { categoriesApi } from '@/shared/services/categories-api';
 import ExcelJS from 'exceljs';
 
 interface ReportsManagementProps {
@@ -160,7 +160,7 @@ export function ReportsManagement({ onBack }: ReportsManagementProps) {
   const loadReportData = async () => {
     try {
       setIsLoading(true);
-
+      
       let productsData: Product[] = [];
       let storesData: Store[] = [];
       let citiesData: City[] = [];
@@ -340,7 +340,9 @@ export function ReportsManagement({ onBack }: ReportsManagementProps) {
               (orderSellerNameOk ? orderSellerName!.trim() : null) ??
               '—';
             const productName = item.productName ?? product?.name ?? item.productId;
-            const productSku = item.sku ?? product?.sku ?? '';
+            const productSku = String(
+              item.sku ?? item.Sku ?? item.code ?? item.Code ?? product?.sku ?? (product as any)?.code ?? ''
+            ).trim();
 
             const poDisplay = orderIdToPo.get(inv.orderId) ?? inv.orderId;
             salesReports.push({
@@ -399,8 +401,8 @@ export function ReportsManagement({ onBack }: ReportsManagementProps) {
           const seller = usersData.find((u: User) => String(u.id) === String(invoice.sellerId));
           const storeName = store?.name ?? invoice.storeName ?? '—';
           const sellerName = seller ? `${seller.firstName} ${seller.lastName}`.trim() || seller.email : (invoice.sellerName ?? '—');
-          if (invoice.items && invoice.items.length > 0) {
-            invoice.items.forEach((item: any) => {
+        if (invoice.items && invoice.items.length > 0) {
+          invoice.items.forEach((item: any) => {
               const product = productsData.find((p: Product) => String(p.id) === String(item.productId));
               if (!product) return;
               const qty = Number(item?.quantity ?? item?.Quantity ?? 0) || 0;
@@ -429,9 +431,9 @@ export function ReportsManagement({ onBack }: ReportsManagementProps) {
                 invoiceNumber: poDisplay,
                 orderNumber: poDisplay
               });
-            });
-          }
-        });
+          });
+        }
+      });
       }
 
       setProducts(productsData);
@@ -767,151 +769,128 @@ export function ReportsManagement({ onBack }: ReportsManagementProps) {
   };
 
   const exportToExcel = async () => {
-      const sectionStyle = { font: { bold: true, size: 11 } };
       const wb = new ExcelJS.Workbook();
-      const ws = wb.addWorksheet(locale.startsWith('es') ? 'Reporte' : 'Report', { views: [{ state: 'frozen', ySplit: 1 }] });
-      const genDate = new Date().toLocaleString(locale, { dateStyle: 'long', timeStyle: 'short' });
-      let row = 1;
-
-      ws.getCell(row, 1).value = translate('reportCompanyName');
-      ws.getCell(row, 1).font = { bold: true, size: 16 };
-      row += 1;
-      ws.getCell(row, 1).value = translate('reportConfidential');
-      ws.getCell(row, 1).font = { size: 9, color: { argb: 'FF64748B' } };
-      row += 1;
-      ws.getCell(row, 1).value = `${translate('reportDocumentType')} · ${translate('reportTitleAdmin')}`;
-      ws.getCell(row, 1).font = { size: 10 };
-      row += 2;
-
-      ws.getCell(row, 1).value = `${translate('periodLabel')}: ${filters.dateFrom || '—'} ${translate('to')} ${filters.dateTo || '—'}`;
-      ws.getCell(row, 2).value = `${translate('generatedLabel')}: ${genDate}`;
-      row += 2;
-
-      ws.getCell(row, 1).value = translate('reportSection1');
-      ws.getCell(row, 1).font = sectionStyle;
-      row += 1;
-      ws.getCell(row, 1).value = translate('totalSales');
-      ws.getCell(row, 2).value = translate('unitsSold');
-      ws.getCell(row, 3).value = translate('averageTicket');
-      ws.getCell(row, 4).value = translate('transactionsCount');
-      [1, 2, 3, 4].forEach((c) => { ws.getCell(row, c).font = { bold: true }; });
-      row += 1;
-      ws.getCell(row, 1).value = `$${salesMetrics.totalSales.toFixed(2)}`;
-      ws.getCell(row, 2).value = salesMetrics.totalQuantity.toLocaleString(locale);
-      ws.getCell(row, 3).value = `$${salesMetrics.averageTicket.toFixed(2)}`;
-      ws.getCell(row, 4).value = salesMetrics.totalTransactions;
-      row += 2;
-
-      ws.getCell(row, 1).value = translate('reportSection2');
-      ws.getCell(row, 1).font = sectionStyle;
-      row += 1;
-      const u = translate('unitsShort');
-      ['#', translate('csvColProduct'), translate('csvColSku'), translate('totalSales'), translate('csvColQty')].forEach((val, c) => {
-        const cell = ws.getCell(row, c + 1);
-        cell.value = val;
-        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E293B' } };
-        cell.font = { color: { argb: 'FFFFFFFF' }, bold: true };
-      });
-      row += 1;
-      salesMetrics.topProducts.forEach((p, i) => {
-        ws.getCell(row, 1).value = i + 1;
-        ws.getCell(row, 2).value = (p.productName || '').substring(0, 50);
-        ws.getCell(row, 3).value = p.productSku || '';
-        ws.getCell(row, 4).value = Number(p.totalSales.toFixed(2));
-        ws.getCell(row, 5).value = p.totalQuantity;
-        row += 1;
-      });
-      row += 1;
-
-      ws.getCell(row, 1).value = translate('reportSection3');
-      ws.getCell(row, 1).font = sectionStyle;
-      row += 1;
-      ['#', translate('csvColStore'), translate('csvColCity'), translate('totalSales')].forEach((val, c) => {
-        const cell = ws.getCell(row, c + 1);
-        cell.value = val;
-        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E293B' } };
-        cell.font = { color: { argb: 'FFFFFFFF' }, bold: true };
-      });
-      row += 1;
-      salesMetrics.topStores.forEach((s, i) => {
-        ws.getCell(row, 1).value = i + 1;
-        ws.getCell(row, 2).value = (s.storeName || '').substring(0, 40);
-        ws.getCell(row, 3).value = (s.cityName || '').substring(0, 25);
-        ws.getCell(row, 4).value = Number(s.totalSales.toFixed(2));
-        row += 1;
-      });
-      row += 1;
-
-      ws.getCell(row, 1).value = translate('reportSection4');
-      ws.getCell(row, 1).font = sectionStyle;
-      row += 1;
-      ['#', translate('csvColSeller'), translate('totalSales'), translate('csvColQty')].forEach((val, c) => {
-        const cell = ws.getCell(row, c + 1);
-        cell.value = val;
-        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E293B' } };
-        cell.font = { color: { argb: 'FFFFFFFF' }, bold: true };
-      });
-      row += 1;
-      salesMetrics.topSellers.forEach((s, i) => {
-        ws.getCell(row, 1).value = i + 1;
-        ws.getCell(row, 2).value = (s.sellerName || '').substring(0, 40);
-        ws.getCell(row, 3).value = Number(s.totalSales.toFixed(2));
-        ws.getCell(row, 4).value = s.totalQuantity;
-        row += 1;
-      });
-      row += 1;
-
-      ws.getCell(row, 1).value = translate('reportDetailSection');
-      ws.getCell(row, 1).font = sectionStyle;
-      row += 1;
-      [translate('csvColDate'), translate('csvColInvoice'), translate('csvColProduct'), translate('csvColStore'), translate('csvColSeller'), translate('csvColQty'), translate('csvColUnitPrice'), translate('csvColTotal')].forEach((val, c) => {
-        const cell = ws.getCell(row, c + 1);
-        cell.value = val;
-        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E293B' } };
-        cell.font = { color: { argb: 'FFFFFFFF' }, bold: true };
-      });
-      row += 1;
-      const detailRows = filteredSalesDataSorted.slice(0, 2000);
-      detailRows.forEach((sale) => {
-        ws.getCell(row, 1).value = new Date(sale.date).toLocaleDateString(locale);
-        ws.getCell(row, 2).value = sale.invoiceNumber ? `${sale.invoiceNumber}` : '';
-        ws.getCell(row, 3).value = (sale.productName ?? '').substring(0, 40);
-        ws.getCell(row, 4).value = (sale.storeName ?? '').substring(0, 30);
-        ws.getCell(row, 5).value = (sale.sellerName ?? '').substring(0, 25);
-        ws.getCell(row, 6).value = sale.quantity;
-        ws.getCell(row, 7).value = Number(sale.unitPrice.toFixed(2));
-        ws.getCell(row, 8).value = Number(sale.totalAmount.toFixed(2));
-        row += 1;
-      });
-      if (filteredSalesDataSorted.length > 2000) {
-        ws.getCell(row, 1).value = locale.startsWith('es') ? `Mostrando 2000 de ${filteredSalesDataSorted.length} registros.` : `Showing 2000 of ${filteredSalesDataSorted.length} records.`;
-        ws.getCell(row, 1).font = { italic: true, size: 9 };
-        row += 1;
-      }
-      row += 1;
-      ws.getCell(row, 1).value = `${translate('reportPreparedBy')} — ${new Date().toLocaleString(locale, { dateStyle: 'medium', timeStyle: 'short' })}`;
-      ws.getCell(row, 1).font = { size: 9, color: { argb: 'FF64748B' } };
-
+      const ws = wb.addWorksheet(locale.startsWith('es') ? 'Transacciones' : 'Transactions');
       ws.columns = [
-        { width: 12 }, { width: 14 }, { width: 38 }, { width: 28 }, { width: 22 },
-        { width: 8 }, { width: 12 }, { width: 12 }, { width: 12 }, { width: 12 }
+        { header: translate('csvColDate'), key: 'date', width: 14 },
+        { header: translate('csvColInvoice'), key: 'invoice', width: 20 },
+        { header: translate('csvColOrder'), key: 'orderId', width: 18 },
+        { header: translate('csvColStore'), key: 'store', width: 28 },
+        { header: translate('csvColCity'), key: 'city', width: 20 },
+        { header: translate('csvColSeller'), key: 'seller', width: 24 },
+        { header: translate('csvColSku'), key: 'sku', width: 18 },
+        { header: translate('csvColProduct'), key: 'product', width: 38 },
+        { header: translate('csvColQty'), key: 'qty', width: 10 },
+        { header: translate('csvColUnitPrice'), key: 'unitPrice', width: 14 },
+        { header: translate('csvColTotal'), key: 'lineTotal', width: 14 },
       ];
-
-      const headerFill = { type: 'pattern' as const, pattern: 'solid' as const, fgColor: { argb: 'FF1E293B' } };
-      const headerFont = { color: { argb: 'FFFFFFFF' as const }, bold: true };
-      const loadingShort = toast.loading(translate('ordersShortageGenerating'));
-      try {
-        await appendReportOrdersAndShortageSheets(wb, {
-          summaries: filteredOrderSummaries,
-          translate,
-          locale,
-          sectionFont: { bold: true, size: 11 },
-          headerFill,
-          headerFont,
+      const detailRows = filteredSalesDataSorted.slice(0, 50000);
+      const categories = await categoriesApi.fetchAll().catch(() => []);
+      const familyById = new Map<string, { sku?: string; code?: string; name?: string }>();
+      categories.forEach((c: any) => {
+        const id = String(c?.id ?? '').trim();
+        if (!id) return;
+        familyById.set(id, { sku: c?.sku, code: c?.code, name: c?.name });
+        if (!Number.isNaN(Number(id))) {
+          familyById.set(String(Number(id)), { sku: c?.sku, code: c?.code, name: c?.name });
+        }
+      });
+      const productById = new Map<string, Product>();
+      products.forEach((p) => {
+        const id = String(p.id);
+        productById.set(id, p);
+        if (!Number.isNaN(Number(id))) productById.set(String(Number(id)), p);
+      });
+      detailRows.forEach((sale) => {
+        const product = productById.get(String(sale.productId)) ?? productById.get(String(Number(sale.productId)));
+        const skuFallback = String(
+          sale.productSku ||
+            (product as any)?.sku ||
+            (product as any)?.code ||
+            sale.productId ||
+            ''
+        ).trim();
+        ws.addRow({
+          date: new Date(sale.date).toLocaleDateString(locale),
+          invoice: sale.invoiceNumber ? `${sale.invoiceNumber}` : '',
+          orderId: String((sale as any).orderId ?? (sale as any).orderNumber ?? '').trim(),
+          store: sale.storeName ?? '',
+          city: sale.cityName ?? '',
+          seller: sale.sellerName ?? '',
+          sku: skuFallback || '—',
+          product: sale.productName ?? '',
+          qty: sale.quantity,
+          unitPrice: Number(sale.unitPrice.toFixed(2)),
+          lineTotal: Number(sale.totalAmount.toFixed(2)),
         });
-      } finally {
-        toast.dismiss(loadingShort);
-      }
+      });
+
+      const wsFamily = wb.addWorksheet(locale.startsWith('es') ? 'Transacciones_Familia' : 'Transactions_Family');
+      wsFamily.columns = [
+        { header: translate('csvColDate'), key: 'date', width: 14 },
+        { header: translate('csvColInvoice'), key: 'invoice', width: 20 },
+        { header: translate('csvColOrder'), key: 'orderId', width: 18 },
+        { header: translate('csvColStore'), key: 'store', width: 28 },
+        { header: translate('csvColCity'), key: 'city', width: 20 },
+        { header: translate('csvColSeller'), key: 'seller', width: 24 },
+        { header: translate('familyCodeLabel') || 'Código familia', key: 'familyCode', width: 18 },
+        { header: translate('familySkuLabel') || 'SKU familia', key: 'familySku', width: 18 },
+        { header: translate('family_col') || 'Familia', key: 'familyName', width: 30 },
+        { header: translate('csvColQty'), key: 'qty', width: 10 },
+        { header: translate('csvColTotal'), key: 'lineTotal', width: 14 },
+      ];
+      const byInvoiceFamily = new Map<
+        string,
+        {
+          date: string;
+          invoice: string;
+          orderId: string;
+          store: string;
+          city: string;
+          seller: string;
+          familyCode: string;
+          familySku: string;
+          familyName: string;
+          qty: number;
+          lineTotal: number;
+        }
+      >();
+      detailRows.forEach((sale) => {
+        const product = productById.get(String(sale.productId)) ?? productById.get(String(Number(sale.productId)));
+        const familyId = String((product as any)?.familyId ?? (product as any)?.categoryId ?? '').trim();
+        const fam = familyById.get(familyId) ?? familyById.get(String(Number(familyId)));
+        const familySku = String(fam?.sku ?? '').trim();
+        const familyCode = String(fam?.code ?? '').trim();
+        const familyName = String(fam?.name ?? (product as any)?.category ?? '').trim() || '—';
+        const familyKey = (familySku || familyCode || familyName).toLowerCase();
+        const invKey = String(sale.invoiceId || sale.invoiceNumber || '').trim();
+        const key = `${invKey}::${familyKey}`;
+        const existing = byInvoiceFamily.get(key);
+        if (existing) {
+          existing.qty += Number(sale.quantity) || 0;
+          existing.lineTotal += Number(sale.totalAmount) || 0;
+          return;
+        }
+        byInvoiceFamily.set(key, {
+          date: new Date(sale.date).toLocaleDateString(locale),
+          invoice: sale.invoiceNumber ? `${sale.invoiceNumber}` : '',
+          orderId: String((sale as any).orderId ?? (sale as any).orderNumber ?? '').trim(),
+          store: sale.storeName ?? '',
+          city: sale.cityName ?? '',
+          seller: sale.sellerName ?? '',
+          familyCode: familyCode || '—',
+          familySku: familySku || '—',
+          familyName,
+          qty: Number(sale.quantity) || 0,
+          lineTotal: Number(sale.totalAmount) || 0,
+        });
+      });
+      [...byInvoiceFamily.values()].forEach((row) => {
+        wsFamily.addRow({
+          ...row,
+          lineTotal: Number(row.lineTotal.toFixed(2)),
+        });
+      });
 
       const buffer = await wb.xlsx.writeBuffer();
       const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
@@ -922,7 +901,7 @@ export function ReportsManagement({ onBack }: ReportsManagementProps) {
       a.click();
       URL.revokeObjectURL(url);
       toast.success(translate('reportExportedExcel'));
-    };
+  };
 
   const exportToPDF = () => {
     const u = translate('unitsShort');
@@ -952,7 +931,7 @@ export function ReportsManagement({ onBack }: ReportsManagementProps) {
   ${translate('reportSection2')}
 --------------------------------------------------------------------------------
 
-${salesMetrics.topProducts.map((p, i) =>
+${salesMetrics.topProducts.map((p, i) => 
   `  ${(i + 1).toString().padStart(2)}. ${(p.productName || '').substring(0, 40)} (${p.productSku || ''})  |  $${p.totalSales.toFixed(2)}  |  ${p.totalQuantity} ${u}`
 ).join('\n')}
 
@@ -960,7 +939,7 @@ ${salesMetrics.topProducts.map((p, i) =>
   ${translate('reportSection3')}
 --------------------------------------------------------------------------------
 
-${salesMetrics.topStores.map((s, i) =>
+${salesMetrics.topStores.map((s, i) => 
   `  ${(i + 1).toString().padStart(2)}. ${(s.storeName || '').substring(0, 35)} - ${(s.cityName || '').substring(0, 20)}  |  $${s.totalSales.toFixed(2)}`
 ).join('\n')}
 
@@ -968,7 +947,7 @@ ${salesMetrics.topStores.map((s, i) =>
   ${translate('reportSection4')}
 --------------------------------------------------------------------------------
 
-${salesMetrics.topSellers.map((s, i) =>
+${salesMetrics.topSellers.map((s, i) => 
   `  ${(i + 1).toString().padStart(2)}. ${(s.sellerName || '').substring(0, 35)}  |  $${s.totalSales.toFixed(2)}  |  ${s.totalQuantity} ${u}`
 ).join('\n')}
 
@@ -1424,7 +1403,7 @@ ${salesMetrics.topSellers.map((s, i) =>
                                 {new Date(sale.date).toLocaleDateString(locale)}
                               </TableCell>
                               <TableCell className="font-medium min-w-[230px] w-[230px]">{sale.invoiceNumber ? `${sale.invoiceNumber}` : '—'}</TableCell>
-                              <TableCell>
+                        <TableCell>
                                 <div className="flex items-center gap-3">
                                   {(() => {
                                     const product = products.find((p) => String(p.id) === String(sale.productId));
@@ -1437,23 +1416,23 @@ ${salesMetrics.topSellers.map((s, i) =>
                                       </div>
                                     );
                                   })()}
-                                  <div>
-                                    <p className="font-medium">{sale.productName}</p>
-                                    <p className="text-sm text-gray-500">{sale.productSku}</p>
+                          <div>
+                            <p className="font-medium">{sale.productName}</p>
+                            <p className="text-sm text-gray-500">{sale.productSku}</p>
                                   </div>
-                                </div>
-                              </TableCell>
-                              <TableCell>
-                                <div>
-                                  <p>{sale.storeName}</p>
-                                  <p className="text-sm text-gray-500">{sale.cityName}</p>
-                                </div>
-                              </TableCell>
-                              <TableCell>{sale.sellerName}</TableCell>
-                              <TableCell className="text-right">{sale.quantity}</TableCell>
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <div>
+                            <p>{sale.storeName}</p>
+                            <p className="text-sm text-gray-500">{sale.cityName}</p>
+                          </div>
+                        </TableCell>
+                        <TableCell>{sale.sellerName}</TableCell>
+                        <TableCell className="text-right">{sale.quantity}</TableCell>
                               <TableCell className="text-right">${sale.unitPrice.toFixed(2)}</TableCell>
                               <TableCell className="text-right font-medium">${sale.totalAmount.toFixed(2)}</TableCell>
-                            </TableRow>
+                      </TableRow>
                           </React.Fragment>
                         );
                       })
@@ -1544,7 +1523,7 @@ ${salesMetrics.topSellers.map((s, i) =>
                       {orderPipelineMetrics.pendingList.length === 0 ? (
                         <TableRow>
                           <TableCell colSpan={4} className="text-center text-gray-500 py-8">
-                            {translate('noDataWithFilters')}
+                    {translate('noDataWithFilters')}
                           </TableCell>
                         </TableRow>
                       ) : (
@@ -1588,8 +1567,8 @@ ${salesMetrics.topSellers.map((s, i) =>
                 <div className="flex items-center gap-2 text-muted-foreground text-sm">
                   <RefreshCw className="h-4 w-4 animate-spin" />
                   {translate('reportsShortageLoading')}
-                </div>
-              )}
+                  </div>
+                )}
               {!shortageLoading && invoicedOrderSummaries.length === 0 && (
                 <p className="text-sm text-muted-foreground">{translate('reportsShortageNoInvoiced')}</p>
               )}
@@ -1609,7 +1588,7 @@ ${salesMetrics.topSellers.map((s, i) =>
                       <p className="text-2xl font-bold text-amber-700 mt-1">
                         {shortageAnalytics.totalShortUnits.toLocaleString(locale)}
                       </p>
-                    </div>
+              </div>
                     <div className="rounded-lg border bg-card p-4">
                       <p className="text-xs font-medium text-muted-foreground">
                         {translate('reportsShortageKpiLines')}
@@ -1848,11 +1827,11 @@ ${salesMetrics.topSellers.map((s, i) =>
                     const fullProduct = products.find((p) => String(p.id) === String(product.productId));
                     const imgUrl = getProductImageUrl(fullProduct);
                     return (
-                      <div key={product.productId} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-                        <div className="flex items-center gap-3">
-                          <Badge className="bg-indigo-100 text-indigo-800 border-indigo-200">
-                            #{index + 1}
-                          </Badge>
+                    <div key={product.productId} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                      <div className="flex items-center gap-3">
+                        <Badge className="bg-indigo-100 text-indigo-800 border-indigo-200">
+                          #{index + 1}
+                        </Badge>
                           {imgUrl ? (
                             <img src={imgUrl} alt="" className="w-10 h-10 rounded object-cover flex-shrink-0" />
                           ) : (
@@ -1860,16 +1839,16 @@ ${salesMetrics.topSellers.map((s, i) =>
                               <Package className="h-5 w-5 text-gray-500" />
                             </div>
                           )}
-                          <div>
-                            <p className="font-medium text-gray-900">{product.productName}</p>
-                            <p className="text-sm text-gray-500">{product.productSku}</p>
-                          </div>
-                        </div>
-                        <div className="text-right">
-                          <p className="font-bold text-gray-900">${product.totalSales.toFixed(2)}</p>
-                          <p className="text-sm text-gray-500">{product.totalQuantity} {translate('totalQuantityUnits')}</p>
+                        <div>
+                          <p className="font-medium text-gray-900">{product.productName}</p>
+                          <p className="text-sm text-gray-500">{product.productSku}</p>
                         </div>
                       </div>
+                      <div className="text-right">
+                          <p className="font-bold text-gray-900">${product.totalSales.toFixed(2)}</p>
+                        <p className="text-sm text-gray-500">{product.totalQuantity} {translate('totalQuantityUnits')}</p>
+                      </div>
+                    </div>
                     );
                   })}
                 </div>

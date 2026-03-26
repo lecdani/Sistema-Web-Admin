@@ -154,13 +154,13 @@ export function InvoiceManagement({ onBack }: InvoiceManagementProps) {
       draft: { label: translate('statusDraft'), color: 'bg-gray-100 text-gray-800' },
       sent: { label: translate('statusSent'), color: 'bg-blue-100 text-blue-800' },
       paid: { label: translate('statusPaid'), color: 'bg-green-100 text-green-800' },
-      cancelled: { label: translate('statusCancelled'), color: 'bg-red-100 text-red-800' }
+      cancelled: { label: translate('statusCancelled'), color: 'bg-slate-200 text-slate-800' }
     };
 
     const config = statusConfig[status as keyof typeof statusConfig] || statusConfig.draft;
     
     return (
-      <Badge className={config.color}>
+      <Badge variant="secondary" className={config.color}>
         {config.label}
       </Badge>
     );

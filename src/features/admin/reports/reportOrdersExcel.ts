@@ -18,7 +18,7 @@ export function getOrderLifecycleFromStatus(status: string | undefined): 'initia
 }
 
 export interface ShortageDetailRow {
-  po: string;
+  invoiceNumber: string;
   orderId: string;
   /** ID de tienda del pedido (para resolver nombre en UI si falta en el resumen). */
   storeId?: string;
@@ -124,7 +124,7 @@ export async function computeShortageAnalytics(
         if (!pAgg.name && rowS.productName) pAgg.name = rowS.productName || '';
 
         detailRows.push({
-          po: String(o.po || o.id),
+          invoiceNumber: String((inv as any)?.invoiceNumber ?? (inv as any)?.InvoiceNumber ?? o.invoiceId ?? ''),
           orderId: o.id,
           storeId: rawStoreId || undefined,
           storeName,
@@ -240,7 +240,7 @@ export async function appendReportOrdersAndShortageSheets(
   wsP.getCell(row, 1).font = sectionFont;
   row += 1;
   const pendHeaders = [
-    translate('ordersShortagePo'),
+    translate('invoiceNumberCol'),
     'ID',
     translate('storeHeader'),
     translate('date'),
@@ -258,7 +258,7 @@ export async function appendReportOrdersAndShortageSheets(
     (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()
   );
   for (const o of sortedInitial.slice(0, 500)) {
-    wsP.getCell(row, 1).value = o.po ?? o.id;
+    wsP.getCell(row, 1).value = String((o as any).invoiceId ?? '');
     wsP.getCell(row, 2).value = o.id;
     wsP.getCell(row, 3).value = o.storeName || o.storeId;
     wsP.getCell(row, 4).value = new Date(o.date).toLocaleDateString(locale);

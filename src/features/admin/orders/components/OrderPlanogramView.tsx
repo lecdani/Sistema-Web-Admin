@@ -32,15 +32,15 @@ function normKey(s: string): string {
 /**
  * Cantidades desde líneas de factura (PWA + refuerzos admin: code/sku/id/nombre en catálogo).
  */
-function buildQuantitiesMapFromInvoiceLines(
+function buildQuantitiesQueueFromInvoiceLines(
   invoiceItems: LineItem[],
   orderItems: Array<{ productId?: string; ProductId?: string; productName?: string; sku?: string; price?: number }>,
   getProduct: (id: string) =>
     | { id: string; name?: string; sku?: string; familyId?: string; categoryId?: string; currentPrice?: number }
     | undefined,
   catalogProducts: Product[]
-): Map<string, { productName: string; sku: string; quantity: number; price: number }> {
-  const map = new Map<string, { productName: string; sku: string; quantity: number; price: number }>();
+): Map<string, Array<{ productName: string; sku: string; quantity: number; price: number }>> {
+  const map = new Map<string, Array<{ productName: string; sku: string; quantity: number; price: number }>>();
 
   const resolveProductId = (line: LineItem): string => {
     const code = String(line.code || '').trim();
@@ -104,17 +104,10 @@ function buildQuantitiesMapFromInvoiceLines(
     const sku = String(
       (oi as any)?.sku || prod?.sku || (prod as Product | undefined)?.code || code
     ).trim();
-    const prev = map.get(productId);
-    if (prev) {
-      map.set(productId, {
-        productName: name || prev.productName,
-        sku: sku || prev.sku,
-        quantity: prev.quantity + qty,
-        price: price > 0 ? price : prev.price,
-      });
-    } else {
-      map.set(productId, { productName: name, sku, quantity: qty, price });
-    }
+    const row = { productName: name, sku, quantity: qty, price };
+    const arr = map.get(productId) ?? [];
+    arr.push(row);
+    map.set(productId, arr);
   }
   return map;
 }
@@ -207,7 +200,7 @@ export const OrderPlanogramView: React.FC<OrderPlanogramViewProps> = ({
           }
           if (!mounted || !planogramsData.length) {
             setLoadError(translate('noActivePlanogramActivate'));
-            setLoading(false);
+      setLoading(false);
             return;
           }
           planogram =
@@ -218,7 +211,7 @@ export const OrderPlanogramView: React.FC<OrderPlanogramViewProps> = ({
 
         if (!planogram) {
           setLoadError(translate('noActivePlanogramActivate'));
-          setLoading(false);
+      setLoading(false);
           return;
         }
         setPlanogramName(planogram.name ?? null);
@@ -267,9 +260,14 @@ export const OrderPlanogramView: React.FC<OrderPlanogramViewProps> = ({
         });
         const getProduct = (id: string) => productMap.get(id) || productMap.get(String(Number(id)));
 
-        const orderItemsByProductId = new Map<
+        // IMPORTANTE:
+        // No agrupar por productId aquí. Con planogramas que permiten duplicados,
+        // el backend puede devolver múltiples líneas con el mismo producto. Si colapsamos en Map,
+        // la cantidad se "replica" en todas las celdas donde aparezca ese producto.
+        // Usamos una cola (queue) por productId y vamos consumiendo por celda.
+        const qtyQueueByProductId = new Map<
           string,
-          { productName: string; sku: string; quantity: number; price: number }
+          Array<{ productName: string; sku: string; quantity: number; price: number }>
         >();
         const items = apiOrder.items ?? [];
 
@@ -279,7 +277,7 @@ export const OrderPlanogramView: React.FC<OrderPlanogramViewProps> = ({
           let usedInvoiceQuantities = false;
 
           if (invDisplay?.items?.length) {
-            const fromInv = buildQuantitiesMapFromInvoiceLines(
+            const fromInv = buildQuantitiesQueueFromInvoiceLines(
               invDisplay.items,
               items as any[],
               (pid) => {
@@ -297,7 +295,7 @@ export const OrderPlanogramView: React.FC<OrderPlanogramViewProps> = ({
               productsData
             );
             if (fromInv.size > 0) {
-              fromInv.forEach((v, k) => orderItemsByProductId.set(k, { ...v }));
+              fromInv.forEach((arr, k) => qtyQueueByProductId.set(k, [...arr]));
               usedInvoiceQuantities = true;
             }
           }
@@ -324,24 +322,34 @@ export const OrderPlanogramView: React.FC<OrderPlanogramViewProps> = ({
               const name = (item.productName ?? item.sku ?? p?.name ?? '').trim();
               const sku = String(item.sku ?? p?.sku ?? p?.code ?? '').trim();
               const qty = Number(item.quantity ?? item.toOrder ?? item.Quantity ?? 0) || 0;
-              orderItemsByProductId.set(id, { productName: name, sku, quantity: qty, price });
+              if (qty > 0) {
+                const arr = qtyQueueByProductId.get(id) ?? [];
+                arr.push({ productName: name, sku, quantity: qty, price });
+                qtyQueueByProductId.set(id, arr);
+              }
             }
           } else if (usedInvoiceQuantities) {
-            for (const [id, row] of orderItemsByProductId.entries()) {
-              if (row.price > 0) continue;
-              const oi = items.find((x: any) => String(x.productId ?? x.ProductId) === id);
-              let price = Number(oi?.price ?? oi?.unitPrice ?? 0) || 0;
-              if (!price) {
-                const productForPrice = getProduct(id);
-                const familyId = String(productForPrice?.familyId ?? productForPrice?.categoryId ?? '').trim();
-                if (familyId) {
-                  try {
-                    const hp = await histpricesApi.getLatest(familyId);
-                    price = hp?.price ?? 0;
-                  } catch (_) {}
-                }
-              }
-              orderItemsByProductId.set(id, { ...row, price });
+            // Completar precios faltantes en cola
+            for (const [id, arr] of qtyQueueByProductId.entries()) {
+              const nextArr = await Promise.all(
+                arr.map(async (row) => {
+                  if (row.price > 0) return row;
+                  const oi = items.find((x: any) => String(x.productId ?? x.ProductId) === id);
+                  let price = Number(oi?.price ?? oi?.unitPrice ?? 0) || 0;
+                  if (!price) {
+                    const productForPrice = getProduct(id);
+                    const familyId = String(productForPrice?.familyId ?? productForPrice?.categoryId ?? '').trim();
+                    if (familyId) {
+                      try {
+                        const hp = await histpricesApi.getLatest(familyId);
+                        price = hp?.price ?? 0;
+                      } catch (_) {}
+                    }
+                  }
+                  return { ...row, price };
+                })
+              );
+              qtyQueueByProductId.set(id, nextArr);
             }
           }
         } else {
@@ -362,12 +370,12 @@ export const OrderPlanogramView: React.FC<OrderPlanogramViewProps> = ({
               const name = (item.productName ?? item.sku ?? p?.name ?? '').trim();
               const sku = String(item.sku ?? p?.sku ?? p?.code ?? '').trim();
               const qty = item.quantity ?? item.toOrder ?? item.Quantity ?? 0;
-              orderItemsByProductId.set(id, {
-                productName: name,
-                sku,
-                quantity: Number(qty) || 0,
-                price,
-              });
+              const q = Number(qty) || 0;
+              if (q > 0) {
+                const arr = qtyQueueByProductId.get(id) ?? [];
+                arr.push({ productName: name, sku, quantity: q, price });
+                qtyQueueByProductId.set(id, arr);
+              }
             }
           }
         }
@@ -377,21 +385,22 @@ export const OrderPlanogramView: React.FC<OrderPlanogramViewProps> = ({
           for (let col = 0; col < 10; col++) {
             const dist = distList.find((d) => d.xPosition === row && d.yPosition === col);
             const product = dist ? getProduct(dist.productId) : null;
-            const orderItem = product
-              ? orderItemsByProductId.get(product.id) ?? orderItemsByProductId.get(String(Number(product.id)))
-              : null;
+            const pid = product ? (String(product.id) || '') : '';
+            const key = pid ? (qtyQueueByProductId.has(pid) ? pid : String(Number(pid))) : '';
+            const queue = key ? qtyQueueByProductId.get(key) : undefined;
+            const next = queue && queue.length > 0 ? queue.shift()! : null;
             planogramGrid.push({
               row,
               col,
               productId: product?.id ?? '',
-              productName: orderItem?.productName ?? product?.name ?? '',
+              productName: next?.productName ?? product?.name ?? '',
               sku:
-                String(orderItem?.sku || '').trim() ||
+                String(next?.sku || '').trim() ||
                 String(product?.sku || '').trim() ||
                 String(product?.code || '').trim(),
               category: resolveCategory(product ?? null),
-              toOrder: orderItem?.quantity ?? 0,
-              price: orderItem?.price ?? product?.currentPrice ?? 0,
+              toOrder: next?.quantity ?? 0,
+              price: next?.price ?? product?.currentPrice ?? 0,
               imageUrl: product ? getProductImageUrl(product) : undefined,
             });
           }
@@ -471,7 +480,7 @@ export const OrderPlanogramView: React.FC<OrderPlanogramViewProps> = ({
           <div className="bg-slate-50 rounded-lg p-2 text-center print:p-1.5">
             <p className="text-xs text-slate-500 mb-0.5 print:text-[9px] print:mb-0">{translate('productsLabel')}</p>
             <p className="text-sm text-slate-900 print:text-xs">{productsWithQty}</p>
-          </div>
+            </div>
           <div className="bg-indigo-50 rounded-lg p-2 text-center print:p-1.5">
             <p className="text-xs text-indigo-600 mb-0.5 print:text-[9px] print:mb-0">{translate('quantityUnits')}</p>
             <p className="text-sm text-indigo-900 print:text-xs">{totalToOrder}</p>
@@ -556,7 +565,7 @@ export const OrderPlanogramView: React.FC<OrderPlanogramViewProps> = ({
             <span className="w-3 h-3 rounded bg-indigo-50 border border-indigo-300" />
             {translate('withQuantity')}
           </span>
-        </div>
+      </div>
 
         {/* Resumen por familia/categoría: visible también al imprimir pedido inicial */}
         {allCategories.length > 0 && (

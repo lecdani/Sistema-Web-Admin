@@ -15,6 +15,28 @@ function toUser(raw: any): User {
         phone: String(raw.phone ?? raw.Phone ?? ''),
         role,
         cityId: raw.cityId ?? raw.CityId ?? undefined,
+        baseCityId:
+          raw.baseCityId ??
+          raw.BaseCityId ??
+          raw.baseCityID ??
+          raw.BaseCityID ??
+          raw.base_city_id ??
+          raw.BASE_CITY_ID ??
+          raw?.baseCity?.id ??
+          raw?.BaseCity?.id ??
+          raw?.baseCity?.Id ??
+          raw?.BaseCity?.Id ??
+          undefined,
+        baseCity: (() => {
+          const bc = raw?.baseCity ?? raw?.BaseCity ?? null;
+          if (!bc || typeof bc !== 'object') return undefined;
+          const id = String((bc as any).id ?? (bc as any).Id ?? '').trim();
+          const name = String((bc as any).name ?? (bc as any).Name ?? '').trim();
+          const prefix = String((bc as any).prefix ?? (bc as any).Prefix ?? '').trim();
+          if (!id && !name && !prefix) return undefined;
+          return { id, name, prefix: prefix || undefined };
+        })(),
+        sellerCode: raw.sellerCode ?? raw.SellerCode ?? raw.seller_code ?? raw.SELLER_CODE ?? undefined,
         isActive: typeof raw.isActive === 'boolean' ? raw.isActive : (raw.IsActive ?? true),
         createdAt: raw.createdAt ? new Date(raw.createdAt) : raw.CreatedAt ? new Date(raw.CreatedAt) : new Date(),
         updatedAt: raw.updatedAt ? new Date(raw.updatedAt) : raw.UpdatedAt ? new Date(raw.UpdatedAt) : new Date(),
@@ -30,7 +52,9 @@ function toPayload(data: Partial<User> & { password?: string }) {
         lastName: data.lastName?.trim(),
         phone: data.phone?.trim(),
         rol: data.role ? toApiRol(data.role) : undefined,
-        isActive: data.isActive
+        isActive: data.isActive,
+        baseCityId: (data as any).baseCityId,
+        BaseCityId: (data as any).baseCityId,
     };
 
     if (data.password) {
@@ -76,7 +100,9 @@ export async function createUser(data: Omit<User, 'id' | 'createdAt' | 'updatedA
         name: (data.firstName ?? '').trim(),
         lastName: (data.lastName ?? '').trim(),
         rol: toApiRol(data.role),
-        phone: (data.phone ?? '').trim()
+        phone: (data.phone ?? '').trim(),
+        baseCityId: (data as any).baseCityId ?? undefined,
+        BaseCityId: (data as any).baseCityId ?? undefined,
     };
 
     const res = await apiClient.post<any>(registerEndpoint, payload);

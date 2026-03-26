@@ -591,6 +591,7 @@ export async function isPoAlreadyUsed(
 // ============================
 
 export interface OrderItemInput {
+  orderDetailId?: string;
   productId: string;
   sku: string;
   productName: string;
@@ -1993,10 +1994,26 @@ export const ordersApi = {
     input: CreateOrderInput,
     optionalInvoiceId?: string | number | null
   ): Promise<boolean> {
-    void orderId;
-    void input;
     void optionalInvoiceId;
-    return false;
+    const idStr = String(orderId).trim();
+    if (!idStr) return false;
+
+    const endpoint = `/orders/orders/${encodeURIComponent(idStr)}`;
+    const items = Array.isArray(input.items) ? input.items : [];
+
+    // Actualización mínima según backend: id + storeId + items(orderDetailId, productId, quantity)
+    const body = {
+      id: idStr,
+      storeId: String(input.storeId || '').trim(),
+      items: items.map((it) => ({
+        orderDetailId: String((it as any).orderDetailId || '').trim() || undefined,
+        productId: String(it.productId || '').trim(),
+        quantity: Number(it.quantity) || 0,
+      })),
+    };
+
+    const res = await safePut<any>(endpoint, body);
+    return res !== null;
   },
 
   /**
