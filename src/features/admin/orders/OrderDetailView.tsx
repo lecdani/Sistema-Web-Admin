@@ -28,6 +28,7 @@ import { categoriesApi } from '@/shared/services/categories-api';
 import { storesApi } from '@/shared/services/stores-api';
 import { citiesApi } from '@/shared/services/cities-api';
 import { usersApi } from '@/shared/services/users-api';
+import { salesRoutesApi } from '@/shared/services/sales-routes-api';
 import { Invoice } from './components/Invoice';
 import { OrderPlanogramView } from './components/OrderPlanogramView';
 import { OrderCatalogGridView } from './components/OrderCatalogGridView';
@@ -206,12 +207,19 @@ export function OrderDetailView({ orderId, onClose, onOrderUpdated }: OrderDetai
         try {
           const user = await usersApi.getById(orderToSet.salespersonId);
           if (user) {
-            setSellerNameDisplay(
-              String(user.sellerCode || '').trim() ||
-                `${user.firstName || ''} ${user.lastName || ''}`.trim() ||
-                user.email ||
-                '—'
-            );
+            let label = `${user.firstName || ''} ${user.lastName || ''}`.trim();
+            if (!label) label = user.email || '—';
+            const routeId = String(user.salesRouteId || '').trim();
+            if (routeId) {
+              try {
+                const route = await salesRoutesApi.getById(routeId);
+                const code = route?.code?.trim();
+                if (code) label = `${label} (${code})`;
+              } catch {
+                /* sin catálogo de ruta */
+              }
+            }
+            setSellerNameDisplay(label);
           } else {
             setSellerNameDisplay(orderToSet.salespersonId);
           }

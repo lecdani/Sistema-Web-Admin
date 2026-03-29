@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   Users,
@@ -16,8 +16,9 @@ import {
   X,
   ArrowLeft,
   Phone,
-  MapPinned,
-  Trash2
+  Waypoints,
+  Store as StoreIcon,
+  ChevronDown,
 } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/shared/components/base/Card';
 import { Button } from '@/shared/components/base/Button';
@@ -48,11 +49,23 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { User } from '@/shared/types';
 import { useLanguage } from '@/shared/hooks/useLanguage';
 import { usersApi } from '@/shared/services/users-api';
-import { storesApi } from '@/shared/services/stores-api';
-import { assignmentsApi } from '@/shared/services/assignments-api';
 import { citiesApi } from '@/shared/services/cities-api';
+import { salesRoutesApi } from '@/shared/services/sales-routes-api';
+import { assignmentsApi } from '@/shared/services/assignments-api';
+import { storesApi } from '@/shared/services/stores-api';
 import { toast } from '@/shared/components/base/Toast';
-import type { Assignment, City, Store } from '@/shared/types';
+import type { City, SalesRoute } from '@/shared/types';
+
+const ASSIGN_ROUTE_LIST_MAX = 100;
+
+function applyAssignedRouteToUser(u: User, routeId: string | null): User {
+  const rid = routeId && String(routeId).trim() ? String(routeId).trim() : null;
+  return { ...u, salesRouteId: rid ?? undefined, salesRouteName: undefined };
+}
+
+function sameUserId(a: string | undefined | null, b: string | undefined | null): boolean {
+  return String(a ?? '').trim().toLowerCase() === String(b ?? '').trim().toLowerCase();
+}
 
 interface UserManagementProps {
   onBack?: () => void;
@@ -65,7 +78,6 @@ interface UserFormData {
   phone: string;
   role: 'admin' | 'user';
   password: string;
-  baseCityId: string;
 }
 
 export const UserManagement: React.FC<UserManagementProps> = ({ onBack }) => {
@@ -82,19 +94,21 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onBack }) => {
   const [isLoading, setIsLoading] = useState(true);
   const [editingUser, setEditingUser] = useState<User | null>(null);
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
-  const [selectedUserBaseCityName, setSelectedUserBaseCityName] = useState<string>('');
   const [showAddDialog, setShowAddDialog] = useState(false);
   const [showDetailDialog, setShowDetailDialog] = useState(false);
+  const [showAssignRouteDialog, setShowAssignRouteDialog] = useState(false);
+  const [assignRouteUser, setAssignRouteUser] = useState<User | null>(null);
+  const [assignRouteSelection, setAssignRouteSelection] = useState<string>('_none');
+  const [assignRouteSaving, setAssignRouteSaving] = useState(false);
+  const [assignModalStores, setAssignModalStores] = useState<{ id: string; name: string }[]>([]);
+  const [assignModalStoresLoading, setAssignModalStoresLoading] = useState(false);
+  const [assignRoutePickerOpen, setAssignRoutePickerOpen] = useState(false);
+  const [assignRouteSearchQuery, setAssignRouteSearchQuery] = useState('');
+  const assignRouteFieldRef = useRef<HTMLDivElement>(null);
   const [showPassword, setShowPassword] = useState(false);
 
-  // Rutas / assignments
-  const [showRoutesDialog, setShowRoutesDialog] = useState(false);
-  const [routesUser, setRoutesUser] = useState<User | null>(null);
-  const [stores, setStores] = useState<Store[]>([]);
   const [cities, setCities] = useState<City[]>([]);
-  const [assignments, setAssignments] = useState<Assignment[]>([]);
-  const [routesLoading, setRoutesLoading] = useState(false);
-  const [selectedStoreToAdd, setSelectedStoreToAdd] = useState<string>('');
+  const [salesRoutes, setSalesRoutes] = useState<SalesRoute[]>([]);
 
   const [formData, setFormData] = useState<UserFormData>({
     firstName: '',
@@ -103,7 +117,6 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onBack }) => {
     phone: '',
     role: 'user',
     password: '',
-    baseCityId: '',
   });
   const [formErrors, setFormErrors] = useState<Partial<Record<keyof UserFormData, string>>>({});
   const [passwordErrors, setPasswordErrors] = useState<string[]>([]);
@@ -111,30 +124,87 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onBack }) => {
   useEffect(() => {
     loadUsers();
     loadCities();
+    loadSalesRoutesCatalog();
   }, []);
 
   useEffect(() => {
-    const loadSelectedUserCity = async () => {
+    if (!showAssignRouteDialog) return;
+    if (!assignRouteSelection || assignRouteSelection === '_none') {
+      setAssignModalStores([]);
+      setAssignModalStoresLoading(false);
+      return;
+    }
+    const rid = String(assignRouteSelection).trim();
+    let cancelled = false;
+    setAssignModalStoresLoading(true);
+    void (async () => {
       try {
-        const baseCityId = String(selectedUser?.baseCityId || '').trim();
-        if (!baseCityId) {
-          setSelectedUserBaseCityName('');
-          return;
-        }
-        // Primero intentar resolver del catálogo ya cargado
-        const fromList = cityNameById(baseCityId);
-        if (fromList) {
-          setSelectedUserBaseCityName(fromList);
-          return;
-        }
-        const city = await citiesApi.getById(baseCityId);
-        setSelectedUserBaseCityName(city?.name ?? '');
+        const [assignments, stores] = await Promise.all([
+          assignmentsApi.fetchAll(),
+          storesApi.fetchAll(),
+        ]);
+        if (cancelled) return;
+        const rnorm = rid.toLowerCase();
+        const forRoute = assignments.filter(
+          (a) => String(a.salesRouteId || '').trim().toLowerCase() === rnorm
+        );
+        const smap = new Map(stores.map((s) => [String(s.id).trim().toLowerCase(), s] as const));
+        const rows = forRoute
+          .map((a) => {
+            const s = smap.get(String(a.storeId).trim().toLowerCase());
+            return {
+              id: String(a.storeId),
+              name: String(s?.name || a.storeId).trim() || String(a.storeId),
+            };
+          })
+          .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
+        setAssignModalStores(rows);
       } catch {
-        setSelectedUserBaseCityName('');
+        if (!cancelled) setAssignModalStores([]);
+      } finally {
+        if (!cancelled) setAssignModalStoresLoading(false);
       }
+    })();
+    return () => {
+      cancelled = true;
     };
-    loadSelectedUserCity();
-  }, [selectedUser?.id, selectedUser?.baseCityId, cities]);
+  }, [showAssignRouteDialog, assignRouteSelection]);
+
+  const loadSalesRoutesCatalog = async () => {
+    try {
+      const data = await salesRoutesApi.fetchAll();
+      setSalesRoutes(data);
+    } catch (e) {
+      console.error('Error cargando rutas:', e);
+      setSalesRoutes([]);
+    }
+  };
+
+  const salesRouteNameById = (id: string | undefined) => {
+    const sid = String(id ?? '').trim();
+    if (!sid) return '';
+    const key = sid.toLowerCase();
+    const r = salesRoutes.find((x) => String(x.id).trim().toLowerCase() === key);
+    return r?.name || sid;
+  };
+
+  const routeFromCatalog = (routeId: string | undefined) => {
+    const sid = String(routeId ?? '').trim().toLowerCase();
+    if (!sid) return null;
+    return salesRoutes.find((x) => String(x.id).trim().toLowerCase() === sid) ?? null;
+  };
+
+  const routeLabelForUser = (u: User) => {
+    if (u.role !== 'user') return '—';
+    const sid = String(u.salesRouteId || '').trim();
+    if (!sid) return '—';
+    const r = routeFromCatalog(sid);
+    const code = r?.code?.trim();
+    const name = String(r?.name || u.salesRouteName || '').trim() || salesRouteNameById(sid);
+    if (code && name) return `${code} · ${name}`;
+    if (code) return code;
+    return name || sid;
+  };
 
   const loadCities = async () => {
     try {
@@ -146,36 +216,6 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onBack }) => {
     }
   };
 
-  const loadRoutesData = async (user: User) => {
-    setRoutesLoading(true);
-    try {
-      const [storesData, allAssignments] = await Promise.all([
-        storesApi.fetchAll(),
-        assignmentsApi.fetchAll(),
-      ]);
-      setStores(storesData.filter((s) => s.isActive));
-      setAssignments(allAssignments);
-    } catch (e) {
-      console.error('Error cargando rutas/asignaciones:', e);
-      toast.error(translate('errorLoadAssignments'));
-      setStores([]);
-      setAssignments([]);
-    } finally {
-      setRoutesLoading(false);
-    }
-  };
-
-  const openRoutesDialog = async (user: User) => {
-    setRoutesUser(user);
-    setSelectedStoreToAdd('');
-    setShowRoutesDialog(true);
-    await loadRoutesData(user);
-  };
-
-  const sellerAssignments = (uid: string) => assignments.filter((a) => String(a.userId) === String(uid));
-  const assignedStoreIdsByOthers = (uid: string) =>
-    new Set(assignments.filter((a) => String(a.userId) !== String(uid)).map((a) => String(a.storeId)));
-
   const cityNameById = (id: string | undefined) => {
     const key = String(id ?? '').trim();
     if (!key) return '';
@@ -183,21 +223,81 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onBack }) => {
     return c?.name || '';
   };
 
-  const resolveBaseCityName = (u: User) => {
-    const fromObj = String((u as any)?.baseCity?.name || '').trim();
-    if (fromObj) return fromObj;
-    const id = String((u as any).baseCityId || '').trim();
-    if (!id) return '';
-    return cityNameById(id) || id;
+  const formatRouteSelectLabel = (r: SalesRoute) => {
+    const code = r.code?.trim();
+    const city = cityNameById(r.cityId);
+    const tail = city ? ` (${city})` : '';
+    if (code) return `${code} · ${r.name}${tail}`;
+    return `${r.name}${tail}`;
   };
+
+  const assignRoutePickerOptions = useMemo(() => {
+    if (!assignRouteUser) return [] as SalesRoute[];
+    const currentId = String(assignRouteUser.salesRouteId || '').trim().toLowerCase();
+    const base = salesRoutes
+      .filter(
+        (r) =>
+          r.isActive ||
+          (!!currentId && String(r.id).trim().toLowerCase() === currentId)
+      )
+      .sort((a, b) => a.name.localeCompare(b.name));
+    const sel = String(assignRouteSelection).trim().toLowerCase();
+    const orphan =
+      sel && sel !== '_none' && !base.some((r) => String(r.id).trim().toLowerCase() === sel)
+        ? salesRoutes.find((r) => String(r.id).trim().toLowerCase() === sel)
+        : null;
+    return orphan ? [orphan, ...base.filter((x) => String(x.id) !== String(orphan.id))] : base;
+  }, [assignRouteUser, salesRoutes, assignRouteSelection]);
+
+  const assignRoutePickerFiltered = useMemo(() => {
+    const q = assignRouteSearchQuery.trim().toLowerCase();
+    if (!q) return assignRoutePickerOptions;
+    return assignRoutePickerOptions.filter((r) => {
+      const code = (r.code || '').toLowerCase();
+      const name = (r.name || '').toLowerCase();
+      const city = cityNameById(r.cityId).toLowerCase();
+      return code.includes(q) || name.includes(q) || city.includes(q);
+    });
+  }, [assignRoutePickerOptions, assignRouteSearchQuery, cities]);
+
+  const assignRoutePickerShown = useMemo(
+    () => assignRoutePickerFiltered.slice(0, ASSIGN_ROUTE_LIST_MAX),
+    [assignRoutePickerFiltered]
+  );
+  const assignRoutePickerTruncated = assignRoutePickerFiltered.length > ASSIGN_ROUTE_LIST_MAX;
+
+  const assignRouteInputClosedValue = useMemo(() => {
+    if (assignRouteSelection === '_none') return '';
+    const sid = String(assignRouteSelection).trim().toLowerCase();
+    const r = salesRoutes.find((x) => String(x.id).trim().toLowerCase() === sid);
+    return r ? formatRouteSelectLabel(r) : salesRouteNameById(assignRouteSelection);
+  }, [assignRouteSelection, salesRoutes]);
+
+  useEffect(() => {
+    if (!assignRoutePickerOpen) return;
+    let remove: (() => void) | undefined;
+    const t = window.setTimeout(() => {
+      const onDocDown = (e: MouseEvent) => {
+        const node = e.target as Node;
+        if (assignRouteFieldRef.current?.contains(node)) return;
+        setAssignRoutePickerOpen(false);
+      };
+      document.addEventListener('mousedown', onDocDown);
+      remove = () => document.removeEventListener('mousedown', onDocDown);
+    }, 0);
+    return () => {
+      clearTimeout(t);
+      remove?.();
+    };
+  }, [assignRoutePickerOpen]);
 
   useEffect(() => {
     applyFilters();
   }, [users, searchTerm, roleFilter, statusFilter]);
 
-  const loadUsers = async () => {
+  const loadUsers = async (opts?: { silent?: boolean }) => {
     try {
-      setIsLoading(true);
+      if (!opts?.silent) setIsLoading(true);
       const data = await usersApi.fetchAll();
       setUsers(data);
     } catch (error) {
@@ -205,7 +305,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onBack }) => {
       toast.error(translate('errorLoadUsers'));
       setUsers([]);
     } finally {
-      setIsLoading(false);
+      if (!opts?.silent) setIsLoading(false);
     }
   };
 
@@ -247,7 +347,6 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onBack }) => {
       phone: '',
       role: 'user',
       password: '',
-      baseCityId: '',
     });
     setFormErrors({});
     setPasswordErrors([]);
@@ -271,9 +370,6 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onBack }) => {
     if (!formData.email.trim()) err.email = translate('emailRequiredShort');
     else if (!/\S+@\S+\.\S+/.test(formData.email)) err.email = translate('emailInvalid');
     if (!formData.phone.trim()) err.phone = translate('phoneRequired');
-    if (formData.role === 'user' && !String(formData.baseCityId || '').trim()) {
-      err.baseCityId = translate('baseCityRequired');
-    }
 
     const emailNorm = formData.email.trim().toLowerCase();
     const existingEmail = users.find(
@@ -310,10 +406,12 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onBack }) => {
         email: formData.email.toLowerCase().trim(),
         phone: formData.phone.trim(),
         role: formData.role,
-        baseCityId: formData.role === 'user' ? String(formData.baseCityId || '').trim() || undefined : undefined,
       };
 
       if (editingUser) {
+        if (formData.password.trim()) {
+          userData.password = formData.password.trim();
+        }
         await usersApi.update(editingUser.id, userData);
         toast.success(translate('userSaved'));
       } else {
@@ -325,6 +423,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onBack }) => {
       }
 
       loadUsers();
+      loadSalesRoutesCatalog();
 
       // Limpiar formulario y cerrar diálogo
       resetForm();
@@ -351,7 +450,6 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onBack }) => {
       phone: user.phone || '',
       role: user.role,
       password: '',
-      baseCityId: String(user.baseCityId || ''),
     });
     setFormErrors({});
     setPasswordErrors([]);
@@ -377,42 +475,79 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onBack }) => {
     setShowDetailDialog(true);
   };
 
-  const handleAddStoreToRoute = async () => {
-    if (!routesUser) return;
-    const storeId = String(selectedStoreToAdd || '').trim();
-    if (!storeId) return;
-    const blocked = assignedStoreIdsByOthers(routesUser.id).has(storeId);
-    if (blocked) {
-      toast.error(translate('storeAlreadyAssigned'));
-      return;
+  const openAssignRouteModal = (user: User) => {
+    setAssignRouteUser(user);
+    setAssignRoutePickerOpen(false);
+    setAssignRouteSearchQuery('');
+    const raw = user.salesRouteId ? String(user.salesRouteId).trim() : '';
+    if (!raw) {
+      setAssignRouteSelection('_none');
+    } else {
+      const match = salesRoutes.find((x) => String(x.id).trim().toLowerCase() === raw.toLowerCase());
+      setAssignRouteSelection(match ? String(match.id) : raw);
     }
-    try {
-      setRoutesLoading(true);
-      await assignmentsApi.create({ userId: routesUser.id, storeId });
-      toast.success(translate('routeSaved'));
-      await loadRoutesData(routesUser);
-      setSelectedStoreToAdd('');
-    } catch (e) {
-      console.error('Error asignando tienda:', e);
-      toast.error(translate('errorSaveAssignment'));
-    } finally {
-      setRoutesLoading(false);
-    }
+    void loadSalesRoutesCatalog();
+    setShowAssignRouteDialog(true);
   };
 
-  const handleRemoveAssignment = async (a: Assignment) => {
-    if (!routesUser) return;
+  const assignRoutePick = (id: string) => {
+    setAssignRouteSelection(id);
+    setAssignRoutePickerOpen(false);
+    setAssignRouteSearchQuery('');
+  };
+
+  const handleSaveAssignRoute = async () => {
+    if (!assignRouteUser || assignRouteUser.role !== 'user') return;
+    const uid = assignRouteUser.id;
+    const routeId =
+      assignRouteSelection && assignRouteSelection !== '_none'
+        ? String(assignRouteSelection).trim()
+        : null;
+    setAssignRouteSaving(true);
     try {
-      setRoutesLoading(true);
-      const ok = await assignmentsApi.remove({ id: a.id, userId: a.userId, storeId: a.storeId });
-      if (!ok) throw new Error('remove failed');
-      toast.success(translate('routeSaved'));
-      await loadRoutesData(routesUser);
-    } catch (e) {
-      console.error('Error eliminando asignación:', e);
-      toast.error(translate('errorRemoveAssignment'));
+      const updatedUser = await usersApi.assignRoute(uid, routeId);
+      const mergedFromAssign = applyAssignedRouteToUser(
+        { ...assignRouteUser, ...updatedUser },
+        routeId
+      );
+      toast.success(translate('assignUserSalesRouteSuccess'));
+      setShowAssignRouteDialog(false);
+      setAssignRouteUser(null);
+
+      try {
+        const data = await usersApi.fetchAll();
+        setUsers(
+          data.map((u) =>
+            sameUserId(u.id, uid)
+              ? applyAssignedRouteToUser({ ...u, ...mergedFromAssign }, routeId)
+              : u
+          )
+        );
+      } catch {
+        setUsers((prev) =>
+          prev.map((u) => (sameUserId(u.id, uid) ? mergedFromAssign : u))
+        );
+      }
+
+      await loadSalesRoutesCatalog();
+
+      if (selectedUser && sameUserId(selectedUser.id, uid)) {
+        try {
+          const refreshed = await usersApi.getById(uid);
+          setSelectedUser(
+            refreshed
+              ? applyAssignedRouteToUser({ ...selectedUser, ...refreshed }, routeId)
+              : mergedFromAssign
+          );
+        } catch {
+          setSelectedUser(mergedFromAssign);
+        }
+      }
+    } catch (e: any) {
+      console.error(e);
+      toast.error(e?.data?.message ?? e?.message ?? translate('errorAssignUserSalesRoute'));
     } finally {
-      setRoutesLoading(false);
+      setAssignRouteSaving(false);
     }
   };
 
@@ -545,7 +680,10 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onBack }) => {
               <Select
                 value={formData.role}
                 onValueChange={(value) =>
-                  setFormData(prev => ({ ...prev, role: value as 'admin' | 'user' }))
+                  setFormData((prev) => ({
+                    ...prev,
+                    role: value as 'admin' | 'user',
+                  }))
                 }
               >
                 <SelectTrigger>
@@ -560,44 +698,6 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onBack }) => {
                 </SelectContent>
               </Select>
             </div>
-
-            {formData.role === 'user' && (
-              <div>
-                <Label htmlFor="baseCityId">{translate('baseCity')} *</Label>
-                {editingUser ? (
-                  <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-800">
-                    {resolveBaseCityName(editingUser) || '—'}
-                  </div>
-                ) : (
-                  <>
-                    <Select
-                      value={formData.baseCityId}
-                      onValueChange={(value) => {
-                        setFormData((prev) => ({ ...prev, baseCityId: value }));
-                        if (formErrors.baseCityId) setFormErrors((prev) => ({ ...prev, baseCityId: undefined }));
-                      }}
-                    >
-                      <SelectTrigger className={formErrors.baseCityId ? 'border-red-500' : ''}>
-                        <SelectValue placeholder={translate('selectCity')}>
-                          {(() => {
-                            const c = cities.find((x) => String(x.id) === String(formData.baseCityId));
-                            return c ? c.name : undefined;
-                          })()}
-                        </SelectValue>
-                      </SelectTrigger>
-                      <SelectContent>
-                        {cities.map((c) => (
-                          <SelectItem key={c.id} value={String(c.id)}>
-                            {c.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    {formErrors.baseCityId && <p className="text-sm text-red-600 mt-1">{formErrors.baseCityId}</p>}
-                  </>
-                )}
-              </div>
-            )}
 
             <div>
               <Label htmlFor="phone">{translate('phone')} *</Label>
@@ -617,44 +717,50 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onBack }) => {
               {formErrors.phone && <p className="text-sm text-red-600 mt-1">{formErrors.phone}</p>}
             </div>
 
-            {!editingUser && (
-              <div>
-                <Label htmlFor="password">{translate('password')} *</Label>
-                <div className="relative">
-                  <Input
-                    id="password"
-                    type={showPassword ? "text" : "password"}
-                    value={formData.password}
-                    onChange={(e) => {
-                      setFormData(prev => ({ ...prev, password: e.target.value }));
-                      const pwd = e.target.value.trim();
-                      setPasswordErrors(pwd ? getPasswordErrors(pwd) : []);
-                      if (formErrors.password) setFormErrors(prev => ({ ...prev, password: undefined }));
-                    }}
-                    placeholder={translate('passwordPlaceholderLong')}
-                    className={formErrors.password || passwordErrors.length ? 'border-red-500' : ''}
-                  />
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    className="absolute right-2 top-1/2 -translate-y-1/2 p-1 h-8 w-8"
-                    onClick={() => setShowPassword(!showPassword)}
-                  >
-                    {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                  </Button>
-                </div>
-                {(formErrors.password || passwordErrors.length > 0) && (
-                  <ul className="text-sm text-red-600 mt-1 list-disc list-inside">
-                    {formErrors.password && !passwordErrors.length ? (
-                      <li>{formErrors.password}</li>
-                    ) : (
-                      passwordErrors.map((msg, i) => <li key={i}>{msg}</li>)
-                    )}
-                  </ul>
-                )}
+            <div>
+              <Label htmlFor="password">
+                {editingUser ? translate('editUserPasswordOptional') : `${translate('password')} *`}
+              </Label>
+              {editingUser && (
+                <p className="text-xs text-gray-500 mt-0.5 mb-1.5">{translate('editUserPasswordHint')}</p>
+              )}
+              <div className="relative">
+                <Input
+                  id="password"
+                  type={showPassword ? 'text' : 'password'}
+                  value={formData.password}
+                  onChange={(e) => {
+                    setFormData((prev) => ({ ...prev, password: e.target.value }));
+                    const pwd = e.target.value.trim();
+                    setPasswordErrors(pwd ? getPasswordErrors(pwd) : []);
+                    if (formErrors.password) setFormErrors((prev) => ({ ...prev, password: undefined }));
+                  }}
+                  placeholder={translate('passwordPlaceholderLong')}
+                  autoComplete="new-password"
+                  className={formErrors.password || passwordErrors.length ? 'border-red-500' : ''}
+                />
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="absolute right-2 top-1/2 -translate-y-1/2 p-1 h-8 w-8"
+                  onClick={() => setShowPassword(!showPassword)}
+                >
+                  {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </Button>
               </div>
-            )}
+              {(formErrors.password || passwordErrors.length > 0) && (
+                <ul className="text-sm text-red-600 mt-1 list-disc list-inside">
+                  {formErrors.password && !passwordErrors.length ? (
+                    <li>{formErrors.password}</li>
+                  ) : (
+                    passwordErrors.map((msg, i) => (
+                      <li key={i}>{msg}</li>
+                    ))
+                  )}
+                </ul>
+              )}
+            </div>
 
           </div>
 
@@ -726,14 +832,14 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onBack }) => {
       <Card>
         <CardContent>
           <div className="flex flex-col lg:flex-row gap-4">
-            <div className="flex-1">
+            <div className="flex-1 min-w-0">
               <div className="relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 pointer-events-none" />
                 <Input
                   placeholder={translate('searchUsersPlaceholder')}
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
-                  className="pl-10"
+                  className="w-full pl-10"
                 />
               </div>
             </div>
@@ -775,129 +881,6 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onBack }) => {
         </CardContent>
       </Card>
 
-      {/* Gestión de rutas (assignments) */}
-      <Dialog
-        open={showRoutesDialog}
-        onOpenChange={(open) => {
-          setShowRoutesDialog(open);
-          if (!open) {
-            setRoutesUser(null);
-            setSelectedStoreToAdd('');
-          }
-        }}
-      >
-        <DialogContent className="sm:max-w-2xl">
-          <DialogHeader>
-            <DialogTitle>{translate('manageRoutesTitle')}</DialogTitle>
-            <DialogDescription>{translate('manageRoutesDesc')}</DialogDescription>
-          </DialogHeader>
-
-          <div className="px-6 py-4 space-y-4">
-            <div className="flex items-center justify-between gap-3">
-              <div className="min-w-0">
-                <p className="text-sm font-medium text-gray-900 truncate">
-                  {routesUser ? `${routesUser.firstName} ${routesUser.lastName}` : '—'}
-                </p>
-                <p className="text-xs text-gray-500 truncate">{routesUser?.email ?? ''}</p>
-              </div>
-              <Badge className="bg-blue-100 text-blue-800">{translate('roleSeller')}</Badge>
-            </div>
-
-            {/* Agregar tienda */}
-            <div className="border border-gray-200 rounded-lg p-4 bg-gray-50">
-              <div className="flex items-center justify-between mb-3">
-                <p className="text-sm font-semibold text-gray-900">{translate('addStoreToRoute')}</p>
-              </div>
-              <div className="flex gap-2 items-center">
-                <Select value={selectedStoreToAdd} onValueChange={setSelectedStoreToAdd}>
-                  <SelectTrigger className="flex-1 bg-white">
-                    <SelectValue placeholder={translate('selectStore')}>
-                      {(() => {
-                        const s = stores.find((x) => String(x.id) === String(selectedStoreToAdd));
-                        return s ? `${s.name}` : undefined;
-                      })()}
-                    </SelectValue>
-                  </SelectTrigger>
-                  <SelectContent className="max-h-[280px]">
-                    {(() => {
-                      if (!routesUser) return null;
-                      const mine = new Set(sellerAssignments(routesUser.id).map((a) => String(a.storeId)));
-                      const blocked = assignedStoreIdsByOthers(routesUser.id);
-                      const baseCityId = String((routesUser as any).baseCityId || '').trim();
-                      const available = stores
-                        .filter((s) => s.isActive)
-                        .filter((s) => !mine.has(String(s.id)))
-                        .filter((s) => !blocked.has(String(s.id)))
-                        .filter((s) => !baseCityId || String(s.cityId) === baseCityId)
-                        .sort((a, b) => a.name.localeCompare(b.name));
-                      return available.map((s) => (
-                        <SelectItem key={s.id} value={String(s.id)}>
-                          {s.name}
-                        </SelectItem>
-                      ));
-                    })()}
-                  </SelectContent>
-                </Select>
-                <Button
-                  onClick={handleAddStoreToRoute}
-                  className="bg-indigo-600 hover:bg-indigo-700"
-                  disabled={!routesUser || !selectedStoreToAdd || routesLoading}
-                >
-                  <Plus className="h-4 w-4 mr-2" />
-                  {translate('add')}
-                </Button>
-              </div>
-            </div>
-
-            {/* Lista de tiendas asignadas */}
-            <div className="border border-gray-200 rounded-lg overflow-hidden">
-              <div className="bg-white px-4 py-3 border-b border-gray-200 flex items-center justify-between">
-                <p className="text-sm font-semibold text-gray-900">{translate('assignedStores')}</p>
-                {routesLoading && (
-                  <span className="text-xs text-gray-500">{translate('loading')}...</span>
-                )}
-              </div>
-              <div className="bg-white divide-y divide-gray-100">
-                {routesUser && sellerAssignments(routesUser.id).length === 0 && (
-                  <div className="px-4 py-6 text-sm text-gray-500">{translate('noAssignedStores')}</div>
-                )}
-                {routesUser &&
-                  sellerAssignments(routesUser.id)
-                    .map((a) => {
-                      const store = stores.find((s) => String(s.id) === String(a.storeId));
-                      return { a, store };
-                    })
-                    .sort((x, y) => (x.store?.name || '').localeCompare(y.store?.name || ''))
-                    .map(({ a, store }) => (
-                      <div key={`${a.userId}-${a.storeId}`} className="px-4 py-3 flex items-center justify-between gap-3">
-                        <div className="min-w-0">
-                          <p className="text-sm text-gray-900 truncate">{store?.name ?? a.storeId}</p>
-                          {store?.address && <p className="text-xs text-gray-500 truncate">{store.address}</p>}
-                        </div>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className="text-red-600 hover:text-red-700"
-                          onClick={() => handleRemoveAssignment(a)}
-                          disabled={routesLoading}
-                          title={translate('delete')}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </div>
-                    ))}
-              </div>
-            </div>
-          </div>
-
-          <DialogFooter>
-            <DialogClose asChild>
-              <Button variant="outline">{translate('close')}</Button>
-            </DialogClose>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
       {/* Users Table */}
       <Card>
         <CardHeader>
@@ -915,13 +898,13 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onBack }) => {
                     {translate('fullName')}
                   </th>
                   <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    {translate('sellerCode')}
-                  </th>
-                  <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                     {translate('email')}
                   </th>
                   <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                     {translate('phone')}
+                  </th>
+                  <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    {translate('userSalesRoute')}
                   </th>
                   <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                     {translate('rolePlaceholder')}
@@ -953,14 +936,14 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onBack }) => {
                         </div>
                       </div>
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">
-                      {user.role === 'user' ? (String(user.sellerCode || '').trim() || '—') : '—'}
-                    </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                       {user.email}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                       {user.phone || '-'}
+                    </td>
+                    <td className="px-6 py-4 text-sm text-gray-700 max-w-[14rem] truncate" title={routeLabelForUser(user)}>
+                      {routeLabelForUser(user)}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <Badge className={getRoleBadgeColor(user.role)}>
@@ -978,10 +961,10 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onBack }) => {
                           <Button
                             size="sm"
                             variant="outline"
-                            onClick={() => openRoutesDialog(user)}
-                            title={translate('manageRoutes')}
+                            onClick={() => openAssignRouteModal(user)}
+                            title={translate('assignUserSalesRouteAction')}
                           >
-                            <MapPinned className="h-4 w-4" />
+                            <Waypoints className="h-4 w-4" />
                           </Button>
                         )}
                         <Button
@@ -1114,21 +1097,10 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onBack }) => {
 
               <div className="bg-gray-50 rounded-lg border border-gray-200 p-4 space-y-3">
                 <div className="grid grid-cols-1 gap-3 text-sm">
-                  <div className="flex justify-between gap-4">
-                    <span className="text-gray-500 font-medium">{translate('sellerCode')}</span>
-                    <span className="text-gray-900">
-                      {selectedUser.role === 'user' ? (String(selectedUser.sellerCode || '').trim() || '-') : '-'}
-                    </span>
-                  </div>
-                  <div className="flex justify-between gap-4">
-                    <span className="text-gray-500 font-medium">{translate('baseCity')}</span>
-                    <span className="text-gray-900">
-                      {(() => {
-                        if (selectedUser.role !== 'user') return '-';
-                        const id = String(selectedUser.baseCityId || '').trim();
-                        if (!id) return '-';
-                        return selectedUserBaseCityName || resolveBaseCityName(selectedUser) || id || '-';
-                      })()}
+                  <div className="flex justify-between gap-4 items-start">
+                    <span className="text-gray-500 font-medium shrink-0">{translate('userSalesRoute')}</span>
+                    <span className="text-gray-900 text-right">
+                      {routeLabelForUser(selectedUser)}
                     </span>
                   </div>
                   <div className="flex justify-between gap-4">
@@ -1165,10 +1137,23 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onBack }) => {
             </div>
           )}
 
-          <DialogFooter>
+          <DialogFooter className="flex flex-wrap gap-2 sm:justify-end">
             <DialogClose asChild>
               <Button variant="outline">{translate('close')}</Button>
             </DialogClose>
+            {selectedUser?.role === 'user' && (
+              <Button
+                variant="outline"
+                onClick={() => {
+                  const u = selectedUser;
+                  setShowDetailDialog(false);
+                  openAssignRouteModal(u);
+                }}
+              >
+                <Waypoints className="h-4 w-4 mr-2" />
+                {translate('assignUserSalesRouteAction')}
+              </Button>
+            )}
             {selectedUser && (
               <Button
                 onClick={() => {
@@ -1181,6 +1166,208 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onBack }) => {
                 {translate('edit')}
               </Button>
             )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={showAssignRouteDialog}
+        onOpenChange={(open) => {
+          setShowAssignRouteDialog(open);
+          if (!open) {
+            setAssignRouteUser(null);
+            setAssignRouteSelection('_none');
+            setAssignModalStores([]);
+            setAssignModalStoresLoading(false);
+            setAssignRoutePickerOpen(false);
+            setAssignRouteSearchQuery('');
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-xl w-[calc(100vw-1.5rem)] sm:w-full h-[600px] max-h-[calc(100vh-2rem)] flex flex-col overflow-visible p-0 gap-0">
+          <DialogHeader className="shrink-0 px-6 pt-6 pb-2">
+            <DialogTitle className="flex items-center gap-2">
+              <Waypoints className="h-5 w-5 text-indigo-600" />
+              {translate('assignUserSalesRouteTitle')}
+            </DialogTitle>
+          </DialogHeader>
+          {assignRouteUser && (
+            <div className="flex flex-1 flex-col min-h-0 min-w-0 overflow-x-hidden overflow-y-auto px-6 pb-2 gap-3">
+              <div ref={assignRouteFieldRef} className="shrink-0 space-y-1.5 relative z-20">
+                <Label>{translate('userSalesRoute')}</Label>
+                <p className="text-xs text-gray-500">{translate('userSalesRouteHint')}</p>
+                <div className="flex gap-2 items-center">
+                  <div className="relative min-w-0 flex-1">
+                    <Search
+                      className="pointer-events-none absolute left-3 top-1/2 z-[1] h-4 w-4 -translate-y-1/2 text-gray-400"
+                      aria-hidden
+                    />
+                    <Input
+                      className="h-10 w-full pl-10"
+                      value={assignRoutePickerOpen ? assignRouteSearchQuery : assignRouteInputClosedValue}
+                      onChange={(e) => {
+                        setAssignRouteSearchQuery(e.target.value);
+                        if (!assignRoutePickerOpen) setAssignRoutePickerOpen(true);
+                      }}
+                      onFocus={() => {
+                        setAssignRoutePickerOpen(true);
+                        setAssignRouteSearchQuery('');
+                      }}
+                      placeholder={
+                        assignRoutePickerOpen
+                          ? translate('assignUserRouteSearchPlaceholder')
+                          : translate('noSalesRouteOption')
+                      }
+                      autoComplete="off"
+                    />
+                  </div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-10 w-10 shrink-0 p-0"
+                    aria-expanded={assignRoutePickerOpen}
+                    onClick={() => {
+                      setAssignRoutePickerOpen((o) => !o);
+                      if (!assignRoutePickerOpen) setAssignRouteSearchQuery('');
+                    }}
+                  >
+                    <ChevronDown
+                      className={`h-4 w-4 transition-transform ${assignRoutePickerOpen ? 'rotate-180' : ''}`}
+                    />
+                  </Button>
+                </div>
+                {assignRoutePickerOpen && (
+                  <div
+                    role="listbox"
+                    className="absolute left-0 right-0 top-full z-[100] mt-1 flex max-h-[min(15rem,40vh)] flex-col overflow-hidden rounded-lg border border-gray-200 bg-white shadow-lg"
+                  >
+                    <button
+                      type="button"
+                      role="option"
+                      className="w-full shrink-0 border-b border-slate-100 px-3 py-2.5 text-left text-sm text-slate-700 hover:bg-slate-50"
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() => assignRoutePick('_none')}
+                    >
+                      {translate('noSalesRouteOption')}
+                    </button>
+                    <div className="max-h-[11rem] overflow-y-auto overscroll-contain py-1">
+                      {assignRoutePickerFiltered.length === 0 && assignRouteSearchQuery.trim() ? (
+                        <p className="px-3 py-4 text-center text-sm text-slate-500">
+                          {translate('assignUserRouteNoMatches')}
+                        </p>
+                      ) : (
+                        assignRoutePickerShown.map((r) => (
+                          <button
+                            key={r.id}
+                            type="button"
+                            role="option"
+                            className="w-full px-3 py-2 text-left text-sm text-gray-800 hover:bg-blue-50"
+                            onMouseDown={(e) => e.preventDefault()}
+                            onClick={() => assignRoutePick(String(r.id))}
+                          >
+                            {formatRouteSelectLabel(r)}
+                            {!r.isActive ? ` — ${translate('salesRouteInactive')}` : ''}
+                          </button>
+                        ))
+                      )}
+                    </div>
+                    {assignRoutePickerTruncated && (
+                      <p className="shrink-0 border-t border-amber-100 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                        {translate('assignUserRouteResultsTruncated')}
+                      </p>
+                    )}
+                  </div>
+                )}
+                {assignRoutePickerOptions.length === 0 && (
+                  <p className="text-sm text-amber-700">{translate('noSalesRoutes')}</p>
+                )}
+              </div>
+
+              <div className="flex flex-1 flex-col min-h-0 rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm">
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 shrink-0 mb-2">
+                  {translate('assignUserRouteSelectedSummary')}
+                </p>
+                <div className="shrink-0 space-y-2 min-h-[5.5rem] pb-3 border-b border-slate-200/80">
+                  {(() => {
+                    const r =
+                      assignRouteSelection !== '_none' ? routeFromCatalog(assignRouteSelection) : null;
+                    const code = r?.code?.trim();
+                    const name =
+                      r?.name ||
+                      (assignRouteSelection !== '_none'
+                        ? salesRouteNameById(assignRouteSelection)
+                        : '') ||
+                      '—';
+                    const city = r ? cityNameById(r.cityId) || '—' : '—';
+                    return (
+                      <>
+                        <div className="flex flex-wrap gap-2 items-center">
+                          <span className="text-slate-500 shrink-0">{translate('salesRouteCodeHeader')}:</span>
+                          {code ? (
+                            <span className="font-mono font-semibold text-indigo-900 bg-white border border-indigo-100 px-2 py-0.5 rounded text-xs">
+                              {code}
+                            </span>
+                          ) : (
+                            <span className="text-slate-400">—</span>
+                          )}
+                        </div>
+                        <div>
+                          <span className="text-slate-500">{translate('salesRouteNameLabel')}: </span>
+                          <span className="font-medium text-slate-900">{name}</span>
+                        </div>
+                        <div>
+                          <span className="text-slate-500">{translate('city')}: </span>
+                          <span className="text-slate-900">{city}</span>
+                        </div>
+                      </>
+                    );
+                  })()}
+                </div>
+                <div className="flex flex-1 flex-col min-h-0 pt-3">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-2 flex items-center gap-1.5 shrink-0">
+                    <StoreIcon className="h-3.5 w-3.5" />
+                    {translate('assignUserRouteStoresTitle')}
+                  </p>
+                  <div className="flex-1 min-h-[140px] max-h-[200px] overflow-y-auto rounded-md border border-slate-200/60 bg-white/60 px-2 py-2">
+                    {assignRouteSelection === '_none' ? (
+                      <p className="text-sm text-slate-500 text-center py-10 px-2">
+                        {translate('assignUserRoutePickToSeeStores')}
+                      </p>
+                    ) : assignModalStoresLoading ? (
+                      <p className="text-slate-500 py-6 text-center">{translate('loading')}</p>
+                    ) : assignModalStores.length === 0 ? (
+                      <p className="text-slate-600 py-6 text-center px-2">{translate('assignUserRouteNoStores')}</p>
+                    ) : (
+                      <ul className="space-y-1.5">
+                        {assignModalStores.map((s) => (
+                          <li key={s.id} className="text-slate-800 flex gap-2 text-sm">
+                            <span className="text-slate-400 shrink-0">·</span>
+                            <span>{s.name}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+          <DialogFooter className="shrink-0 border-t border-slate-100 bg-white">
+            <DialogClose asChild>
+              <Button variant="outline" disabled={assignRouteSaving}>
+                <X className="h-4 w-4 mr-2" />
+                {translate('cancel')}
+              </Button>
+            </DialogClose>
+            <Button
+              className="bg-indigo-600 hover:bg-indigo-700"
+              disabled={assignRouteSaving || !assignRouteUser}
+              onClick={() => void handleSaveAssignRoute()}
+            >
+              <Save className="h-4 w-4 mr-2" />
+              {translate('assignUserSalesRouteSave')}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

@@ -290,12 +290,15 @@ export function CreateOrderDialog({ onClose, onOrderCreated, editingOrder }: Cre
 
     // Información de la tienda
     const selectedStore = stores.find((s) => s.id === selectedStoreId);
+    const selectedSeller = sellers.find((s) => s.id === selectedSellerId);
 
     const orderPayload = {
       storeId: selectedStoreId,
       storeName: selectedStore?.name,
       storeAddress: selectedStore?.address,
       salespersonId: selectedSellerId,
+      salesRouteId: selectedSeller?.salesRouteId,
+      planogramId: activePlanogram?.id,
       vendorNumber: '2F318',
       items: selectedItems.map((cell) => ({
         productId: cell.productId!,
@@ -398,12 +401,15 @@ export function CreateOrderDialog({ onClose, onOrderCreated, editingOrder }: Cre
     const total = subtotal;
 
     const selectedStore = stores.find((s) => s.id === selectedStoreId);
+    const selectedSeller = sellers.find((s) => s.id === selectedSellerId);
 
     const orderPayload = {
       storeId: selectedStoreId,
       storeName: selectedStore?.name,
       storeAddress: selectedStore?.address,
       salespersonId: selectedSellerId,
+      salesRouteId: selectedSeller?.salesRouteId,
+      planogramId: activePlanogram?.id,
       vendorNumber: '2F318',
       items: selectedItems.map((cell) => ({
         productId: cell.productId!,

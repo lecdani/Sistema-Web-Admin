@@ -15,12 +15,30 @@ function toAssignment(raw: any): Assignment | null {
       raw?.Salesperson ??
       ''
   ).trim();
+  const salesRouteId = String(
+    raw?.routeId ??
+      raw?.RouteId ??
+      raw?.route_id ??
+      raw?.Route_Id ??
+      raw?.salesRouteId ??
+      raw?.SalesRouteId ??
+      raw?.sales_route_id ??
+      raw?.Sales_Route_Id ??
+      raw?.salesRoute?.id ??
+      raw?.SalesRoute?.Id ??
+      ''
+  ).trim();
   const storeId = String(raw?.storeId ?? raw?.StoreId ?? '').trim();
-  if (!userId || !storeId) return null;
+  if (!storeId) return null;
+  if (!userId && !salesRouteId) return null;
+  const syntheticId =
+    id ||
+    (salesRouteId ? `${salesRouteId}::${storeId}` : userId ? `${userId}::${storeId}` : storeId);
   return {
-    id: id || `${userId}::${storeId}`,
-    userId,
+    id: syntheticId,
+    userId: userId || undefined,
     storeId,
+    salesRouteId: salesRouteId || undefined,
     createdAt: raw?.createdAt ? new Date(raw.createdAt) : raw?.CreatedAt ? new Date(raw.CreatedAt) : undefined,
   };
 }
@@ -46,17 +64,27 @@ export const assignmentsApi = {
     return list.map(toAssignment).filter((a): a is Assignment => a != null);
   },
 
-  async fetchByUser(userId: string): Promise<Assignment[]> {
+  async fetchByUser(userId: string, salesRouteId?: string): Promise<Assignment[]> {
     const uid = String(userId ?? '').trim();
-    if (!uid) return [];
+    const rid = String(salesRouteId ?? '').trim();
+    if (!uid && !rid) return [];
     const all = await this.fetchAll();
-    return all.filter((a) => String(a.userId) === uid);
+    return all.filter(
+      (a) =>
+        (uid && String(a.userId) === uid) || (rid && String(a.salesRouteId) === rid)
+    );
   },
 
-  async create(params: { userId: string; storeId: string }): Promise<Assignment | null> {
+  async create(params: {
+    userId?: string;
+    storeId: string;
+    salesRouteId?: string;
+  }): Promise<Assignment | null> {
     const salespersonId = String(params.userId ?? '').trim();
     const storeId = String(params.storeId ?? '').trim();
-    if (!salespersonId || !storeId) return null;
+    const salesRouteId = String(params.salesRouteId ?? '').trim();
+    if (!storeId) return null;
+    if (!salespersonId && !salesRouteId) return null;
 
     const logged = getLoggedUser();
     const assignedById =
@@ -65,30 +93,72 @@ export const assignmentsApi = {
       '';
     if (!assignedById) return null;
 
-    const body = {
+    const body: Record<string, string> = {
       assignedById,
       AssignedById: assignedById,
-      salespersonId,
-      SalespersonId: salespersonId,
       storeId,
       StoreId: storeId,
     };
-    const res = await apiClient.post<any>(API_CONFIG.ENDPOINTS.ASSIGNMENTS.CREATE, body);
-    if (res == null) return { id: `${salespersonId}::${storeId}`, userId: salespersonId, storeId };
-    if (typeof res === 'string' || typeof res === 'number') {
-      return { id: String(res), userId: salespersonId, storeId };
+    if (salespersonId) {
+      body.salespersonId = salespersonId;
+      body.SalespersonId = salespersonId;
+      body.userId = salespersonId;
+      body.UserId = salespersonId;
     }
-    return toAssignment(res) ?? { id: `${salespersonId}::${storeId}`, userId: salespersonId, storeId };
+    if (salesRouteId) {
+      body.routeId = salesRouteId;
+      body.RouteId = salesRouteId;
+      body.route_id = salesRouteId;
+      body.salesRouteId = salesRouteId;
+      body.SalesRouteId = salesRouteId;
+    }
+
+    const res = await apiClient.post<any>(API_CONFIG.ENDPOINTS.ASSIGNMENTS.CREATE, body);
+    if (res == null) {
+      return {
+        id: salesRouteId ? `${salesRouteId}::${storeId}` : `${salespersonId}::${storeId}`,
+        userId: salespersonId || undefined,
+        storeId,
+        salesRouteId: salesRouteId || undefined,
+      };
+    }
+    if (typeof res === 'string' || typeof res === 'number') {
+      return {
+        id: String(res),
+        userId: salespersonId || undefined,
+        storeId,
+        salesRouteId: salesRouteId || undefined,
+      };
+    }
+    return (
+      toAssignment(res) ?? {
+        id: salesRouteId ? `${salesRouteId}::${storeId}` : `${salespersonId}::${storeId}`,
+        userId: salespersonId || undefined,
+        storeId,
+        salesRouteId: salesRouteId || undefined,
+      }
+    );
   },
 
-  async remove(params: { id?: string; userId: string; storeId: string }): Promise<boolean> {
+  async remove(params: {
+    id?: string;
+    userId?: string;
+    storeId: string;
+    salesRouteId?: string;
+  }): Promise<boolean> {
     const userId = String(params.userId ?? '').trim();
     const storeId = String(params.storeId ?? '').trim();
-    if (!userId || !storeId) return false;
+    const salesRouteId = String(params.salesRouteId ?? '').trim();
+    if (!storeId) return false;
     let id = String(params.id ?? '').trim();
     if (!id) {
       const all = await this.fetchAll();
-      const found = all.find((a) => String(a.userId) === userId && String(a.storeId) === storeId);
+      const found = all.find((a) => {
+        if (String(a.storeId) !== storeId) return false;
+        if (userId && String(a.userId) === userId) return true;
+        if (salesRouteId && String(a.salesRouteId) === salesRouteId) return true;
+        return false;
+      });
       id = found?.id ? String(found.id) : '';
     }
     if (!id) return false;
@@ -101,4 +171,3 @@ export const assignmentsApi = {
     }
   },
 };
-

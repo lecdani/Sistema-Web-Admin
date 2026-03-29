@@ -3,6 +3,75 @@ import type { User } from '@/shared/types';
 
 const E = API_CONFIG.ENDPOINTS.USERS;
 
+function pickGuidish(v: unknown): string | undefined {
+    if (v == null) return undefined;
+    if (typeof v === 'string') {
+        const t = v.trim();
+        return t || undefined;
+    }
+    if (typeof v === 'number' && Number.isFinite(v)) return String(v);
+    if (typeof v === 'object') {
+        const o = v as Record<string, unknown>;
+        const inner = o.id ?? o.Id ?? o.value ?? o.Value;
+        return pickGuidish(inner);
+    }
+    return undefined;
+}
+
+/** Extrae el id de ruta de ventas desde distintas formas típicas de la API .NET / JSON. */
+function extractSalesRouteId(raw: any): string | undefined {
+    if (!raw || typeof raw !== 'object') return undefined;
+    const flat = [
+        raw.routeId,
+        raw.RouteId,
+        raw.routeID,
+        raw.RouteID,
+        raw.salesRouteId,
+        raw.SalesRouteId,
+        raw.salesRouteID,
+        raw.SalesRouteID,
+        raw.sales_route_id,
+        raw.Sales_Route_Id,
+        raw.assignedRouteId,
+        raw.AssignedRouteId,
+        raw.assigned_route_id,
+    ];
+    for (const x of flat) {
+        const id = pickGuidish(x);
+        if (id) return id;
+    }
+    const navs = [
+        raw.route,
+        raw.Route,
+        raw.salesRoute,
+        raw.SalesRoute,
+        raw.userRoute,
+        raw.UserRoute,
+        raw.assignedRoute,
+        raw.AssignedRoute,
+    ];
+    for (const n of navs) {
+        const id = pickGuidish(n);
+        if (id) return id;
+    }
+    return undefined;
+}
+
+function extractSalesRouteName(raw: any): string | undefined {
+    if (!raw || typeof raw !== 'object') return undefined;
+    const direct = raw.salesRouteName ?? raw.SalesRouteName ?? raw.routeName ?? raw.RouteName;
+    const s = typeof direct === 'string' ? direct.trim() : '';
+    if (s) return s;
+    const navs = [raw.salesRoute, raw.SalesRoute, raw.route, raw.Route, raw.assignedRoute, raw.AssignedRoute];
+    for (const n of navs) {
+        if (n && typeof n === 'object') {
+            const name = String((n as any).name ?? (n as any).Name ?? '').trim();
+            if (name) return name;
+        }
+    }
+    return undefined;
+}
+
 function toUser(raw: any): User {
     const rawRole = String(raw.rol ?? raw.Rol ?? raw.role ?? raw.Role ?? 'user').toLowerCase();
     const role: 'admin' | 'user' = rawRole.startsWith('admin') ? 'admin' : 'user'; // cualquier otro (Vendedor, etc.) se trata como usuario normal
@@ -37,6 +106,8 @@ function toUser(raw: any): User {
           return { id, name, prefix: prefix || undefined };
         })(),
         sellerCode: raw.sellerCode ?? raw.SellerCode ?? raw.seller_code ?? raw.SELLER_CODE ?? undefined,
+        salesRouteId: extractSalesRouteId(raw),
+        salesRouteName: extractSalesRouteName(raw),
         isActive: typeof raw.isActive === 'boolean' ? raw.isActive : (raw.IsActive ?? true),
         createdAt: raw.createdAt ? new Date(raw.createdAt) : raw.CreatedAt ? new Date(raw.CreatedAt) : new Date(),
         updatedAt: raw.updatedAt ? new Date(raw.updatedAt) : raw.UpdatedAt ? new Date(raw.UpdatedAt) : new Date(),
@@ -53,9 +124,15 @@ function toPayload(data: Partial<User> & { password?: string }) {
         phone: data.phone?.trim(),
         rol: data.role ? toApiRol(data.role) : undefined,
         isActive: data.isActive,
-        baseCityId: (data as any).baseCityId,
-        BaseCityId: (data as any).baseCityId,
     };
+
+    if ((data as any).salesRouteId !== undefined) {
+        const sr = String((data as any).salesRouteId ?? '').trim();
+        payload.routeId = sr || null;
+        payload.RouteId = sr || null;
+        payload.salesRouteId = sr || null;
+        payload.SalesRouteId = sr || null;
+    }
 
     if (data.password) {
         payload.password = data.password;
@@ -70,7 +147,9 @@ function toPayload(data: Partial<User> & { password?: string }) {
 /** Lista todos los usuarios */
 export async function fetchUsers(): Promise<User[]> {
     const res = await apiClient.get<any>(E.GET_ALL);
-    const list = Array.isArray(res) ? res : res?.data ?? res?.items ?? [];
+    const list = Array.isArray(res)
+        ? res
+        : res?.data ?? res?.items ?? res?.value ?? res?.users ?? res?.Users ?? [];
     return (list as any[]).map(toUser);
 }
 
@@ -101,8 +180,6 @@ export async function createUser(data: Omit<User, 'id' | 'createdAt' | 'updatedA
         lastName: (data.lastName ?? '').trim(),
         rol: toApiRol(data.role),
         phone: (data.phone ?? '').trim(),
-        baseCityId: (data as any).baseCityId ?? undefined,
-        BaseCityId: (data as any).baseCityId ?? undefined,
     };
 
     const res = await apiClient.post<any>(registerEndpoint, payload);
@@ -147,6 +224,48 @@ export async function updateUser(id: string, data: Partial<User> & { password?: 
     }
 
     return toUser(res);
+}
+
+/** Asegura que el usuario refleje la ruta recién asignada aunque el GET no devuelva routeId. */
+function userWithAssignedRoute(user: User, routeId: string | null): User {
+    const rid = routeId && String(routeId).trim() ? String(routeId).trim() : null;
+    return {
+        ...user,
+        salesRouteId: rid ?? undefined,
+        salesRouteName: undefined,
+    };
+}
+
+/**
+ * Primera asignación, reasignación o quitar ruta: mismo PUT /users/users/{id}/assign-route
+ * (mismo cuerpo y flujo; el id va en la URL y, por compatibilidad DTO, también en el JSON).
+ */
+export async function assignUserRoute(userId: string, routeId: string | null): Promise<User> {
+    const uid = String(userId || '').trim();
+    const rid = routeId && String(routeId).trim() ? String(routeId).trim() : null;
+    const endpoint = E.ASSIGN_ROUTE.replace('{id}', encodeURIComponent(uid));
+    const body = {
+        userId: uid,
+        UserId: uid,
+        routeId: rid,
+        RouteId: rid,
+        salesRouteId: rid,
+        SalesRouteId: rid,
+    };
+    const res = await apiClient.put<any>(endpoint, body);
+
+    const looksLikeUser =
+        res &&
+        typeof res === 'object' &&
+        (pickGuidish(res.id ?? res.Id) || String(res.email ?? res.Email ?? '').trim());
+
+    if (looksLikeUser) {
+        return userWithAssignedRoute(toUser(res), rid);
+    }
+
+    const fetched = await fetchUserById(uid);
+    if (fetched) return userWithAssignedRoute(fetched, rid);
+    throw new Error('assign-route: could not load user after assign');
 }
 
 /** Desactiva un usuario */
@@ -220,6 +339,7 @@ export const usersApi = {
     getById: fetchUserById,
     create: createUser,
     update: updateUser,
+    assignRoute: assignUserRoute,
     deactivate: deactivateUser,
     getProfile,
     updateProfile,

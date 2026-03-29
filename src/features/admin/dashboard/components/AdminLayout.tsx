@@ -15,7 +15,8 @@ import {
   BarChart3,
   Layout,
   MapPin,
-  ShoppingCart
+  ShoppingCart,
+  Waypoints
 } from 'lucide-react';
 import { Button } from '@/shared/components/base/Button';
 import { Avatar, AvatarFallback, AvatarImage } from '@/shared/components/base/Avatar';
@@ -74,6 +75,7 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ children, currentPage,
     { nameKey: 'navMainPanel', href: '/dashboard', icon: LayoutDashboard, current: activePage === 'dashboard' },
     { nameKey: 'navCities', href: '/cities', icon: MapPin, current: activePage === 'cities' },
     { nameKey: 'navStores', href: '/stores', icon: StoreIcon, current: activePage === 'stores' },
+    { nameKey: 'navSalesRoutes', href: '/routes', icon: Waypoints, current: activePage === 'routes' },
     { nameKey: 'navUsers', href: '/users', icon: Users, current: activePage === 'users' }
   ];
 

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   Package,
@@ -87,7 +87,9 @@ interface PriceUpdateData {
 
 interface FamilyFormData {
   name: string;
-  code: string;
+  shortName: string;
+  familyCode: string;
+  genericCode: string;
   sku: string;
   volume: string;
   unit: string;
@@ -96,11 +98,17 @@ interface FamilyFormData {
 }
 interface FamilyFormErrors {
   name?: string;
-  code?: string;
+  shortName?: string;
+  familyCode?: string;
+  genericCode?: string;
   sku?: string;
   volume?: string;
   unit?: string;
   price?: string;
+}
+
+function categoryFamilyCode(c: Category): string {
+  return String(c.familyCode ?? c.code ?? '').trim();
 }
 
 /** Clave estable para mapa precio↔familia (evita fallos string vs number en ids). */
@@ -116,8 +124,8 @@ function getProductCodeDisplay(p: Product): string {
 
 /** Texto de volumen/unidad de familia; `null` si no hay nada que mostrar. */
 function formatFamilyVolumeLine(category: Category): string | null {
-  const rawVol = (category as any).volume;
-  const unit = String((category as any).unit ?? '').trim();
+  const rawVol = category.volume;
+  const unit = String(category.unit ?? '').trim();
   let volPart: string | null = null;
   if (rawVol != null && String(rawVol).trim() !== '') {
     const n = Number(rawVol);
@@ -159,7 +167,9 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
   const [editingCategory, setEditingCategory] = useState<Category | null>(null);
   const [familyForm, setFamilyForm] = useState<FamilyFormData>({
     name: '',
-    code: '',
+    shortName: '',
+    familyCode: '',
+    genericCode: '',
     sku: '',
     volume: '',
     unit: '',
@@ -214,6 +224,18 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
   useEffect(() => {
     applyFilters();
   }, [products, searchTerm, statusFilter, categoryFilter]);
+
+  const filteredFamiliesForList = useMemo(() => {
+    const q = categorySearchTerm.trim().toLowerCase();
+    if (!q) return categories;
+    return categories.filter((c) =>
+      [c.name, c.shortName, categoryFamilyCode(c), c.genericCode, c.sku].some((s) =>
+        String(s ?? '')
+          .toLowerCase()
+          .includes(q)
+      )
+    );
+  }, [categories, categorySearchTerm]);
 
   const loadProducts = async (opts?: {
     /** Sin pantalla de carga completa (p. ej. tras actualizar precio). */
@@ -397,48 +419,46 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
       return;
     }
     try {
-      const familyId = formData.categoryId || undefined;
-      const payload: Record<string, unknown> = {
+      const familyId = String(formData.categoryId || '').trim();
+      const brandId = String(formData.brandId || '').trim();
+      const imageForCreate =
+        getPendingImageFileName()?.trim() || formData.imageFileName?.trim() || '';
+      const imageForUpdate =
+        formData.imageFileName?.trim() ||
+        lastUploadedFileNameRef.current?.trim() ||
+        String(editingProduct?.imageFileName ?? '').trim();
+
+      const apiBody = {
         name: formData.name.trim(),
         code: formData.code.trim(),
-        brandId: formData.brandId || undefined,
+        brandId,
         familyId,
-        categoryId: familyId,
         isActive: editingProduct ? editingProduct.isActive : true,
+        imageFileName: editingProduct ? imageForUpdate : imageForCreate,
       };
+
       if (editingProduct) {
-        const imageForUpdate = formData.imageFileName?.trim() || lastUploadedFileNameRef.current?.trim() || undefined;
-        const currentFamilyId = String((editingProduct as any).familyId ?? editingProduct.categoryId ?? '').trim();
-        const nextFamilyId = String(familyId ?? '').trim();
+        const currentFamilyId = String(
+          editingProduct.familyId ?? editingProduct.categoryId ?? ''
+        ).trim();
         const currentBrandId = String(editingProduct.brandId ?? '').trim();
-        const nextBrandId = String(formData.brandId ?? '').trim();
         const currentName = String(editingProduct.name ?? '').trim();
-        const nextName = String(formData.name ?? '').trim();
         const currentCode = String(editingProduct.code ?? '').trim();
-        const nextCode = String(formData.code ?? '').trim();
+        const currentImage = String(editingProduct.imageFileName ?? '').trim();
         const hasChanges =
-          currentName !== nextName ||
-          currentCode !== nextCode ||
-          currentBrandId !== nextBrandId ||
-          currentFamilyId !== nextFamilyId ||
-          !!imageForUpdate;
+          currentName !== apiBody.name ||
+          currentCode !== apiBody.code ||
+          currentBrandId !== apiBody.brandId ||
+          currentFamilyId !== apiBody.familyId ||
+          currentImage !== apiBody.imageFileName;
         if (!hasChanges) {
           toast.error(translate('noChangesToSave'));
           return;
         }
-        if (imageForUpdate) payload.imageFileName = imageForUpdate;
-        await productsApi.update(editingProduct.id, payload as any);
+        await productsApi.update(editingProduct.id, apiBody);
         toast.success(translate('productSaved'));
       } else {
-        const imageFileNameForCreate = getPendingImageFileName() || formData.imageFileName?.trim() || undefined;
-        if (imageFileNameForCreate) {
-          payload.imageFileName = imageFileNameForCreate;
-          payload.ImageFileName = imageFileNameForCreate;
-        }
-        const created = await productsApi.create(
-          { ...payload } as any,
-          imageFileNameForCreate
-        );
+        const created = await productsApi.create(apiBody);
         clearPendingImageFileName();
         toast.success(translate('productCreated'));
         setSearchTerm(created.name);
@@ -629,49 +649,52 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
   const handleSaveCategory = async () => {
     const errors: FamilyFormErrors = {};
     const name = familyForm.name.trim();
-    if (!name) {
-      errors.name = translate('familyNameRequired');
+    const shortName = familyForm.shortName.trim();
+    const familyCode = familyForm.familyCode.trim();
+    const genericCode = familyForm.genericCode.trim();
+    const sku = familyForm.sku.trim();
+    const unit = familyForm.unit.trim();
+
+    if (!name) errors.name = translate('familyNameRequired');
+    if (!shortName) errors.shortName = translate('familyShortNameRequired');
+    if (!familyCode) errors.familyCode = translate('familyCodeRequired');
+    if (!genericCode) errors.genericCode = translate('familyGenericCodeRequired');
+    if (!sku) errors.sku = translate('familySkuRequired');
+
+    if (!familyForm.volume.trim()) {
+      errors.volume = translate('familyVolumeRequired');
     }
-    if (!familyForm.code.trim()) {
-      errors.code = translate('familyCodeRequired');
+    if (!unit) {
+      errors.unit = translate('familyUnitRequired');
     }
-    if (!familyForm.sku.trim()) {
-      errors.sku = translate('familySkuRequired');
-    }
+
     if (Object.keys(errors).length > 0) {
       setFamilyFormErrors(errors);
       toast.error(Object.values(errors)[0] || translate('completeRequiredFields'));
       return;
     }
-    const volumeNumber = familyForm.volume.trim() ? Number(familyForm.volume) : 0;
-    if (familyForm.volume.trim() && (!Number.isFinite(volumeNumber) || volumeNumber <= 0)) {
+
+    const volumeNumber = Number(familyForm.volume.trim().replace(',', '.'));
+    if (!Number.isFinite(volumeNumber) || volumeNumber < 0) {
       setFamilyFormErrors((prev) => ({ ...prev, volume: translate('familyVolumeInvalid') }));
       toast.error(translate('familyVolumeInvalid'));
       return;
     }
+
     const payload = {
       name,
-      code: familyForm.code.trim(),
-      sku: familyForm.sku.trim(),
+      shortName,
+      familyCode,
+      genericCode,
+      sku,
       volume: volumeNumber,
-      unit: familyForm.unit.trim(),
+      unit,
     };
-    const sku = payload.sku;
-    const code = payload.code;
-    if (!/^\d{6}$/.test(sku)) {
-      setFamilyFormErrors((prev) => ({ ...prev, sku: translate('familySkuMustBe6Digits') }));
-      toast.error(translate('familySkuMustBe6Digits'));
-      return;
-    }
-    if (!/^\d{4}$/.test(code)) {
-      setFamilyFormErrors((prev) => ({ ...prev, code: translate('familyCodeMustBe4Digits') }));
-      toast.error(translate('familyCodeMustBe4Digits'));
-      return;
-    }
-    const normalizedSku = sku.trim();
-    const normalizedCode = code.trim();
+
+    const normalizedSku = sku;
+    const normalizedFamilyCode = familyCode;
     const isDuplicateSku = categories.some(
-      (c) => String((c as any).sku ?? '').trim() === normalizedSku && (!editingCategory || c.id !== editingCategory.id)
+      (c) => String(c.sku ?? '').trim() === normalizedSku && (!editingCategory || c.id !== editingCategory.id)
     );
     if (isDuplicateSku) {
       setFamilyFormErrors((prev) => ({ ...prev, sku: translate('duplicateFamilySku') }));
@@ -679,10 +702,10 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
       return;
     }
     const isDuplicateCode = categories.some(
-      (c) => String((c as any).code ?? '').trim() === normalizedCode && (!editingCategory || c.id !== editingCategory.id)
+      (c) => categoryFamilyCode(c) === normalizedFamilyCode && (!editingCategory || c.id !== editingCategory.id)
     );
     if (isDuplicateCode) {
-      setFamilyFormErrors((prev) => ({ ...prev, code: translate('duplicateFamilyCode') }));
+      setFamilyFormErrors((prev) => ({ ...prev, familyCode: translate('duplicateFamilyCode') }));
       toast.error(translate('duplicateFamilyCode'));
       return;
     }
@@ -709,14 +732,18 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
     try {
       if (editingCategory) {
         const currentName = String(editingCategory.name ?? '').trim();
-        const currentCode = String((editingCategory as any).code ?? '').trim();
-        const currentSku = String((editingCategory as any).sku ?? '').trim();
-        const currentVolumeRaw = Number((editingCategory as any).volume ?? 0);
+        const currentShort = String(editingCategory.shortName ?? '').trim();
+        const currentFamCode = categoryFamilyCode(editingCategory);
+        const currentGen = String(editingCategory.genericCode ?? '').trim();
+        const currentSku = String(editingCategory.sku ?? '').trim();
+        const currentVolumeRaw = Number(editingCategory.volume ?? 0);
         const currentVolume = Number.isFinite(currentVolumeRaw) ? currentVolumeRaw : 0;
-        const currentUnit = String((editingCategory as any).unit ?? '').trim();
+        const currentUnit = String(editingCategory.unit ?? '').trim();
         const hasChanges =
           currentName !== payload.name ||
-          currentCode !== payload.code ||
+          currentShort !== payload.shortName ||
+          currentFamCode !== payload.familyCode ||
+          currentGen !== payload.genericCode ||
           currentSku !== payload.sku ||
           currentVolume !== payload.volume ||
           currentUnit !== payload.unit;
@@ -724,12 +751,12 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
           toast.error(translate('noChangesToSave'));
           return;
         }
-        const updated = await categoriesApi.update(editingCategory.id, payload as any);
+        const updated = await categoriesApi.update(editingCategory.id, payload);
         setCategories((prev) => prev.map((c) => (c.id === editingCategory.id ? updated : c)));
         await refreshOneFamilyPrice(editingCategory.id);
         toast.success(translate('familyUpdated'));
       } else {
-        const created = await categoriesApi.create(payload as any);
+        const created = await categoriesApi.create(payload);
         const fid = familyPriceKey(created.id);
         let histPriceSaved = false;
         try {
@@ -762,7 +789,16 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
         }
         setCategorySearchTerm(created.name);
       }
-      setFamilyForm({ name: '', code: '', sku: '', volume: '', unit: '', price: '' });
+      setFamilyForm({
+        name: '',
+        shortName: '',
+        familyCode: '',
+        genericCode: '',
+        sku: '',
+        volume: '',
+        unit: '',
+        price: '',
+      });
       setFamilyFormErrors({});
       setEditingCategory(null);
       setShowCategoryDialog(false);
@@ -928,8 +964,8 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
                         <div className="text-sm text-indigo-900 font-medium space-y-1">
                           <div>
                             {[
-                              `SKU: ${(selectedFamily as any).sku || '—'}`,
-                              `${translate('familyCodeLabel')}: ${(selectedFamily as any).code || '—'}`,
+                              `SKU: ${selectedFamily.sku || '—'}`,
+                              `${translate('familyCodeLabel')}: ${categoryFamilyCode(selectedFamily) || '—'}`,
                               selectedFamily.name || '—',
                               formatFamilyVolumeLine(selectedFamily),
                             ]
@@ -1452,7 +1488,16 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
                     type="button"
                     onClick={() => {
                       setEditingCategory(null);
-                      setFamilyForm({ name: '', code: '', sku: '', volume: '', unit: '', price: '' });
+                      setFamilyForm({
+                        name: '',
+                        shortName: '',
+                        familyCode: '',
+                        genericCode: '',
+                        sku: '',
+                        volume: '',
+                        unit: '',
+                        price: '',
+                      });
                       setFamilyFormErrors({});
                       setShowCategoryDialog(true);
                     }}
@@ -1475,19 +1520,24 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
                   </div>
                 </div>
                 <div className="divide-y divide-gray-200 bg-white">
-                  {(categorySearchTerm.trim() ? categories.filter(c => c.name.toLowerCase().includes(categorySearchTerm.trim().toLowerCase())) : categories).length === 0 ? (
+                  {filteredFamiliesForList.length === 0 ? (
                     <p className="px-4 py-8 text-sm text-gray-500 text-center">{categorySearchTerm.trim() ? translate('noResults') : translate('noFamilies')}</p>
                   ) : (
-                    (categorySearchTerm.trim() ? categories.filter(c => c.name.toLowerCase().includes(categorySearchTerm.trim().toLowerCase())) : categories).map((c) => {
+                    filteredFamiliesForList.map((c) => {
                       const familyVolLine = formatFamilyVolumeLine(c);
                       return (
                       <div key={c.id} className="flex items-center justify-between px-4 py-3 hover:bg-gray-50 group gap-3">
                         <div className="min-w-0 flex-1">
                           <div className="flex items-center flex-wrap gap-2">
-                            <span className="text-sm font-semibold text-gray-900">{`SKU: ${(c as any).sku || '—'}`}</span>
-                            <span className="text-sm font-semibold text-gray-900">{`${translate('familyCodeLabel')}: ${(c as any).code || '—'}`}</span>
+                            <span className="text-sm font-semibold text-gray-900">{`SKU: ${c.sku || '—'}`}</span>
+                            <span className="text-sm font-semibold text-gray-900">{`${translate('familyCodeLabel')}: ${categoryFamilyCode(c) || '—'}`}</span>
                             <span className="text-sm font-semibold text-gray-900">{c.name}</span>
                           </div>
+                          {(c.shortName || c.genericCode) ? (
+                            <span className="text-xs text-gray-600 block truncate">
+                              {[c.shortName, c.genericCode ? `${translate('familyGenericCodeLabel')}: ${c.genericCode}` : ''].filter(Boolean).join(' · ')}
+                            </span>
+                          ) : null}
                           {familyVolLine ? (
                             <span className="text-xs text-gray-500 block truncate">{familyVolLine}</span>
                           ) : null}
@@ -1548,10 +1598,12 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
                             setEditingCategory(c);
                             setFamilyForm({
                               name: c.name ?? '',
-                              code: String((c as any).code ?? ''),
-                              sku: String((c as any).sku ?? ''),
-                              volume: (c as any).volume != null ? String((c as any).volume) : '',
-                              unit: String((c as any).unit ?? ''),
+                              shortName: String(c.shortName ?? c.name ?? ''),
+                              familyCode: categoryFamilyCode(c),
+                              genericCode: String(c.genericCode ?? ''),
+                              sku: String(c.sku ?? ''),
+                              volume: c.volume != null && Number.isFinite(Number(c.volume)) ? String(c.volume) : '',
+                              unit: String(c.unit ?? ''),
                               price: '',
                             });
                             setFamilyFormErrors({});
@@ -1900,64 +1952,91 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
 
       {/* Family dialog */}
       <Dialog open={showCategoryDialog} onOpenChange={setShowCategoryDialog}>
-        <DialogContent className="sm:max-w-md">
+        <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>{editingCategory ? translate('editFamily') : translate('newFamily')}</DialogTitle>
             <DialogDescription>
               {editingCategory ? translate('editFamilyDesc') : translate('newFamilyDescWithPrice')}
             </DialogDescription>
           </DialogHeader>
-          <div className="space-y-5 px-6 py-4">
-            <Label htmlFor="familyName">{translate('name')} *</Label>
-            <Input
-              id="familyName"
-              value={familyForm.name}
-              onChange={(e) => {
-                setFamilyForm((prev) => ({ ...prev, name: e.target.value }));
-                if (familyFormErrors.name) setFamilyFormErrors((prev) => ({ ...prev, name: undefined }));
-              }}
-              placeholder="Ej. Bebidas"
-              className={familyFormErrors.name ? 'border-red-500' : ''}
-            />
-            {familyFormErrors.name && <p className="text-sm text-red-600">{familyFormErrors.name}</p>}
-            <Label htmlFor="familyCode">{translate('familyCodeLabel')} *</Label>
-            <Input
-              id="familyCode"
-              value={familyForm.code}
-              onChange={(e) => {
-                setFamilyForm((prev) => ({ ...prev, code: e.target.value.replace(/\D/g, '').slice(0, 4) }));
-                if (familyFormErrors.code) setFamilyFormErrors((prev) => ({ ...prev, code: undefined }));
-              }}
-              placeholder="Ej. 1234"
-              inputMode="numeric"
-              maxLength={4}
-              required
-              className={familyFormErrors.code ? 'border-red-500' : ''}
-            />
-            {familyFormErrors.code && <p className="text-sm text-red-600">{familyFormErrors.code}</p>}
-            <Label htmlFor="familySku">{translate('familySkuLabel')} *</Label>
-            <Input
-              id="familySku"
-              value={familyForm.sku}
-              onChange={(e) => {
-                setFamilyForm((prev) => ({ ...prev, sku: e.target.value.replace(/\D/g, '').slice(0, 6) }));
-                if (familyFormErrors.sku) setFamilyFormErrors((prev) => ({ ...prev, sku: undefined }));
-              }}
-              placeholder="Ej. 123456"
-              inputMode="numeric"
-              maxLength={6}
-              required
-              className={familyFormErrors.sku ? 'border-red-500' : ''}
-            />
-            {familyFormErrors.sku && <p className="text-sm text-red-600">{familyFormErrors.sku}</p>}
+          <div className="space-y-4 px-6 py-4">
+            <div>
+              <Label htmlFor="familyName">{translate('name')} *</Label>
+              <Input
+                id="familyName"
+                value={familyForm.name}
+                onChange={(e) => {
+                  setFamilyForm((prev) => ({ ...prev, name: e.target.value }));
+                  if (familyFormErrors.name) setFamilyFormErrors((prev) => ({ ...prev, name: undefined }));
+                }}
+                placeholder="Ej. Bebidas"
+                className={familyFormErrors.name ? 'border-red-500' : ''}
+              />
+              {familyFormErrors.name && <p className="text-sm text-red-600 mt-1">{familyFormErrors.name}</p>}
+            </div>
+            <div>
+              <Label htmlFor="familyShortName">{translate('familyShortNameLabel')} *</Label>
+              <Input
+                id="familyShortName"
+                value={familyForm.shortName}
+                onChange={(e) => {
+                  setFamilyForm((prev) => ({ ...prev, shortName: e.target.value }));
+                  if (familyFormErrors.shortName) setFamilyFormErrors((prev) => ({ ...prev, shortName: undefined }));
+                }}
+                placeholder="Ej. Bebidas corto"
+                className={familyFormErrors.shortName ? 'border-red-500' : ''}
+              />
+              {familyFormErrors.shortName && <p className="text-sm text-red-600 mt-1">{familyFormErrors.shortName}</p>}
+            </div>
+            <div>
+              <Label htmlFor="familyCodeField">{translate('familyCodeLabel')} *</Label>
+              <Input
+                id="familyCodeField"
+                value={familyForm.familyCode}
+                onChange={(e) => {
+                  setFamilyForm((prev) => ({ ...prev, familyCode: e.target.value }));
+                  if (familyFormErrors.familyCode) setFamilyFormErrors((prev) => ({ ...prev, familyCode: undefined }));
+                }}
+                placeholder="Ej. AB12"
+                className={familyFormErrors.familyCode ? 'border-red-500' : ''}
+              />
+              {familyFormErrors.familyCode && <p className="text-sm text-red-600 mt-1">{familyFormErrors.familyCode}</p>}
+            </div>
+            <div>
+              <Label htmlFor="familyGenericCode">{translate('familyGenericCodeLabel')} *</Label>
+              <Input
+                id="familyGenericCode"
+                value={familyForm.genericCode}
+                onChange={(e) => {
+                  setFamilyForm((prev) => ({ ...prev, genericCode: e.target.value }));
+                  if (familyFormErrors.genericCode) setFamilyFormErrors((prev) => ({ ...prev, genericCode: undefined }));
+                }}
+                placeholder="Ej. GEN-001"
+                className={familyFormErrors.genericCode ? 'border-red-500' : ''}
+              />
+              {familyFormErrors.genericCode && <p className="text-sm text-red-600 mt-1">{familyFormErrors.genericCode}</p>}
+            </div>
+            <div>
+              <Label htmlFor="familySku">{translate('familySkuLabel')} *</Label>
+              <Input
+                id="familySku"
+                value={familyForm.sku}
+                onChange={(e) => {
+                  setFamilyForm((prev) => ({ ...prev, sku: e.target.value }));
+                  if (familyFormErrors.sku) setFamilyFormErrors((prev) => ({ ...prev, sku: undefined }));
+                }}
+                placeholder="SKU"
+                className={familyFormErrors.sku ? 'border-red-500' : ''}
+              />
+              {familyFormErrors.sku && <p className="text-sm text-red-600 mt-1">{familyFormErrors.sku}</p>}
+            </div>
             <div className="grid grid-cols-2 gap-3">
               <div>
-            <Label htmlFor="familyVolume">{translate('familyVolumeLabel')}</Label>
+                <Label htmlFor="familyVolume">{translate('familyVolumeLabel')} *</Label>
                 <Input
                   id="familyVolume"
-                  type="number"
-                  min="0.01"
-                  step="0.01"
+                  type="text"
+                  inputMode="decimal"
                   value={familyForm.volume}
                   onChange={(e) => {
                     setFamilyForm((prev) => ({ ...prev, volume: e.target.value }));
@@ -1969,7 +2048,7 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
                 {familyFormErrors.volume && <p className="text-sm text-red-600 mt-1">{familyFormErrors.volume}</p>}
               </div>
               <div>
-                <Label htmlFor="familyUnit">{translate('familyUnitLabel')}</Label>
+                <Label htmlFor="familyUnit">{translate('familyUnitLabel')} *</Label>
                 <Input
                   id="familyUnit"
                   value={familyForm.unit}
@@ -2010,7 +2089,16 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
           <DialogFooter>
             <Button variant="outline" onClick={() => {
               setShowCategoryDialog(false);
-              setFamilyForm({ name: '', code: '', sku: '', volume: '', unit: '', price: '' });
+              setFamilyForm({
+                name: '',
+                shortName: '',
+                familyCode: '',
+                genericCode: '',
+                sku: '',
+                volume: '',
+                unit: '',
+                price: '',
+              });
               setFamilyFormErrors({});
               setEditingCategory(null);
             }}>{translate('cancel')}</Button>

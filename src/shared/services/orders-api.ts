@@ -604,9 +604,12 @@ export interface CreateOrderInput {
   storeName?: string;
   storeAddress?: string;
   salespersonId?: string;
+  /** FK SALES_ROUTE en ORDER (modelo ER). */
+  salesRouteId?: string;
   vendorNumber?: string;
   /** Código PO (Purchase Order), único en el sistema. */
   po?: string;
+  planogramId?: string;
   items: OrderItemInput[];
   subtotal: number;
   tax: number;
@@ -1416,19 +1419,6 @@ export const ordersApi = {
       items: mappedItems,
       Items: mappedItems,
     };
-    const poTrimmed = (input.po ?? '').trim();
-    if (poTrimmed) {
-      payload.po = poTrimmed;
-      payload.Po = poTrimmed;
-    }
-    if ((input.planogramId ?? '').trim()) {
-      const pid = String(input.planogramId).trim();
-      payload.planogramId = pid;
-      payload.PlanogramId = pid;
-      payload.planogram_id = pid;
-      payload.PLANOGRAM_ID = pid;
-    }
-
     const createdOrder = await safePost<any>('/orders/orders', payload);
     if (!createdOrder) {
       return null;

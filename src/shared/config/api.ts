@@ -41,6 +41,7 @@ export const API_CONFIG = {
       GET_BY_ID: '/users/users/{id}',
       CREATE: '/users/users',
       UPDATE: '/users/users/{id}',
+      ASSIGN_ROUTE: '/users/users/{id}/assign-route',
       DELETE: '/users/users/{id}',
       DEACTIVATE: '/users/users/desactivate/{id}',
       GET_PROFILE: '/users/profile',
@@ -118,6 +119,14 @@ export const API_CONFIG = {
       LIST: '/assignments/assignments',
       CREATE: '/assignments/assignments',
       DELETE: '/assignments/assignments/{id}'
+    },
+    SALES_ROUTES: {
+      LIST: '/salesRoutes',
+      GET_BY_ID: '/salesRoutes/{id}',
+      CREATE: '/salesRoutes',
+      UPDATE: '/salesRoutes/{id}',
+      DELETE: '/salesRoutes/{id}',
+      TOGGLE_STATUS: '/salesRoutes/{id}/toggle-status'
     }
   },
 

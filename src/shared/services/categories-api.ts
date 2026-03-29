@@ -3,15 +3,55 @@ import type { Category } from '@/shared/types';
 
 const E = API_CONFIG.ENDPOINTS.FAMILIES;
 
-/** Respuesta POST/PUT a veces trae solo id+nombre; rellenamos con lo que ya enviamos para que la UI no muestre "—" hasta recargar. */
+export type FamilyWritePayload = {
+  name: string;
+  shortName: string;
+  familyCode: string;
+  genericCode: string;
+  sku: string;
+  volume: number;
+  unit: string;
+};
+
+function buildFamilyJsonBody(p: FamilyWritePayload): Record<string, unknown> {
+  return {
+    name: p.name,
+    Name: p.name,
+    shortName: p.shortName,
+    ShortName: p.shortName,
+    familyCode: p.familyCode,
+    FamilyCode: p.familyCode,
+    genericCode: p.genericCode,
+    GenericCode: p.genericCode,
+    sku: p.sku,
+    Sku: p.sku,
+    volume: p.volume,
+    Volume: p.volume,
+    unit: p.unit,
+    Unit: p.unit,
+  };
+}
+
+/** Respuesta POST/PUT a veces trae solo id+nombre; rellenamos con lo enviado para que la UI no muestre "—" hasta recargar. */
 function mergeFamilyResponseWithPayload(raw: Record<string, any>, payload: Record<string, any>) {
   if (!String(raw.name ?? raw.Name ?? '').trim()) {
     raw.name = payload.name;
     raw.Name = payload.Name;
   }
-  if (!String(raw.code ?? raw.Code ?? '').trim()) {
-    raw.code = payload.code;
-    raw.Code = payload.Code;
+  if (!String(raw.shortName ?? raw.ShortName ?? '').trim() && String(payload.shortName ?? '').trim()) {
+    raw.shortName = payload.shortName;
+    raw.ShortName = payload.ShortName;
+  }
+  const pCode = String(payload.familyCode ?? payload.code ?? '').trim();
+  if (!String(raw.familyCode ?? raw.FamilyCode ?? raw.family_code ?? '').trim() && pCode) {
+    raw.familyCode = pCode;
+    raw.FamilyCode = pCode;
+    raw.code = pCode;
+    raw.Code = pCode;
+  }
+  if (!String(raw.genericCode ?? raw.GenericCode ?? raw.generic_code ?? '').trim() && String(payload.genericCode ?? '').trim()) {
+    raw.genericCode = payload.genericCode;
+    raw.GenericCode = payload.GenericCode;
   }
   if (!String(raw.sku ?? raw.Sku ?? '').trim()) {
     raw.sku = payload.sku;
@@ -40,22 +80,31 @@ function unwrapCreatedFamilyBody(res: any): Record<string, any> | null {
 }
 
 function toCategory(raw: any): Category {
-  // Asegurar un id no vacío para evitar keys `` duplicadas en React
   let idValue =
+    raw?.familyId ??
+    raw?.FamilyId ??
+    raw?.family_id ??
     raw?.id ??
     raw?.Id ??
-    raw?.name ??
-    raw?.Name ??
     null;
 
   if (idValue == null || String(idValue).trim() === '') {
     idValue = `temp-${Math.random().toString(36).slice(2, 10)}`;
   }
 
+  const familyCode = String(
+    raw.familyCode ?? raw.FamilyCode ?? raw.family_code ?? raw.code ?? raw.Code ?? ''
+  ).trim();
+  const shortName = String(raw.shortName ?? raw.ShortName ?? raw.short_name ?? '').trim();
+  const genericCode = String(raw.genericCode ?? raw.GenericCode ?? raw.generic_code ?? '').trim();
+
   return {
     id: String(idValue),
     name: String(raw.name ?? raw.Name ?? '').trim() || 'Familia',
-    code: String(raw.code ?? raw.Code ?? '').trim() || undefined,
+    shortName: shortName || undefined,
+    familyCode: familyCode || undefined,
+    code: familyCode || undefined,
+    genericCode: genericCode || undefined,
     sku: String(raw.sku ?? raw.Sku ?? '').trim() || undefined,
     volume: Number(raw.volume ?? raw.Volume ?? 0) || undefined,
     unit: String(raw.unit ?? raw.Unit ?? '').trim() || undefined,
@@ -83,20 +132,18 @@ export async function fetchCategoryById(id: string): Promise<Category | null> {
   }
 }
 
-/** Crea una familia */
-export async function createCategory(data: { name: string; code?: string; sku?: string; volume?: number; unit?: string }): Promise<Category> {
-  const payload = {
+/** Crea una familia (POST body: name, shortName, familyCode, genericCode, sku, volume, unit). */
+export async function createCategory(data: FamilyWritePayload): Promise<Category> {
+  const p: FamilyWritePayload = {
     name: (data.name ?? '').trim() || 'Familia',
-    Name: (data.name ?? '').trim() || 'Familia',
-    code: String(data.code ?? '').trim(),
-    Code: String(data.code ?? '').trim(),
+    shortName: String(data.shortName ?? '').trim(),
+    familyCode: String(data.familyCode ?? '').trim(),
+    genericCode: String(data.genericCode ?? '').trim(),
     sku: String(data.sku ?? '').trim(),
-    Sku: String(data.sku ?? '').trim(),
     volume: Number(data.volume ?? 0),
-    Volume: Number(data.volume ?? 0),
     unit: String(data.unit ?? '').trim(),
-    Unit: String(data.unit ?? '').trim(),
   };
+  const payload = buildFamilyJsonBody(p);
   const res = await apiClient.post<any>(E.CREATE, payload);
 
   const body = unwrapCreatedFamilyBody(res);
@@ -105,31 +152,27 @@ export async function createCategory(data: { name: string; code?: string; sku?: 
     return toCategory(body);
   }
 
-  // Si el backend no devuelve nada, crear una categoría temporal con id único
   return toCategory({ id: `temp-${Math.random().toString(36).slice(2, 10)}`, ...payload });
 }
 
-/** Actualiza una familia */
-export async function updateCategory(id: string, data: { name: string; code?: string; sku?: string; volume?: number; unit?: string }): Promise<Category> {
+/** Actualiza una familia (mismo shape que create). */
+export async function updateCategory(id: string, data: FamilyWritePayload): Promise<Category> {
   const endpoint = E.UPDATE.replace('{id}', encodeURIComponent(id));
-  const payload = {
-    id,
+  const p: FamilyWritePayload = {
     name: (data.name ?? '').trim(),
-    Name: (data.name ?? '').trim(),
-    code: String(data.code ?? '').trim(),
-    Code: String(data.code ?? '').trim(),
+    shortName: String(data.shortName ?? '').trim(),
+    familyCode: String(data.familyCode ?? '').trim(),
+    genericCode: String(data.genericCode ?? '').trim(),
     sku: String(data.sku ?? '').trim(),
-    Sku: String(data.sku ?? '').trim(),
     volume: Number(data.volume ?? 0),
-    Volume: Number(data.volume ?? 0),
     unit: String(data.unit ?? '').trim(),
-    Unit: String(data.unit ?? '').trim(),
   };
+  const payload = { id, Id: id, ...buildFamilyJsonBody(p) };
   const res = await apiClient.put<any>(endpoint, payload);
   const body = unwrapCreatedFamilyBody(res);
   if (body) {
     mergeFamilyResponseWithPayload(body, payload);
-    if (!String(body.id ?? body.Id ?? '').trim()) {
+    if (!String(body.id ?? body.Id ?? body.familyId ?? body.FamilyId ?? '').trim()) {
       body.id = id;
       body.Id = id;
     }

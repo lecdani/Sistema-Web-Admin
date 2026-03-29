@@ -15,6 +15,10 @@ export interface User {
   baseCity?: { id: string; name: string; prefix?: string };
   /** Código del vendedor generado por backend (ej. FL-01). */
   sellerCode?: string;
+  /** Ruta de ventas asignada al usuario (FK SALES_ROUTE, según modelo ER). */
+  salesRouteId?: string;
+  /** Nombre de la ruta si la API lo envía embebido (sin depender del catálogo). */
+  salesRouteName?: string;
   isActive: boolean;
   createdAt: Date;
   updatedAt: Date;
@@ -51,6 +55,17 @@ export interface City {
   updatedAt: Date;
 }
 
+/** Ruta de ventas (catálogo; puede existir sin usuarios asignados). */
+export interface SalesRoute {
+  id: string;
+  name: string;
+  cityId: string;
+  code?: string;
+  isActive: boolean;
+  createdAt?: Date;
+  updatedAt?: Date;
+}
+
 export interface Store {
   id: string;
   name: string;
@@ -71,10 +86,18 @@ export interface Brand {
   updatedAt: Date;
 }
 
+/** Familia de productos (FAMILY): alinea con API camelCase y columnas snake_case en BD. */
 export interface Category {
   id: string;
+  /** name en BD (VARCHAR 25) */
   name: string;
+  /** short_name */
+  shortName?: string;
+  /** family_code (VARCHAR 4) — `code` es alias legado para el mismo valor. */
   code?: string;
+  familyCode?: string;
+  /** generic_code (VARCHAR 12) */
+  genericCode?: string;
   sku?: string;
   volume?: number;
   unit?: string;
@@ -181,8 +204,11 @@ export interface OrderItem {
 
 export interface Assignment {
   id: string;
-  userId: string;
+  /** Legacy: vendedor directo en la asignación. */
+  userId?: string;
   storeId: string;
+  /** Modelo ER: asignación ruta + tienda. */
+  salesRouteId?: string;
   createdAt?: Date;
 }
 

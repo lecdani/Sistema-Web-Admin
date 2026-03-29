@@ -36,17 +36,35 @@ function toProduct(raw: any, currentPrice?: number): Product {
   };
 }
 
-export interface ProductPayload {
+/**
+ * POST/PUT producto: mismo shape que la API.
+ * { name, code, brandId, familyId, isActive, imageFileName }
+ */
+export interface ProductWritePayload {
   name: string;
-  code?: string;
-  category?: string;
-  sku?: string;
+  code: string;
+  brandId: string;
+  familyId: string;
   isActive: boolean;
-  brandId?: string;
-  familyId?: string;
-  categoryId?: string;
-  /** Opcional. Nombre del archivo en S3 devuelto por POST /images/upload (confirmación de que el archivo existe en AWS S3). */
-  imageFileName?: string;
+  /** Vacío si no hay imagen. */
+  imageFileName: string;
+}
+
+function expandProductBody(b: ProductWritePayload): Record<string, unknown> {
+  return {
+    name: b.name,
+    Name: b.name,
+    code: b.code,
+    Code: b.code,
+    brandId: b.brandId,
+    BrandId: b.brandId,
+    familyId: b.familyId,
+    FamilyId: b.familyId,
+    isActive: b.isActive,
+    IsActive: b.isActive,
+    imageFileName: b.imageFileName,
+    ImageFileName: b.imageFileName,
+  };
 }
 
 /** Lista todos los productos. Si el backend devuelve error (ej. 500), devuelve [] para no romper la app. */
@@ -80,71 +98,41 @@ export async function fetchProductsByBrand(brandId: string): Promise<Product[]> 
   return (list as any[]).map((raw: any) => toProduct(raw));
 }
 
-/** Crea un producto. imageFileNameOverride: si se pasa, se envía siempre al backend (evita pérdida por estado). */
-export async function createProduct(
-  data: ProductPayload,
-  imageFileNameOverride?: string | null
-): Promise<Product> {
-  const payload: any = {
+/** Crea un producto (POST con name, code, brandId, familyId, isActive, imageFileName). */
+export async function createProduct(data: ProductWritePayload): Promise<Product> {
+  const body = expandProductBody({
     name: (data.name ?? '').trim(),
-    isActive: data.isActive ?? true
-  };
-  const productCode = (data.code ?? '').trim();
-  if (productCode) {
-    payload.code = productCode;
-    payload.Code = productCode;
-  }
-  if (data.brandId) payload.brandId = data.brandId;
-  const familyId = data.familyId ?? data.categoryId;
-  if (familyId) {
-    payload.familyId = familyId;
-    payload.FamilyId = familyId;
-  }
-  const fileName = (imageFileNameOverride != null && imageFileNameOverride !== '')
-    ? String(imageFileNameOverride).trim()
-    : (data.imageFileName != null && data.imageFileName !== '')
-      ? String(data.imageFileName).trim()
-      : '';
-  if (fileName) {
-    payload.imageFileName = fileName;
-    payload.ImageFileName = fileName;
-  }
-  if (typeof process !== 'undefined' && process.env?.NODE_ENV === 'development') {
-    console.log('[products-api] createProduct payload:', JSON.stringify(payload));
-  }
-  const res = await apiClient.post<any>(E.CREATE, payload);
+    code: String(data.code ?? '').trim(),
+    brandId: String(data.brandId ?? '').trim(),
+    familyId: String(data.familyId ?? '').trim(),
+    isActive: data.isActive ?? true,
+    imageFileName: String(data.imageFileName ?? '').trim(),
+  });
+  const res = await apiClient.post<any>(E.CREATE, body);
   if (res && (res.id || res.name)) return toProduct(res);
   const list = await fetchProducts();
-  const created = list.find(p => p.name === payload.name);
+  const created = list.find((p) => p.name === body.name);
   if (created) return created;
-  return toProduct({ id: (res?.id ?? '').toString(), ...payload });
+  return toProduct({ id: String(res?.id ?? res?.Id ?? ''), ...body });
 }
 
-/** Actualiza un producto */
-export async function updateProduct(id: string, data: Partial<ProductPayload>): Promise<Product> {
+/** Actualiza un producto (PUT con el mismo cuerpo que create; el id va en la URL). */
+export async function updateProduct(id: string, data: ProductWritePayload): Promise<Product> {
   const endpoint = E.UPDATE.replace('{id}', encodeURIComponent(id));
-  const payload: any = { id, name: data.name?.trim(), isActive: data.isActive };
-  if (data.code !== undefined) {
-    const productCode = String(data.code ?? '').trim();
-    payload.code = productCode;
-    payload.Code = productCode;
-  }
-  if (data.brandId != null) payload.brandId = data.brandId;
-  const familyId = data.familyId ?? data.categoryId;
-  if (familyId != null) {
-    payload.familyId = familyId;
-    payload.FamilyId = familyId;
-  }
-  if (data.imageFileName !== undefined) {
-    payload.imageFileName = data.imageFileName;
-    payload.ImageFileName = data.imageFileName;
-  }
-  const res = await apiClient.put<any>(endpoint, payload);
+  const body = expandProductBody({
+    name: (data.name ?? '').trim(),
+    code: String(data.code ?? '').trim(),
+    brandId: String(data.brandId ?? '').trim(),
+    familyId: String(data.familyId ?? '').trim(),
+    isActive: data.isActive ?? true,
+    imageFileName: String(data.imageFileName ?? '').trim(),
+  });
+  const res = await apiClient.put<any>(endpoint, body);
   if (typeof res === 'string' || res === null || res === undefined) {
     const fetched = await fetchProductById(id);
     if (fetched) return fetched;
   }
-  return toProduct(res ?? { id, ...payload });
+  return toProduct(res ?? { id, ...body });
 }
 
 /** Elimina un producto */
