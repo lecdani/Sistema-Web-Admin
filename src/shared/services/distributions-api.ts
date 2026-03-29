@@ -17,6 +17,8 @@ function getPositionFromRaw(raw: any): { x: number; y: number } {
 
 function toDistribution(raw: any): Distribution {
   const { x: xPosition, y: yPosition } = getPositionFromRaw(raw);
+  const isActiveRaw = raw.isActive ?? raw.IsActive ?? raw.active ?? raw.Active;
+  const isActive = typeof isActiveRaw === 'boolean' ? isActiveRaw : true;
   return {
     id: String(raw.id ?? raw.distributionId ?? raw.Id ?? ''),
     planogramId: String(
@@ -27,7 +29,8 @@ function toDistribution(raw: any): Distribution {
     ),
     xPosition,
     yPosition,
-    createdAt: raw.createdAt ? new Date(raw.createdAt) : raw.CreatedAt ? new Date(raw.CreatedAt) : new Date()
+    createdAt: raw.createdAt ? new Date(raw.createdAt) : raw.CreatedAt ? new Date(raw.CreatedAt) : new Date(),
+    isActive,
   };
 }
 
@@ -64,7 +67,9 @@ export async function fetchDistributionsByPlanogram(planogramId: string): Promis
       ? res
       : res?.data ?? res?.items ?? res?.value ?? res?.distributions ?? res?.Distributions ?? (res && typeof res === 'object' && !Array.isArray(res) ? [res] : []);
     const items = Array.isArray(list) ? list : [];
-    return items.map((item: any) => toDistribution(item?.distribution ?? item?.Distribution ?? item));
+    return items
+      .map((item: any) => toDistribution(item?.distribution ?? item?.Distribution ?? item))
+      .filter((d) => d.isActive !== false);
   } catch {
     return [];
   }
@@ -144,20 +149,70 @@ export async function updateDistribution(
   return toDistribution(res);
 }
 
+export type DeactivateDistributionFallback = {
+  planogramId: string;
+  productId: string;
+  xPosition: number;
+  yPosition: number;
+};
+
 /**
  * Desactiva una distribución.
- * Backend real: PUT /distributions/distribution/{id}
+ * - Con `fallback` (caso planograma): muchos backends no exponen PUT .../desactivate/... (404).
+ *   Se usa solo PUT `/distributions/distribution/{id}` con `isActive: false` y datos completos.
+ * - Sin `fallback`: intenta rutas desactivate conocidas; si 404, error claro.
  */
+export async function deactivateDistribution(
+  id: string,
+  fallback?: DeactivateDistributionFallback
+): Promise<void> {
+  if (fallback) {
+    await updateDistribution(id, {
+      planogramId: fallback.planogramId,
+      productId: fallback.productId,
+      xPosition: fallback.xPosition,
+      yPosition: fallback.yPosition,
+      isActive: false,
+    });
+    return;
+  }
+
+  const encoded = encodeURIComponent(id);
+  const candidates = [
+    E.DEACTIVATE.replace('{id}', encoded),
+    E.DEACTIVATE_SINGULAR.replace('{id}', encoded),
+  ];
+
+  let last404 = false;
+  for (const path of candidates) {
+    try {
+      await apiClient.put(path, { id, Id: id });
+      return;
+    } catch (e: any) {
+      if (e?.status === 404) {
+        last404 = true;
+        continue;
+      }
+      throw e;
+    }
+  }
+
+  if (last404) {
+    throw new Error(
+      'No existe endpoint de desactivación de distribución (404). Pasa planogramId/productId/posición para usar PUT update como baja lógica.'
+    );
+  }
+}
+
+/** @deprecated Usar deactivateDistribution; el toggle real va por desactivate/{id}. */
 export async function toggleDistributionActive(id: string): Promise<void> {
-  const endpoint = E.UPDATE.replace('{id}', encodeURIComponent(id));
-  // Algunos backends manejan el "desactivar" por update con flag.
-  // Enviar flags comunes para maximizar compatibilidad sin romper si se ignoran.
-  await apiClient.put(endpoint, { id, isActive: false, IsActive: false, active: false, Active: false });
+  await deactivateDistribution(id);
 }
 
 export const distributionsApi = {
   getByPlanogram: fetchDistributionsByPlanogram,
   create: createDistribution,
   update: updateDistribution,
+  deactivate: deactivateDistribution,
   toggleActive: toggleDistributionActive,
 };

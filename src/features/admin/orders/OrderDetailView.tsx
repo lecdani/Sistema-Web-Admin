@@ -1,9 +1,10 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Button } from '@/shared/components/base/Button';
 import { Badge } from '@/shared/components/base/Badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/shared/components/base/Tabs';
 import { Alert, AlertDescription } from '@/shared/components/base/Alert';
-import { Card, CardContent, CardHeader, CardTitle } from '@/shared/components/base/Card';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/shared/components/base/Card';
+import { Label } from '@/shared/components/base/Label';
 import {
   ShoppingCart,
   FileText,
@@ -13,15 +14,21 @@ import {
   Download,
   Layout,
   Printer,
+  ImagePlus,
+  X,
+  Save,
 } from 'lucide-react';
 import { useLanguage } from '@/shared/hooks/useLanguage';
 import {
   ordersApi,
   OrderForUI,
   computeOrderInvoiceShortfall,
+  applyInvoiceQtyToOrderItems,
   type OrderDiscrepancyItem,
 } from '@/shared/services/orders-api';
 import { getBackendAssetUrl } from '@/shared/config/api';
+import { uploadImage } from '@/shared/services/images-api';
+import { toast } from '@/shared/components/base/Toast';
 import { histpricesApi } from '@/shared/services/histprices-api';
 import { productsApi } from '@/shared/services/products-api';
 import { categoriesApi } from '@/shared/services/categories-api';
@@ -33,6 +40,7 @@ import { Invoice } from './components/Invoice';
 import { OrderPlanogramView } from './components/OrderPlanogramView';
 import { OrderCatalogGridView } from './components/OrderCatalogGridView';
 import type { Order } from '@/shared/types';
+import { sameFamilyId } from '@/shared/utils/family-display';
 
 interface OrderDetailViewProps {
   orderId: string;
@@ -45,17 +53,6 @@ function looksLikeId(name: string): boolean {
   return /^[0-9a-f-]{36}$/i.test(name.trim()) || /^\d+$/.test(name.trim());
 }
 
-function sameFamilyId(a: string | undefined, b: string | undefined): boolean {
-  const aa = String(a || '').trim();
-  const bb = String(b || '').trim();
-  if (!aa || !bb) return false;
-  if (aa === bb) return true;
-  const an = Number(aa);
-  const bn = Number(bb);
-  if (Number.isNaN(an) || Number.isNaN(bn)) return false;
-  return an === bn;
-}
-
 export function OrderDetailView({ orderId, onClose, onOrderUpdated }: OrderDetailViewProps) {
   const { translate, locale } = useLanguage();
   const [order, setOrder] = useState<OrderForUI | null>(null);
@@ -64,6 +61,7 @@ export function OrderDetailView({ orderId, onClose, onOrderUpdated }: OrderDetai
     date: string;
     total: number;
     subtotal: number;
+    invoiceId?: string;
     storeId?: string;
     pod?: string;
     items: Array<{ qty: number; code: string; description: string; price: number; amount: number }>;
@@ -72,25 +70,55 @@ export function OrderDetailView({ orderId, onClose, onOrderUpdated }: OrderDetai
   const [storeNameDisplay, setStoreNameDisplay] = useState<string>('');
   const [storeAddressDisplay, setStoreAddressDisplay] = useState<string>('');
   const [storeCityDisplay, setStoreCityDisplay] = useState<string>('');
-  const [sellerNameDisplay, setSellerNameDisplay] = useState<string>('');
+  const [sellerPersonName, setSellerPersonName] = useState<string>('');
+  const [sellerRouteCode, setSellerRouteCode] = useState<string>('');
+  const [detailReload, setDetailReload] = useState(0);
+  const [emergencyPodFile, setEmergencyPodFile] = useState<File | null>(null);
+  const [emergencyPodPreview, setEmergencyPodPreview] = useState<string | null>(null);
+  const [emergencyPodUploading, setEmergencyPodUploading] = useState(false);
   const [activeTab, setActiveTab] = useState('summary');
   const [invoiceViewMode, setInvoiceViewMode] = useState<'product' | 'family'>('product');
   const [invoicePrintLayout, setInvoicePrintLayout] = useState<'normal' | 'ticket'>('normal');
-  const [storeHasPlanogram, setStoreHasPlanogram] = useState(true);
+  const [storeHasPlanogram, setStoreHasPlanogram] = useState<boolean | null>(null);
+  /** Id de factura resuelto al cargar (pedido + factura + lista), para POD aunque el pedido no traiga invoiceId. */
+  const [podInvoiceIdForUpload, setPodInvoiceIdForUpload] = useState('');
+  const emergencyPodInputRef = useRef<HTMLInputElement>(null);
   const [discrepancies, setDiscrepancies] = useState<OrderDiscrepancyItem[]>([]);
   const [discrepanciesLoaded, setDiscrepanciesLoaded] = useState(false);
-  const [allCategories, setAllCategories] = useState<Array<{ id: string; name: string; sku?: string; code?: string }>>([]);
+  const [allCategories, setAllCategories] = useState<
+    Array<{
+      id: string;
+      name: string;
+      sku?: string;
+      code?: string;
+      shortName?: string;
+      volume?: number;
+      unit?: string;
+    }>
+  >([]);
 
   useEffect(() => {
     const load = async () => {
+      setPodInvoiceIdForUpload('');
       const ord = await ordersApi.getOrderById(orderId);
       if (!ord) {
         setOrder(null);
         setInvoiceDisplay(null);
+        setPodInvoiceIdForUpload('');
         return;
       }
       const categoriesList = await categoriesApi.fetchAll();
-      setAllCategories(categoriesList.map((c) => ({ id: c.id, name: c.name, sku: c.sku, code: c.code })));
+      setAllCategories(
+        categoriesList.map((c) => ({
+          id: c.id,
+          name: c.name,
+          sku: c.sku,
+          code: String(c.code || c.familyCode || '').trim() || undefined,
+          shortName: (c.shortName || '').trim() || undefined,
+          volume: c.volume != null && Number.isFinite(Number(c.volume)) ? Number(c.volume) : undefined,
+          unit: (c.unit || '').trim() || undefined,
+        }))
+      );
       const categoryById = new Map<string, string>();
       categoriesList.forEach((c) => {
         categoryById.set(c.id, c.name);
@@ -184,17 +212,33 @@ export function OrderDetailView({ orderId, onClose, onOrderUpdated }: OrderDetai
               setStoreCityDisplay('');
             }
           } else {
+            setStoreHasPlanogram(null);
             resolvedStoreName = name || orderToSet.storeName || '—';
             setStoreNameDisplay(resolvedStoreName);
             setStoreAddressDisplay(orderToSet.storeAddress || '');
             setStoreCityDisplay('');
           }
         } catch {
+          setStoreHasPlanogram(null);
           setStoreNameDisplay(name || orderToSet.storeName || '—');
           setStoreAddressDisplay(orderToSet.storeAddress || '');
           setStoreCityDisplay('');
         }
       } else {
+        if (storeIdToResolve) {
+          try {
+            const store = await storesApi.getById(storeIdToResolve);
+            setStoreHasPlanogram(store ? store.hasPlanogram !== false : null);
+          } catch {
+            setStoreHasPlanogram(
+              String((orderToSet as any).planogramId ?? '').trim() ? true : null
+            );
+          }
+        } else {
+          setStoreHasPlanogram(
+            String((orderToSet as any).planogramId ?? '').trim() ? true : null
+          );
+        }
         resolvedStoreName = name || orderToSet.storeName || '—';
         resolvedStoreAddress = orderToSet.storeAddress || '';
         setStoreNameDisplay(resolvedStoreName);
@@ -202,36 +246,53 @@ export function OrderDetailView({ orderId, onClose, onOrderUpdated }: OrderDetai
         setStoreCityDisplay('');
       }
 
-      // Nombre del vendedor desde API
+      // Vendedor y código de ruta (UI: código resaltado, nombre entre paréntesis)
       if (orderToSet.salespersonId) {
         try {
           const user = await usersApi.getById(orderToSet.salespersonId);
           if (user) {
-            let label = `${user.firstName || ''} ${user.lastName || ''}`.trim();
-            if (!label) label = user.email || '—';
+            let person = `${user.firstName || ''} ${user.lastName || ''}`.trim();
+            if (!person) person = user.email || '—';
+            let routeCode = '';
             const routeId = String(user.salesRouteId || '').trim();
             if (routeId) {
               try {
                 const route = await salesRoutesApi.getById(routeId);
-                const code = route?.code?.trim();
-                if (code) label = `${label} (${code})`;
+                routeCode = (route?.code || '').trim();
               } catch {
                 /* sin catálogo de ruta */
               }
             }
-            setSellerNameDisplay(label);
+            setSellerPersonName(person);
+            setSellerRouteCode(routeCode);
           } else {
-            setSellerNameDisplay(orderToSet.salespersonId);
+            setSellerPersonName(orderToSet.salespersonId);
+            setSellerRouteCode('');
           }
         } catch {
-          setSellerNameDisplay(orderToSet.salespersonId);
+          setSellerPersonName(orderToSet.salespersonId);
+          setSellerRouteCode('');
         }
       } else {
-        setSellerNameDisplay('—');
+        setSellerPersonName('—');
+        setSellerRouteCode('');
       }
 
       const inv = await ordersApi.getInvoiceDisplayForOrder(orderId, orderToSet.invoiceId, orderToSet);
       setInvoiceDisplay(inv);
+      {
+        let pid = String(orderToSet.invoiceId ?? (orderToSet as any).InvoiceId ?? '').trim();
+        if (inv?.invoiceId) pid = String(inv.invoiceId).trim();
+        if (!pid) {
+          const a = await ordersApi.getInvoiceIdForOrder(orderId);
+          if (a != null) pid = String(a).trim();
+          else if (orderToSet.backendOrderId != null && String(orderToSet.backendOrderId).trim() !== '') {
+            const b = await ordersApi.getInvoiceIdForOrder(String(orderToSet.backendOrderId));
+            if (b != null) pid = String(b).trim();
+          }
+        }
+        setPodInvoiceIdForUpload(pid);
+      }
       // Si la tienda seguía vacía pero la factura tiene storeId, resolver nombre de tienda
       const invStoreId = (inv?.storeId != null && inv?.storeId !== '') ? String(inv.storeId).trim() : '';
       if (!resolvedStoreName && invStoreId) {
@@ -247,7 +308,7 @@ export function OrderDetailView({ orderId, onClose, onOrderUpdated }: OrderDetai
       }
     };
     load();
-  }, [orderId]);
+  }, [orderId, detailReload]);
 
   useEffect(() => {
     setPodImageError(false);
@@ -276,10 +337,7 @@ export function OrderDetailView({ orderId, onClose, onOrderUpdated }: OrderDetai
     let cancelled = false;
     setDiscrepanciesLoaded(false);
     (async () => {
-      let rows = await ordersApi.getOrderDiscrepancies(orderId);
-      if (!rows.length && (order as any).backendOrderId != null && String((order as any).backendOrderId) !== String(orderId)) {
-        rows = await ordersApi.getOrderDiscrepancies(String((order as any).backendOrderId));
-      }
+      const rows = await ordersApi.getOrderDiscrepancies(orderId, (order as any).backendOrderId);
       if (!cancelled) {
         setDiscrepancies(rows);
         setDiscrepanciesLoaded(true);
@@ -325,6 +383,14 @@ export function OrderDetailView({ orderId, onClose, onOrderUpdated }: OrderDetai
     setActiveTab('summary');
   }, [orderId]);
 
+  useEffect(() => {
+    setEmergencyPodFile(null);
+    setEmergencyPodPreview((prev) => {
+      if (prev) URL.revokeObjectURL(prev);
+      return null;
+    });
+  }, [orderId]);
+
   /**
    * Pedido faltante: comparar siempre pedido inicial (líneas del pedido) vs factura cuando haya líneas de factura.
    * Si no hay factura en pantalla, usar filas cortas del endpoint de discrepancias.
@@ -339,11 +405,11 @@ export function OrderDetailView({ orderId, onClose, onOrderUpdated }: OrderDetai
     }
 
     if (rows.length === 0) {
-      rows = discrepancies.filter(
-        (r) =>
-          r.orderedQty > 0 &&
-          (r.orderedQty > r.deliveredQty || (Number.isFinite(r.difference) && r.difference > 0))
-      );
+      rows = discrepancies.filter((r) => {
+        const diff = Number.isFinite(r.difference) ? r.difference : r.orderedQty - r.deliveredQty;
+        if (diff > 0) return true;
+        return r.orderedQty > 0 && r.deliveredQty < r.orderedQty;
+      });
     }
 
     return rows.map((r) => {
@@ -357,6 +423,22 @@ export function OrderDetailView({ orderId, onClose, onOrderUpdated }: OrderDetai
       return s ? { ...r, sku: s } : r;
     });
   }, [discrepancies, order?.items, invoiceDisplay?.items]);
+
+  const hasInvoiceLines = !!(invoiceDisplay?.items && invoiceDisplay.items.length > 0);
+  /** Pedido creado desde planograma (PWA): factura y vista planograma solo en este caso. */
+  const orderFromPlanogram = !!(String((order as any)?.planogramId ?? '').trim());
+  const isCatalogStore = storeHasPlanogram === false;
+  const catalogInvoicedItems = useMemo(() => {
+    if (!order?.items?.length || !invoiceDisplay?.items?.length) return null;
+    return applyInvoiceQtyToOrderItems(order.items as any[], invoiceDisplay.items);
+  }, [order?.items, invoiceDisplay?.items]);
+
+  useEffect(() => {
+    if (activeTab !== 'invoice-doc') return;
+    if (!showInvoicedTabs || isCatalogStore || !orderFromPlanogram) {
+      setActiveTab('planogram-invoice');
+    }
+  }, [activeTab, showInvoicedTabs, isCatalogStore, orderFromPlanogram]);
 
   if (!order) {
     return (
@@ -425,6 +507,8 @@ export function OrderDetailView({ orderId, onClose, onOrderUpdated }: OrderDetai
   };
   const podImageUrl = displayPod ? buildPodImageUrl(displayPod) : '';
   const isPodPath = displayPod && !displayPod.startsWith('data:') && !displayPod.startsWith('http');
+  /** Solo si hay ruta de imagen; `podUploaded` sin ruta no bloquea la carga de emergencia. */
+  const hasPodEvidence = !!displayPod;
 
   // Fecha factura como en PWA (en-US)
   const formatInvoiceDate = (d: string) => {
@@ -432,7 +516,79 @@ export function OrderDetailView({ orderId, onClose, onOrderUpdated }: OrderDetai
     return d.includes(',') ? d : new Date(d).toLocaleDateString(locale);
   };
 
-  const hasInvoiceLines = !!(invoiceDisplay?.items && invoiceDisplay.items.length > 0);
+  const rawInvoiceIdForPod =
+    String(podInvoiceIdForUpload || '').trim() ||
+    (order.invoiceId ??
+      (order as any)?.InvoiceId ??
+      invoiceDisplay?.invoiceId);
+  const invoiceIdForPod =
+    rawInvoiceIdForPod != null && String(rawInvoiceIdForPod).trim() !== ''
+      ? String(rawInvoiceIdForPod).trim()
+      : '';
+
+  const canShowEmergencyPodUpload = showInvoicedTabs && !hasPodEvidence && !!invoiceIdForPod;
+
+  const clearEmergencyPodSelection = () => {
+    setEmergencyPodPreview((prev) => {
+      if (prev) URL.revokeObjectURL(prev);
+      return null;
+    });
+    setEmergencyPodFile(null);
+    if (emergencyPodInputRef.current) emergencyPodInputRef.current.value = '';
+  };
+
+  const handleEmergencyPodFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setEmergencyPodPreview((prev) => {
+      if (prev) URL.revokeObjectURL(prev);
+      return URL.createObjectURL(file);
+    });
+    setEmergencyPodFile(file);
+    e.target.value = '';
+  };
+
+  const handleEmergencyPodSubmit = async () => {
+    if (!emergencyPodFile || !invoiceIdForPod) {
+      toast.error(translate('selectPODImage'));
+      return;
+    }
+    setEmergencyPodUploading(true);
+    try {
+      const { fileName } = await uploadImage(emergencyPodFile);
+      const fn = (fileName || '').trim();
+      if (!fn) {
+        toast.error(translate('podUploadFailed'));
+        return;
+      }
+      const patched = await ordersApi.uploadPODForInvoice({
+        invoiceId: invoiceIdForPod,
+        fileName: fn,
+      });
+      if (!patched) {
+        toast.error(translate('podUploadFailed'));
+        return;
+      }
+      const backendOrderId = String((order as any)?.backendOrderId ?? order?.id ?? orderId);
+      const statusOk = await ordersApi.updateOrderStatus(backendOrderId, true);
+      if (!statusOk) {
+        toast.warning(translate('podSavedStatusNotUpdated'));
+      } else {
+        toast.success(translate('podUploadedSuccess'));
+      }
+      clearEmergencyPodSelection();
+      setDetailReload((n) => n + 1);
+      onOrderUpdated?.();
+    } catch (err: unknown) {
+      const msg =
+        err && typeof err === 'object' && 'message' in err
+          ? String((err as { message?: string }).message || '')
+          : '';
+      toast.error(msg ? `${translate('podUploadFailed')}: ${msg}` : translate('podUploadFailed'));
+    } finally {
+      setEmergencyPodUploading(false);
+    }
+  };
 
   return (
     <div className="space-y-0">
@@ -465,6 +621,20 @@ export function OrderDetailView({ orderId, onClose, onOrderUpdated }: OrderDetai
             <div className={`inline-flex px-3 py-1 rounded-full text-sm font-semibold ${headerStatusClass}`}>
               {getStatusLabel(order.status)}
             </div>
+            {detailLifecycle === 'invoiced' ? (
+              <div className="mt-2 flex justify-end">
+                <Badge
+                  variant="secondary"
+                  className={
+                    hasPodEvidence
+                      ? 'bg-emerald-100 text-emerald-900 border border-emerald-200'
+                      : 'bg-amber-100 text-amber-900 border border-amber-200'
+                  }
+                >
+                  {hasPodEvidence ? translate('invoicedWithPodBadge') : translate('invoicedMissingPodBadge')}
+                </Badge>
+              </div>
+            ) : null}
           </div>
         </div>
       </div>
@@ -477,13 +647,17 @@ export function OrderDetailView({ orderId, onClose, onOrderUpdated }: OrderDetai
           </TabsTrigger>
           {showInvoicedTabs ? (
             <>
-              <TabsTrigger value="invoice-doc" className="flex items-center gap-2 px-4 sm:px-6 py-3 rounded-none border-b-2 border-transparent data-[state=active]:border-indigo-600 data-[state=active]:bg-white data-[state=active]:text-indigo-600">
-                <FileText className="h-4 w-4" />
-                {translate('invoiceLabel')}
-              </TabsTrigger>
+              {!isCatalogStore && orderFromPlanogram ? (
+                <TabsTrigger value="invoice-doc" className="flex items-center gap-2 px-4 sm:px-6 py-3 rounded-none border-b-2 border-transparent data-[state=active]:border-indigo-600 data-[state=active]:bg-white data-[state=active]:text-indigo-600">
+                  <FileText className="h-4 w-4" />
+                  {translate('invoiceLabel')}
+                </TabsTrigger>
+              ) : null}
               <TabsTrigger value="planogram-invoice" className="flex items-center gap-2 px-4 sm:px-6 py-3 rounded-none border-b-2 border-transparent data-[state=active]:border-indigo-600 data-[state=active]:bg-white data-[state=active]:text-indigo-600">
                 <Layout className="h-4 w-4" />
-                {translate('orderTabPlanogramInvoiced')}
+                {!isCatalogStore
+                  ? translate('orderTabPlanogramInvoiced')
+                  : translate('orderTabCatalogInvoiced')}
               </TabsTrigger>
               <TabsTrigger value="pod-only" className="flex items-center gap-2 px-4 sm:px-6 py-3 rounded-none border-b-2 border-transparent data-[state=active]:border-indigo-600 data-[state=active]:bg-white data-[state=active]:text-indigo-600">
                 <Package className="h-4 w-4" />
@@ -537,9 +711,20 @@ export function OrderDetailView({ orderId, onClose, onOrderUpdated }: OrderDetai
                   </div>
                 </div>
                 {/* 4. Vendedor */}
-                <div className="flex justify-between items-center">
-                  <span className="text-gray-600 text-sm">{translate('sellerLabel')}:</span>
-                  <span className="font-medium text-gray-900">{sellerNameDisplay || '—'}</span>
+                <div className="flex justify-between items-center gap-2">
+                  <span className="text-gray-600 text-sm shrink-0">{translate('sellerLabel')}:</span>
+                  <span className="font-medium text-gray-900 text-right min-w-0">
+                    {sellerRouteCode ? (
+                      <>
+                        <span className="font-bold text-indigo-700 tracking-wide">{sellerRouteCode}</span>
+                        {sellerPersonName && sellerPersonName !== '—' ? (
+                          <span className="text-gray-900 font-normal"> ({sellerPersonName})</span>
+                        ) : null}
+                      </>
+                    ) : (
+                      sellerPersonName || '—'
+                    )}
+                  </span>
                 </div>
                 {((order as any).deliveredAt || order.deliveryDate) && (
                   <div className="flex justify-between items-center pt-2 border-t">
@@ -650,7 +835,7 @@ export function OrderDetailView({ orderId, onClose, onOrderUpdated }: OrderDetai
             </div>
           )}
           <div id="admin-order-initial-print-root">
-          {storeHasPlanogram ? (
+          {!isCatalogStore ? (
             <OrderPlanogramView
               quantitySource="order"
               order={
@@ -683,6 +868,7 @@ export function OrderDetailView({ orderId, onClose, onOrderUpdated }: OrderDetai
             />
           ) : (
             <OrderCatalogGridView
+              useAllActiveProducts
               order={
                 {
                   id: order.id,
@@ -704,6 +890,7 @@ export function OrderDetailView({ orderId, onClose, onOrderUpdated }: OrderDetai
 
         {showInvoicedTabs ? (
         <>
+        {!isCatalogStore && orderFromPlanogram ? (
         <TabsContent value="invoice-doc" className="p-6 mt-0 space-y-6" id="order-detail-billing-print">
           {(() => {
             const invFromApi = invoiceDisplay?.items?.length ? invoiceDisplay : null;
@@ -771,7 +958,7 @@ export function OrderDetailView({ orderId, onClose, onOrderUpdated }: OrderDetai
               return false;
             };
             const invoiceItems = toInvoiceRows.map((row) => {
-              const matched = order.items.find((item: any) => invoiceRowMatchesOrderItem(row, item));
+              const matched = order.items.find((item: any) => invoiceRowMatchesOrderItem(row, item)) as any;
               const familyId = String(
                 matched?.familyId ?? matched?.FamilyId ?? matched?.categoryId ?? matched?.CategoryId ?? ''
               ).trim();
@@ -782,6 +969,10 @@ export function OrderDetailView({ orderId, onClose, onOrderUpdated }: OrderDetai
               const familyName = String(fam?.name || matched?.category || '').trim() || undefined;
               const familyCode = String(fam?.code || '').trim() || undefined;
               const familySku = String(fam?.sku || '').trim() || undefined;
+              const familyShortName = String(fam?.shortName || '').trim() || undefined;
+              const familyVolume =
+                fam?.volume != null && Number.isFinite(Number(fam.volume)) ? Number(fam.volume) : undefined;
+              const familyUnit = fam?.unit?.trim() || undefined;
               return {
                 qty: row.qty,
                 code: row.sku,
@@ -791,6 +982,9 @@ export function OrderDetailView({ orderId, onClose, onOrderUpdated }: OrderDetai
                 familyName,
                 familyCode,
                 familySku,
+                familyShortName,
+                familyVolume,
+                familyUnit,
               };
             });
             return (
@@ -858,7 +1052,9 @@ export function OrderDetailView({ orderId, onClose, onOrderUpdated }: OrderDetai
                   <Invoice
                     invoiceNumber={String(inv.invoiceNumber)}
                     date={formatInvoiceDate(invoiceDateStr)}
-                    vendorName={sellerNameDisplay}
+                    vendorName={sellerPersonName}
+                    vendorRouteCode={sellerRouteCode}
+                    vendorPersonName={sellerPersonName}
                     storeName={storeNameDisplay || order.storeName || '—'}
                     storeAddress={storeAddressDisplay || order.storeAddress || ''}
                     items={invoiceItems}
@@ -871,6 +1067,7 @@ export function OrderDetailView({ orderId, onClose, onOrderUpdated }: OrderDetai
             );
           })()}
         </TabsContent>
+        ) : null}
 
         <TabsContent value="planogram-invoice" className="p-6 mt-0 space-y-6">
           <div className="flex flex-wrap gap-2 print:hidden">
@@ -893,7 +1090,7 @@ export function OrderDetailView({ orderId, onClose, onOrderUpdated }: OrderDetai
               <AlertDescription className="text-amber-900 ml-2">{translate('noInvoiceYetAdmin')}</AlertDescription>
             </Alert>
           ) : null}
-          {storeHasPlanogram && hasInvoiceLines ? (
+          {hasInvoiceLines && !isCatalogStore ? (
             <div id="admin-planogram-print-root" className="space-y-2">
               <h3 className="text-sm font-semibold text-slate-800 print:hidden">{translate('planogram')}</h3>
               <OrderPlanogramView
@@ -927,39 +1124,79 @@ export function OrderDetailView({ orderId, onClose, onOrderUpdated }: OrderDetai
                 }
               />
             </div>
-          ) : (
-            <p className="text-sm text-slate-500">{translate('orderNoPlanogram')}</p>
-          )}
+          ) : hasInvoiceLines && catalogInvoicedItems?.length ? (
+            <div id="admin-planogram-print-root" className="space-y-2">
+              <OrderCatalogGridView
+                useAllActiveProducts
+                order={
+                  {
+                    id: order.id,
+                    items: catalogInvoicedItems.map((it: any) => ({
+                      id: it.id ?? '',
+                      orderId: order.id,
+                      productId: it.productId ?? it.sku ?? '',
+                      quantity: it.quantity ?? it.toOrder ?? 0,
+                      productName: it.productName,
+                      price: Number(it.price) || 0,
+                      sku: it.sku,
+                    })),
+                  } as any
+                }
+              />
+            </div>
+          ) : null}
         </TabsContent>
 
-        <TabsContent value="pod-only" className="p-6 mt-0 space-y-6">
-          <Card className="border-slate-200 overflow-hidden">
-            <CardHeader className="px-4 pt-4 pb-2">
-              <CardTitle className="text-sm">{translate('podTitle')}</CardTitle>
+        <TabsContent value="pod-only" className="p-6 mt-0">
+          <Card>
+            <CardHeader className="border-b border-gray-100 bg-gray-50/90 py-4">
+              <CardTitle className="text-base">{translate('podTitle')}</CardTitle>
+              <CardDescription>
+                {displayPod
+                  ? translate('receiptRegistered')
+                  : canShowEmergencyPodUpload
+                    ? translate('productImageHint')
+                    : !invoiceIdForPod
+                      ? translate('podEmergencyInvoiceMissing')
+                      : translate('noPODRegistered')}
+              </CardDescription>
             </CardHeader>
-            <CardContent className="px-4 pb-4 pt-0">
+            <CardContent
+              className="pt-6 space-y-6"
+              onClick={(e) => e.stopPropagation()}
+              onPointerDown={(e) => e.stopPropagation()}
+            >
               {displayPod ? (
-                <div className="flex flex-col gap-3">
-                  <div className="flex items-center gap-2">
+                <div className="space-y-4">
+                  <div className="flex items-center gap-2 rounded-lg border border-green-200 bg-green-50 px-4 py-3">
                     <CheckCircle className="h-5 w-5 text-green-600 shrink-0" />
-                    <p className="text-xs text-slate-500">{translate('receiptRegistered')}</p>
+                    <p className="text-sm text-green-900">{translate('receiptRegistered')}</p>
                   </div>
-                  {isPodPath && <p className="text-xs text-slate-500 font-mono break-all">{displayPod}</p>}
-                  {podImageUrl && (
-                    <div className="relative w-full max-w-2xl mx-auto rounded-lg border border-slate-200 overflow-hidden bg-slate-50 min-h-[280px] flex items-center justify-center p-2">
+                  {isPodPath ? (
+                    <p className="text-xs text-gray-500 font-mono break-all">{displayPod}</p>
+                  ) : null}
+                  {podImageUrl ? (
+                    <div className="relative w-full max-w-2xl rounded-lg border-2 border-dashed border-gray-200 bg-gray-50 overflow-hidden min-h-[240px] flex items-center justify-center p-3">
                       {podImageError ? (
                         <div className="flex flex-col items-center justify-center py-8 px-4 text-center">
-                          <p className="text-sm text-amber-700 mb-1">{translate('imageLoadError')}</p>
-                          <p className="text-xs text-slate-500 mb-2">{translate('pathLabel')}: {displayPod}</p>
-                          <a href={podImageUrl} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-600 underline break-all">{translate('openLink')}</a>
+                          <p className="text-sm text-amber-800 mb-1">{translate('imageLoadError')}</p>
+                          <p className="text-xs text-gray-500 mb-2">{translate('pathLabel')}: {displayPod}</p>
+                          <a
+                            href={podImageUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-sm text-indigo-600 hover:text-indigo-800 underline break-all"
+                          >
+                            {translate('openLink')}
+                          </a>
                         </div>
                       ) : (
                         <img
                           key={podImageUrl}
                           src={podImageUrl}
                           alt={translate('podTitle')}
-                          className="w-full max-w-full max-h-[520px] object-contain"
-                          style={{ minHeight: '280px' }}
+                          className="w-full max-w-full max-h-[480px] object-contain"
+                          style={{ minHeight: '240px' }}
                           referrerPolicy="no-referrer"
                           loading="lazy"
                           decoding="async"
@@ -968,10 +1205,97 @@ export function OrderDetailView({ orderId, onClose, onOrderUpdated }: OrderDetai
                         />
                       )}
                     </div>
-                  )}
+                  ) : null}
                 </div>
+              ) : canShowEmergencyPodUpload ? (
+                <div className="space-y-6">
+                  <div className="space-y-3">
+                    <Label className="text-gray-900">{translate('podEmergencySelectImage')}</Label>
+                    <input
+                      ref={emergencyPodInputRef}
+                      type="file"
+                      accept="image/*,.heic,.heif"
+                      className="hidden"
+                      onChange={handleEmergencyPodFileChange}
+                    />
+                    <div className="flex flex-col sm:flex-row sm:items-start gap-4">
+                      <div className="shrink-0 w-full sm:w-40 aspect-square max-w-[11rem] mx-auto sm:mx-0 rounded-lg border-2 border-dashed border-gray-200 bg-gray-50 overflow-hidden">
+                        {emergencyPodPreview ? (
+                          <div className="relative size-full min-h-[10rem]">
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img
+                              src={emergencyPodPreview}
+                              alt=""
+                              className="absolute inset-0 size-full object-cover"
+                            />
+                            {emergencyPodUploading ? (
+                              <div className="absolute inset-0 bg-black/40 flex items-center justify-center">
+                                <span className="text-white text-sm font-medium">{translate('uploading')}</span>
+                              </div>
+                            ) : null}
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="icon"
+                              className="absolute top-1.5 right-1.5 h-8 w-8 rounded-full bg-white shadow border-gray-300 hover:bg-gray-100"
+                              onClick={clearEmergencyPodSelection}
+                              disabled={emergencyPodUploading}
+                              title={translate('cancel')}
+                            >
+                              <X className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        ) : (
+                          <div className="flex flex-col items-center justify-center text-center p-4 h-full min-h-[10rem] text-gray-400">
+                            <ImagePlus className="h-10 w-10 mb-2 opacity-60" />
+                            <span className="text-xs">{translate('noImageSelected')}</span>
+                          </div>
+                        )}
+                      </div>
+                      <div className="flex flex-col gap-3 flex-1 min-w-0">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="w-fit"
+                          onClick={() => emergencyPodInputRef.current?.click()}
+                          disabled={emergencyPodUploading}
+                        >
+                          <ImagePlus className="h-4 w-4 mr-2" />
+                          {emergencyPodFile ? translate('changeImage') : translate('selectImage')}
+                        </Button>
+                        <p className="text-xs text-gray-500">{translate('productImageHint')}</p>
+                        {emergencyPodFile && !emergencyPodUploading ? (
+                          <p className="text-xs text-green-700 font-medium truncate" title={emergencyPodFile.name}>
+                            {emergencyPodFile.name}
+                          </p>
+                        ) : null}
+                        <Button
+                          type="button"
+                          size="sm"
+                          className="w-fit bg-indigo-600 hover:bg-indigo-700"
+                          disabled={!emergencyPodFile || emergencyPodUploading}
+                          onClick={() => void handleEmergencyPodSubmit()}
+                        >
+                          <Save className="h-4 w-4 mr-2" />
+                          {emergencyPodUploading ? translate('uploading') : translate('podEmergencySubmit')}
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                  <Alert className="border-amber-200 bg-amber-50 text-amber-950">
+                    <AlertCircle className="h-4 w-4 text-amber-700" />
+                    <AlertDescription className="text-amber-950 ml-2 space-y-1.5 [&_p]:text-sm">
+                      <p className="font-semibold text-amber-950">{translate('podEmergencyUploadTitle')}</p>
+                      <p className="text-amber-900/95">{translate('podAdminWarning')}</p>
+                      <p className="text-amber-900/90 text-xs">{translate('podEmergencyUploadDesc')}</p>
+                    </AlertDescription>
+                  </Alert>
+                </div>
+              ) : !invoiceIdForPod ? (
+                <p className="text-sm text-gray-600">{translate('podEmergencyInvoiceMissing')}</p>
               ) : (
-                <p className="text-xs text-slate-500">{translate('noPODRegistered')}</p>
+                <p className="text-sm text-gray-600">{translate('noPODRegistered')}</p>
               )}
             </CardContent>
           </Card>

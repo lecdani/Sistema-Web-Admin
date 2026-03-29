@@ -109,7 +109,9 @@ export const API_CONFIG = {
       CREATE: '/distributions/distributions',
       UPDATE: '/distributions/distribution/{id}',
       DELETE: '/distributions/distributions/{id}',
-      DEACTIVATE: '/distributions/distributions/desactivate/{id}'
+      /** Algunos backends solo exponen la ruta plural; otros la singular (como UPDATE). */
+      DEACTIVATE: '/distributions/distributions/desactivate/{id}',
+      DEACTIVATE_SINGULAR: '/distributions/distribution/desactivate/{id}'
     },
     IMAGES: {
       UPLOAD: '/images/upload',
@@ -252,14 +254,22 @@ export class ApiClient {
         const isOrderDiscrepanciesEndpoint =
           endpoint.includes('/orders/orders/dicrepancies/') ||
           endpoint.includes('/orders/dicrepancies/') ||
+          endpoint.includes('/orders/orders/discrepancies/') ||
           endpoint.includes('/orders/discrepancies/');
+        /** Rutas de baja de distribución: a veces no existen y el front hace fallback por PUT update. */
+        const isDistributionDesactivate404 =
+          response.status === 404 &&
+          endpoint.includes('/distributions/') &&
+          /desactiv|deactiv/i.test(endpoint);
+
         const isExpected404 =
           response.status === 404 &&
           (isProfileEndpoint ||
             endpoint.startsWith('/users/users/') ||
             isHistPriceLatestEndpoint ||
             isOrdersByUserEndpoint ||
-            isOrderDiscrepanciesEndpoint);
+            isOrderDiscrepanciesEndpoint ||
+            isDistributionDesactivate404);
 
         if (!isExpected404 && !isProfileEndpoint && !isChangePasswordEndpoint) {
           console.error(`[ApiClient] Error en respuesta: ${response.status}`, data);

@@ -56,6 +56,7 @@ import { usersApi } from '@/shared/services/users-api';
 import { citiesApi } from '@/shared/services/cities-api';
 import { storesApi } from '@/shared/services/stores-api';
 import { assignmentsApi } from '@/shared/services/assignments-api';
+import { fetchAllOrderSummaries } from '@/shared/services/orders-api';
 import type { Assignment, City, SalesRoute, Store, User } from '@/shared/types';
 import { assignmentsForRoute, storeAssignedToOtherRoute } from '@/shared/utils/assignment-match';
 
@@ -89,6 +90,8 @@ export function SalesRouteManagement({ onBack }: SalesRouteManagementProps) {
   const [assignments, setAssignments] = useState<Assignment[]>([]);
   const [storesLoading, setStoresLoading] = useState(false);
   const [selectedStoreToAdd, setSelectedStoreToAdd] = useState('');
+  /** Ids de ruta (normalizados) que tienen al menos un pedido (por FK en pedido o por vendedor de la ruta). */
+  const [routeIdsWithOrders, setRouteIdsWithOrders] = useState<Set<string>>(() => new Set());
 
   useEffect(() => {
     void loadInitial();
@@ -122,20 +125,40 @@ export function SalesRouteManagement({ onBack }: SalesRouteManagementProps) {
   const loadInitial = async () => {
     setLoading(true);
     try {
-      const [rList, cList, uList] = await Promise.all([
+      const [rList, cList, uList, orderSummaries] = await Promise.all([
         salesRoutesApi.fetchAll(),
         citiesApi.fetchAll(),
         usersApi.fetchAll(),
+        fetchAllOrderSummaries(),
       ]);
       setRoutes(rList);
       setCities(cList);
       setAllUsers(uList);
+      const normKey = (id: string | undefined) => String(id ?? '').trim().toLowerCase();
+      const sellerIdToRouteId = new Map<string, string>();
+      for (const u of uList) {
+        if (u.role === 'user' && u.salesRouteId) {
+          sellerIdToRouteId.set(normKey(String(u.id)), normKey(String(u.salesRouteId)));
+        }
+      }
+      const withOrders = new Set<string>();
+      for (const o of orderSummaries) {
+        const direct = o.salesRouteId ? normKey(String(o.salesRouteId)) : '';
+        if (direct) withOrders.add(direct);
+        const sp = o.salespersonId ? normKey(String(o.salespersonId)) : '';
+        if (sp) {
+          const rr = sellerIdToRouteId.get(sp);
+          if (rr) withOrders.add(rr);
+        }
+      }
+      setRouteIdsWithOrders(withOrders);
     } catch (e) {
       console.error(e);
       toast.error(translate('errorLoadSalesRoutes'));
       setRoutes([]);
       setCities([]);
       setAllUsers([]);
+      setRouteIdsWithOrders(new Set());
     } finally {
       setLoading(false);
     }
@@ -150,6 +173,9 @@ export function SalesRouteManagement({ onBack }: SalesRouteManagementProps) {
       (u) => u.role === 'user' && routeIdNorm(u.salesRouteId) === rid
     );
   };
+
+  const routeHasAssociatedOrders = (routeId: string) =>
+    routeIdsWithOrders.has(routeIdNorm(routeId));
 
   const formatAssignedSellersCell = (routeId: string) => {
     const sellers = sellersAssignedToRoute(routeId);
@@ -499,28 +525,30 @@ export function SalesRouteManagement({ onBack }: SalesRouteManagementProps) {
                         <Button size="sm" variant="outline" onClick={() => void handleToggle(r)} title={translate('status')}>
                           {r.isActive ? <PowerOff className="h-4 w-4" /> : <Power className="h-4 w-4" />}
                         </Button>
-                        <AlertDialog>
-                          <AlertDialogTrigger asChild>
-                            <Button size="sm" variant="outline" className="text-red-600 hover:text-red-700" title={translate('delete')}>
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
-                          </AlertDialogTrigger>
-                          <AlertDialogContent>
-                            <AlertDialogHeader>
-                              <AlertDialogTitle>{translate('confirmDeleteSalesRoute')}</AlertDialogTitle>
-                              <AlertDialogDescription>{translate('confirmDeleteSalesRouteDesc')}</AlertDialogDescription>
-                            </AlertDialogHeader>
-                            <AlertDialogFooter>
-                              <AlertDialogCancel>{translate('cancel')}</AlertDialogCancel>
-                              <AlertDialogAction
-                                className="bg-red-600 hover:bg-red-700"
-                                onClick={() => void handleDelete(r)}
-                              >
-                                {translate('delete')}
-                              </AlertDialogAction>
-                            </AlertDialogFooter>
-                          </AlertDialogContent>
-                        </AlertDialog>
+                        {!routeHasAssociatedOrders(r.id) ? (
+                          <AlertDialog>
+                            <AlertDialogTrigger asChild>
+                              <Button size="sm" variant="outline" className="text-red-600 hover:text-red-700" title={translate('delete')}>
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </AlertDialogTrigger>
+                            <AlertDialogContent>
+                              <AlertDialogHeader>
+                                <AlertDialogTitle>{translate('confirmDeleteSalesRoute')}</AlertDialogTitle>
+                                <AlertDialogDescription>{translate('confirmDeleteSalesRouteDesc')}</AlertDialogDescription>
+                              </AlertDialogHeader>
+                              <AlertDialogFooter>
+                                <AlertDialogCancel>{translate('cancel')}</AlertDialogCancel>
+                                <AlertDialogAction
+                                  className="bg-red-600 hover:bg-red-700"
+                                  onClick={() => void handleDelete(r)}
+                                >
+                                  {translate('delete')}
+                                </AlertDialogAction>
+                              </AlertDialogFooter>
+                            </AlertDialogContent>
+                          </AlertDialog>
+                        ) : null}
                       </div>
                     </td>
                   </tr>

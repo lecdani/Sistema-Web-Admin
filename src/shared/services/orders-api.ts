@@ -27,6 +27,8 @@ export interface AdminOrderSummary {
   po?: string;
   /** ID del planograma asociado al pedido (tabla orders.planogram_id). */
   planogramId?: string;
+  /** FK ruta de ventas en el pedido (si el backend la expone). */
+  salesRouteId?: string;
 }
 
 export interface OrderDiscrepancyItem {
@@ -71,7 +73,17 @@ export function computeOrderInvoiceShortfall(
     deliveredByCode.set(k, (deliveredByCode.get(k) ?? 0) + q);
   }
 
-  const out: OrderDiscrepancyItem[] = [];
+  const groupedOrdered = new Map<
+    string,
+    {
+      productId: string;
+      sku?: string;
+      productName?: string;
+      orderedQty: number;
+      matchCodes: string[];
+    }
+  >();
+
   for (const it of orderItems) {
     /** Cantidades del pedido inicial (líneas del pedido al crearse / order details). */
     const ordered =
@@ -105,27 +117,91 @@ export function computeOrderInvoiceShortfall(
       String((it as any).barcode ?? (it as any).Barcode ?? '').trim(),
     ].filter(Boolean);
 
-    let delivered = 0;
-    for (const raw of extraCodes) {
-      const k = normDiscrepancyKey(raw);
-      if (!k) continue;
-      const v = deliveredByCode.get(k) ?? 0;
-      if (v > delivered) delivered = v;
-    }
+    const normPid = normDiscrepancyKey(pid);
+    const normSku = normDiscrepancyKey(sku);
+    const groupKey =
+      normPid ||
+      normSku ||
+      normDiscrepancyKey(String((it as any).productName ?? '').trim()) ||
+      `row-${groupedOrdered.size}`;
 
-    if (ordered > delivered) {
-      const diff = ordered - delivered;
-      out.push({
+    if (!groupedOrdered.has(groupKey)) {
+      groupedOrdered.set(groupKey, {
         productId: pid,
         sku: sku || undefined,
         productName: String((it as any).productName ?? '').trim() || undefined,
-        orderedQty: ordered,
+        orderedQty: 0,
+        matchCodes: [],
+      });
+    }
+    const row = groupedOrdered.get(groupKey)!;
+    row.orderedQty += ordered;
+    if (!row.productId && pid) row.productId = pid;
+    if (!row.sku && sku) row.sku = sku;
+    if (!row.productName) {
+      row.productName = String((it as any).productName ?? '').trim() || undefined;
+    }
+    for (const raw of extraCodes) {
+      const k = normDiscrepancyKey(raw);
+      if (k && !row.matchCodes.includes(k)) row.matchCodes.push(k);
+    }
+  }
+
+  const out: OrderDiscrepancyItem[] = [];
+  for (const row of groupedOrdered.values()) {
+    let delivered = 0;
+    for (const k of row.matchCodes) {
+      const v = deliveredByCode.get(k) ?? 0;
+      if (v > delivered) delivered = v;
+    }
+    if (row.orderedQty > delivered) {
+      const diff = row.orderedQty - delivered;
+      out.push({
+        productId: row.productId,
+        sku: row.sku,
+        productName: row.productName,
+        orderedQty: row.orderedQty,
         deliveredQty: delivered,
         difference: diff,
       });
     }
   }
+
   return out;
+}
+
+/**
+ * Misma matriz 10×10 catálogo (admin/PWA): copia ítems del pedido con cantidades
+ * sustituidas por las de la factura cuando el código/SKU/productId coincide con la línea.
+ */
+export function applyInvoiceQtyToOrderItems(
+  orderItems: any[],
+  invoiceLines: Array<{ qty: number; code: string }> | null | undefined
+): any[] {
+  if (!Array.isArray(orderItems) || orderItems.length === 0) return [];
+  if (!invoiceLines?.length) {
+    return orderItems.map((it) => ({ ...it }));
+  }
+  return orderItems.map((it: any) => {
+    const sku = String(it.sku ?? it.Sku ?? it.code ?? it.Code ?? '').trim();
+    const pid = String(it.productId ?? it.ProductId ?? '').trim();
+    const keySet = new Set<string>();
+    for (const raw of [sku, pid]) {
+      const k = normDiscrepancyKey(raw);
+      if (k) keySet.add(k);
+    }
+    let sum = 0;
+    for (const line of invoiceLines) {
+      const c = normDiscrepancyKey(line.code || '');
+      if (!c) continue;
+      if (keySet.has(c)) sum += Number(line.qty) || 0;
+    }
+    return {
+      ...it,
+      quantity: sum,
+      toOrder: sum,
+    };
+  });
 }
 
 function mapRawDiscrepancyRow(r: any): OrderDiscrepancyItem {
@@ -156,8 +232,14 @@ function mapRawDiscrepancyRow(r: any): OrderDiscrepancyItem {
       row?.QtyOrdered ??
       row?.requested ??
       row?.Requested ??
+      row?.requestedQuantity ??
+      row?.RequestedQuantity ??
       row?.orderQuantity ??
       row?.OrderQuantity ??
+      row?.orderDetailQuantity ??
+      row?.OrderDetailQuantity ??
+      row?.cantidadPedido ??
+      row?.CantidadPedido ??
       0
   );
   let deliveredQty = Number(
@@ -176,6 +258,14 @@ function mapRawDiscrepancyRow(r: any): OrderDiscrepancyItem {
       row?.InvoicedQty ??
       row?.received ??
       row?.Received ??
+      row?.quantityInvoiced ??
+      row?.QuantityInvoiced ??
+      row?.invoiceQuantity ??
+      row?.InvoiceQuantity ??
+      row?.cantidadFacturada ??
+      row?.CantidadFacturada ??
+      row?.fulfilledQuantity ??
+      row?.FulfilledQuantity ??
       0
   );
 
@@ -232,6 +322,76 @@ function mapRawDiscrepancyRow(r: any): OrderDiscrepancyItem {
     deliveredQty,
     difference,
   };
+}
+
+/** Lista de filas dentro de la respuesta GET …/dicrepancies/{id} (nombres variables en .NET / typos). */
+function extractDiscrepancyListFromRaw(raw: any): any[] {
+  if (raw == null) return [];
+  if (Array.isArray(raw)) return raw;
+
+  const direct =
+    raw?.dicrepancies ??
+    raw?.Dicrepancies ??
+    raw?.dicrepancyList ??
+    raw?.DicrepancyList ??
+    raw?.results ??
+    raw?.Results ??
+    raw?.data ??
+    raw?.Data ??
+    raw?.items ??
+    raw?.Items ??
+    raw?.value ??
+    raw?.Value ??
+    raw?.discrepancies ??
+    raw?.Discrepancies ??
+    raw?.orderDiscrepancies ??
+    raw?.OrderDiscrepancies ??
+    raw?.orderDiscrepancyDetails ??
+    raw?.OrderDiscrepancyDetails ??
+    raw?.lines ??
+    raw?.Lines ??
+    raw?.details ??
+    raw?.Details;
+
+  if (Array.isArray(direct)) return direct;
+
+  const nested =
+    raw?.order?.dicrepancies ??
+    raw?.Order?.Dicrepancies ??
+    raw?.order?.discrepancies ??
+    raw?.Order?.Discrepancies ??
+    raw?.order?.orderDiscrepancies ??
+    raw?.Order?.OrderDiscrepancies;
+  if (Array.isArray(nested) && nested.length) return nested;
+
+  const extracted = extractFirstArray(raw);
+  return Array.isArray(extracted) ? extracted : [];
+}
+
+async function fetchDiscrepanciesForSingleOrderId(orderId: string): Promise<OrderDiscrepancyItem[]> {
+  const id = String(orderId || '').trim();
+  if (!id) return [];
+
+  const paths = [
+    `/orders/orders/dicrepancies/${encodeURIComponent(id)}`,
+    `/orders/dicrepancies/${encodeURIComponent(id)}`,
+    `/orders/orders/discrepancies/${encodeURIComponent(id)}`,
+    `/orders/discrepancies/${encodeURIComponent(id)}`,
+  ];
+
+  let raw: any = null;
+  for (const path of paths) {
+    raw = await safeGet<any>(path);
+    if (raw != null) break;
+  }
+  if (raw == null) return [];
+
+  const list = extractDiscrepancyListFromRaw(raw);
+  if (!Array.isArray(list) || list.length === 0) return [];
+
+  return list
+    .map((r: any) => mapRawDiscrepancyRow(r))
+    .filter((r) => String(r.productId || '').trim() || String(r.sku || '').trim());
 }
 
 // Igual que PWA: list?.data ?? list?.items ?? []
@@ -415,6 +575,15 @@ function mapRawOrderToAdmin(raw: any): AdminOrderSummary | null {
       (raw?.planogramId ?? raw?.planogram_id ?? '').trim()
         ? String(raw?.planogramId ?? raw?.planogram_id ?? '').trim()
         : undefined,
+    salesRouteId: (() => {
+      const v =
+        raw?.salesRouteId ??
+        raw?.SalesRouteId ??
+        raw?.sales_route_id ??
+        raw?.Sales_Route_Id;
+      const s = v != null && String(v).trim() !== '' ? String(v).trim() : '';
+      return s || undefined;
+    })(),
   };
 }
 
@@ -847,6 +1016,33 @@ function getPodFromInvoice(inv: any): string {
   return '';
 }
 
+function getPodIdFromInvoice(inv: any): string {
+  if (inv == null) return '';
+  const layers = peelInvoiceLayers(inv);
+  const seen = new Set<any>();
+  for (const root of layers) {
+    if (root == null || typeof root !== 'object' || seen.has(root)) continue;
+    seen.add(root);
+    const v =
+      (root as any).podId ??
+      (root as any).PodId ??
+      (root as any).pod_id ??
+      (root as any).POD_ID ??
+      (root as any).podID;
+    if (v == null || v === '') continue;
+    const s = String(v).trim();
+    if (!s || s === '0' || /^null$/i.test(s) || /^undefined$/i.test(s)) continue;
+    return s;
+  }
+  return '';
+}
+
+function invoiceHasPodEvidence(inv: any): boolean {
+  if (!inv) return false;
+  if (getPodIdFromInvoice(inv)) return true;
+  return !!getPodFromInvoice(inv)?.trim();
+}
+
 // Formato de pedido para la UI (muy similar al usado en la PWA)
 export interface OrderForUI {
   id: string;
@@ -883,6 +1079,8 @@ export interface OrderForUI {
   po?: string;
   /** ID del planograma asociado al pedido (tabla orders.planogram_id). */
   planogramId?: string;
+  /** FK ruta de ventas en el pedido (si el backend la expone). */
+  salesRouteId?: string;
 }
 
 function detailQuantity(d: any): number {
@@ -1284,6 +1482,15 @@ function mapRawOrderToUI(raw: any, details: any[] = []): OrderForUI {
       raw?.invoice?.id ??
       raw?.Invoice?.Id,
     salespersonId: salespersonIdRaw != null ? String(salespersonIdRaw) : undefined,
+    salesRouteId: (() => {
+      const v =
+        raw?.salesRouteId ??
+        raw?.SalesRouteId ??
+        raw?.sales_route_id ??
+        raw?.Sales_Route_Id;
+      const s = v != null && String(v).trim() !== '' ? String(v).trim() : '';
+      return s || undefined;
+    })(),
   };
 }
 
@@ -1506,11 +1713,11 @@ export const ordersApi = {
     if (result?.invoiceId) invoice = await getInvoiceById(String(result.invoiceId));
     if (!invoice && result) invoice = await ordersApi.getInvoiceForOrder(orderId);
     if (invoice) {
+      result.podUploaded = invoiceHasPodEvidence(invoice);
       const podText = getPodFromInvoice(invoice);
       if (podText) {
         result.podImageUrl = result.podImageUrl || podText;
         result.podFileName = result.podFileName || podText;
-        if (!result.podUploaded) result.podUploaded = true;
       }
       if (result.total <= 0 || result.subtotal <= 0) {
         const layers = peelInvoiceLayers(invoice);
@@ -1645,6 +1852,8 @@ export const ordersApi = {
     invoiceNumber: string;
     date: string;
     total: number;
+    /** Id real de la factura en backend (POD, enlaces). */
+    invoiceId: string;
     storeId?: string;
     pod?: string;
     items: Array<{
@@ -1848,6 +2057,7 @@ export const ordersApi = {
       date: dateOut,
       total: total > 0 ? total : totalFromDetails,
       subtotal: subtotal > 0 ? subtotal : totalFromDetails,
+      invoiceId: invId,
       storeId: invoice?.storeId ?? invoice?.StoreId ?? order?.storeId,
       items,
       pod: pod || undefined,
@@ -1855,61 +2065,34 @@ export const ordersApi = {
   },
 
   /**
-   * Discrepancias pedido vs factura.
-   * Prueba GET /orders/orders/dicrepancies/{id}, /orders/dicrepancies/{id} (typo histórico) y /orders/discrepancies/{id}.
+   * Discrepancias pedido vs factura (GET /orders/orders/dicrepancies/{id}, etc.).
+   * Combina resultados si `alternateOrderId` difiere (p. ej. id de ruta vs orderId del backend).
    */
-  async getOrderDiscrepancies(orderId: string): Promise<OrderDiscrepancyItem[]> {
-    const id = String(orderId || '').trim();
-    if (!id) return [];
+  async getOrderDiscrepancies(
+    orderId: string,
+    alternateOrderId?: string | number | null
+  ): Promise<OrderDiscrepancyItem[]> {
+    const primary = String(orderId || '').trim();
+    const alt =
+      alternateOrderId != null && String(alternateOrderId).trim() !== ''
+        ? String(alternateOrderId).trim()
+        : '';
+    const seen = new Set<string>();
+    const out: OrderDiscrepancyItem[] = [];
 
-    let raw = await safeGet<any>(
-      `/orders/orders/dicrepancies/${encodeURIComponent(id)}`
-    );
-    if (raw == null) {
-      raw = await safeGet<any>(
-        `/orders/dicrepancies/${encodeURIComponent(id)}`
-      );
-    }
-    if (raw == null) {
-      raw = await safeGet<any>(
-        `/orders/discrepancies/${encodeURIComponent(id)}`
-      );
-    }
-    if (!raw) return [];
+    const merge = (rows: OrderDiscrepancyItem[]) => {
+      for (const r of rows) {
+        const k = `${String(r.productId || '').toLowerCase()}|${String(r.sku || '').trim().toLowerCase()}`;
+        if (!k.replace(/\|/g, '')) continue;
+        if (seen.has(k)) continue;
+        seen.add(k);
+        out.push(r);
+      }
+    };
 
-    let list: any[] = Array.isArray(raw)
-      ? raw
-      : raw?.results ??
-        raw?.Results ??
-        raw?.data ??
-        raw?.Data ??
-        raw?.items ??
-        raw?.Items ??
-        raw?.value ??
-        raw?.Value ??
-        raw?.discrepancies ??
-        raw?.Discrepancies ??
-        raw?.orderDiscrepancies ??
-        raw?.OrderDiscrepancies ??
-        raw?.lines ??
-        raw?.Lines ??
-        [];
-
-    if (!Array.isArray(list) || list.length === 0) {
-      const nested =
-        raw?.order?.discrepancies ??
-        raw?.Order?.Discrepancies ??
-        raw?.invoice?.lines ??
-        raw?.Invoice?.Lines;
-      if (Array.isArray(nested) && nested.length) list = nested;
-    }
-    if (!Array.isArray(list) || list.length === 0) {
-      const extracted = extractFirstArray(raw);
-      if (extracted && extracted.length) list = extracted;
-    }
-
-    const rows = Array.isArray(list) ? list : [];
-    return rows.map((r: any) => mapRawDiscrepancyRow(r));
+    if (primary) merge(await fetchDiscrepanciesForSingleOrderId(primary));
+    if (alt && alt !== primary) merge(await fetchDiscrepanciesForSingleOrderId(alt));
+    return out;
   },
 
   /**
@@ -2017,9 +2200,9 @@ export const ordersApi = {
   },
 
   /**
-   * Asocia el POD a la factura enviando solo el fileName (clave en S3).
-   * La imagen debe subirse antes con POST /images/upload; este PATCH solo envía el link/fileName.
-   * PATCH /invoice/invoices/{id}/pod — body: { pod: fileName } (sin base64).
+   * Asocia el POD a la factura enviando solo el fileName (clave en S3), igual que imágenes de producto.
+   * La imagen debe subirse antes con POST /images/upload.
+   * PATCH /invoice/invoices/{id}/pod — cuerpo JSON: string (p. ej. `"imagenes/foo.png"`), no un objeto.
    */
   async uploadPODForInvoice(params: {
     invoiceId: number | string;
@@ -2030,9 +2213,11 @@ export const ordersApi = {
     const id = String(params.invoiceId).trim();
     const fileName = (params.fileName || '').trim();
     if (!fileName) return false;
-    const body: Record<string, unknown> = { id, pod: fileName };
-    if (params.notes) body.notes = params.notes;
-    const res = await safePatch<any>(`/invoice/invoices/${encodeURIComponent(id)}/pod`, body);
+    void params.notes;
+    const res = await safePatch<unknown>(
+      `/invoice/invoices/${encodeURIComponent(id)}/pod`,
+      fileName
+    );
     return res !== null && res !== undefined;
   },
 

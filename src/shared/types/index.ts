@@ -155,6 +155,8 @@ export interface Distribution {
   xPosition: number;
   yPosition: number;
   createdAt: Date;
+  /** Si el backend devuelve filas desactivadas, la UI puede ignorarlas al pintar el planograma. */
+  isActive?: boolean;
 }
 
 export interface PlanogramWithDistribution extends Planogram {

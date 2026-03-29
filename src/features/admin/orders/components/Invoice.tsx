@@ -1,7 +1,8 @@
 'use client';
 
-import { useMemo } from 'react';
+import { useMemo, type ReactNode } from 'react';
 import { useLanguage } from '@/shared/hooks/useLanguage';
+import { familyVolumeLabel } from '@/shared/utils/family-display';
 
 /**
  * Factura idéntica a la PWA: colores y espaciado con valores fijos (hex + px)
@@ -16,12 +17,19 @@ export interface InvoiceItem {
   familyName?: string;
   familyCode?: string;
   familySku?: string;
+  /** Nombre corto de familia (PWA: mismo criterio que FamilySummaryCell — junto a código). */
+  familyShortName?: string;
+  familyVolume?: number;
+  familyUnit?: string;
 }
 
 export interface InvoiceProps {
   invoiceNumber: string;
   date: string;
   vendorName: string;
+  /** Código de ruta de ventas (resaltado); el nombre del vendedor va entre paréntesis. */
+  vendorRouteCode?: string;
+  vendorPersonName?: string;
   storeName: string;
   storeAddress: string;
   items: InvoiceItem[];
@@ -48,6 +56,8 @@ export function Invoice({
   invoiceNumber,
   date,
   vendorName,
+  vendorRouteCode,
+  vendorPersonName,
   storeName,
   storeAddress,
   items,
@@ -76,51 +86,51 @@ export function Invoice({
   const totalPcs = items.reduce((sum, item) => sum + item.qty, 0);
   const totalAmount = items.reduce((sum, item) => sum + item.amount, 0);
   const addressOnly = (storeAddress || '').replace(/,?\s*[0-9a-f-]{36}\s*$/i, '').replace(/,?\s*\d+\s*$/, '').trim();
-  const familyRows = useMemo(() => {
-    const byFamily = new Map<
-      string,
-      { familySku: string; familyCode: string; familyName: string; qty: number; amount: number }
-    >();
-    items.forEach((item) => {
-      const familyName = (item.familyName || '').trim() || translate('invoiceNoFamily');
-      const familySku = String(item.familySku || '').trim();
-      const familyCode = String(item.familyCode || '').trim();
-      const key = String(item.familySku || item.familyCode || familyName).trim().toLowerCase();
-      if (!byFamily.has(key)) {
-        byFamily.set(key, { familySku, familyCode, familyName, qty: 0, amount: 0 });
-      }
-      const row = byFamily.get(key)!;
-      if (!row.familySku && familySku) row.familySku = familySku;
-      if (!row.familyCode && familyCode) row.familyCode = familyCode;
-      if (!row.familyName && familyName) row.familyName = familyName;
-      row.qty += Number(item.qty) || 0;
-      row.amount += Number(item.amount) || 0;
-    });
-    return [...byFamily.values()]
-      .map((row) => ({
-        sku: row.familySku || '—',
-        code: row.familyCode,
-        familyName: row.familyName,
-        qty: row.qty,
-        amount: row.amount,
-      }))
-      .sort((a, b) => b.qty - a.qty || b.amount - a.amount);
-  }, [items, translate]);
 
   const familyRowsGroupedBySku = useMemo(() => {
-    const bySku = new Map<string, { sku: string; code: string; familyName: string; qty: number; amount: number }>();
+    const bySku = new Map<
+      string,
+      {
+        sku: string;
+        code: string;
+        familyShortName: string;
+        familyName: string;
+        familyVolume?: number;
+        familyUnit?: string;
+        qty: number;
+        amount: number;
+      }
+    >();
     items.forEach((it) => {
       const sku = String(it.familySku || '').trim();
       const code = String(it.familyCode || '').trim();
+      const familyShortName = String(it.familyShortName || '').trim();
       const familyName = String(it.familyName || '').trim() || translate('invoiceNoFamily');
+      const fv =
+        it.familyVolume != null && Number.isFinite(Number(it.familyVolume))
+          ? Number(it.familyVolume)
+          : undefined;
+      const fu = String(it.familyUnit || '').trim() || undefined;
       const key = (sku || code || familyName).toLowerCase();
       if (!bySku.has(key)) {
-        bySku.set(key, { sku: sku || '—', code, familyName, qty: 0, amount: 0 });
+        bySku.set(key, {
+          sku: sku || '—',
+          code,
+          familyShortName,
+          familyName,
+          familyVolume: fv,
+          familyUnit: fu,
+          qty: 0,
+          amount: 0,
+        });
       }
       const row = bySku.get(key)!;
       if ((!row.sku || row.sku === '—') && sku) row.sku = sku;
       if (!row.code && code) row.code = code;
+      if (!row.familyShortName && familyShortName) row.familyShortName = familyShortName;
       if (!row.familyName && familyName) row.familyName = familyName;
+      if (row.familyVolume == null && fv != null) row.familyVolume = fv;
+      if (!row.familyUnit && fu) row.familyUnit = fu;
       row.qty += Number(it.qty) || 0;
       row.amount += Number(it.amount) || 0;
     });
@@ -130,11 +140,18 @@ export function Invoice({
   if (printLayout === 'ticket') {
     const rows =
       viewMode === 'family'
-        ? familyRowsGroupedBySku.map((r) => ({
-            left: `${r.sku || '—'} ${r.code ? `(${r.code})` : ''} ${r.familyName || translate('invoiceNoFamily')}`.trim(),
-            qty: r.qty,
-            amount: r.amount,
-          }))
+        ? familyRowsGroupedBySku.map((r) => {
+            const vol = familyVolumeLabel(r.familyVolume, r.familyUnit);
+            const desc =
+              [r.code, r.familyShortName, vol].filter(Boolean).join(' · ') ||
+              r.familyName ||
+              translate('invoiceNoFamily');
+            return {
+              left: `${r.sku || '—'} — ${desc}`.trim(),
+              qty: r.qty,
+              amount: r.amount,
+            };
+          })
         : productRows.map((it) => ({
             left: `${it.code || '—'} ${it.description || ''}`.trim(),
             qty: Number(it.qty) || 0,
@@ -144,7 +161,9 @@ export function Invoice({
     const ticketUnits = rows.reduce((s, r) => s + (Number(r.qty) || 0), 0);
     const ticketTotal = rows.reduce((s, r) => s + (Number(r.amount) || 0), 0);
     const ticketStore = String(storeName || '').trim() || '—';
-    const ticketVendor = String(vendorName || '').trim() || '—';
+    const ticketVendor = vendorRouteCode?.trim()
+      ? `${vendorRouteCode.trim()}${(vendorPersonName || vendorName)?.trim() ? ` (${(vendorPersonName || vendorName).trim()})` : ''}`
+      : String((vendorPersonName || vendorName || '').trim() || '—') || '—';
     const ticketAddress = String(addressOnly || '').trim();
 
     return (
@@ -337,7 +356,23 @@ export function Invoice({
             >
               {translate('sellerLabel')}
             </p>
-            <p style={{ fontSize: '0.875rem', fontWeight: 600, color: s.slate900 }}>{vendorName || '—'}</p>
+            <p style={{ fontSize: '0.875rem', fontWeight: 600, color: s.slate900 }}>
+              {vendorRouteCode?.trim() ? (
+                <>
+                  <span style={{ fontWeight: 800, letterSpacing: '0.06em', color: s.slate900 }}>
+                    {vendorRouteCode.trim()}
+                  </span>
+                  {(vendorPersonName || vendorName)?.trim() ? (
+                    <span style={{ fontWeight: 600, color: s.slate600 }}>
+                      {' '}
+                      ({(vendorPersonName || vendorName).trim()})
+                    </span>
+                  ) : null}
+                </>
+              ) : (
+                (vendorPersonName || vendorName || '—').trim() || '—'
+              )}
+            </p>
           </div>
         </div>
 
@@ -380,37 +415,57 @@ export function Invoice({
                       <td style={{ padding: '1rem 2rem', textAlign: 'right', fontWeight: 500, color: s.slate900 }}>${Number(item.amount).toFixed(2)}</td>
                     </tr>
                   ))
-                : familyRowsGroupedBySku.map((item, index) => (
-                    <tr
-                      key={`f-${index}`}
-                      style={{
-                        borderBottom: index < familyRowsGroupedBySku.length - 1 ? `1px solid ${s.slate100}` : undefined,
-                      }}
-                    >
-                      <td style={{ padding: '1rem 2rem', color: s.slate700 }}>{item.sku || '—'}</td>
-                      <td style={{ padding: '1rem 2rem', color: s.slate900 }}>
-                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem' }}>
-                          {item.code ? (
-                            <span
-                              style={{
-                                fontSize: '0.7rem',
-                                fontWeight: 600,
-                                padding: '0.125rem 0.5rem',
-                                borderRadius: '0.25rem',
-                                backgroundColor: s.slate100,
-                                color: s.slate700,
-                              }}
-                            >
-                              {item.code}
-                            </span>
-                          ) : null}
-                          <span>{item.familyName || translate('invoiceNoFamily')}</span>
+                : familyRowsGroupedBySku.map((item, index) => {
+                    const volText = familyVolumeLabel(item.familyVolume, item.familyUnit);
+                    const familyParts: ReactNode[] = [];
+                    if (item.code) {
+                      familyParts.push(
+                        <span key="fc" style={{ fontWeight: 700, color: s.slate900 }}>
+                          {item.code}
                         </span>
-                      </td>
-                      <td style={{ padding: '1rem 2rem', textAlign: 'right', color: s.slate700 }}>{item.qty}</td>
-                      <td style={{ padding: '1rem 2rem', textAlign: 'right', fontWeight: 500, color: s.slate900 }}>${Number(item.amount).toFixed(2)}</td>
-                    </tr>
-                  ))}
+                      );
+                    }
+                    if (item.familyShortName) {
+                      familyParts.push(
+                        <span key="fs" style={{ color: s.slate800 }}>
+                          {item.familyShortName}
+                        </span>
+                      );
+                    }
+                    if (volText) {
+                      familyParts.push(
+                        <span key="fv" style={{ color: s.slate600 }}>
+                          {volText}
+                        </span>
+                      );
+                    }
+                    const familyLine =
+                      familyParts.length > 0 ? (
+                        <span style={{ fontSize: '0.875rem' }}>
+                          {familyParts.flatMap((node, i) =>
+                            i === 0 ? [node] : [<span key={`fd-${i}`} style={{ color: s.slate400, margin: '0 0.35rem' }}>·</span>, node]
+                          )}
+                        </span>
+                      ) : null;
+                    return (
+                      <tr
+                        key={`f-${index}`}
+                        style={{
+                          borderBottom:
+                            index < familyRowsGroupedBySku.length - 1 ? `1px solid ${s.slate100}` : undefined,
+                        }}
+                      >
+                        <td style={{ padding: '1rem 2rem', color: s.slate700 }}>{item.sku || '—'}</td>
+                        <td style={{ padding: '1rem 2rem', color: s.slate900 }}>
+                          {familyLine ?? <span>{item.familyName || translate('invoiceNoFamily')}</span>}
+                        </td>
+                        <td style={{ padding: '1rem 2rem', textAlign: 'right', color: s.slate700 }}>{item.qty}</td>
+                        <td style={{ padding: '1rem 2rem', textAlign: 'right', fontWeight: 500, color: s.slate900 }}>
+                          ${Number(item.amount).toFixed(2)}
+                        </td>
+                      </tr>
+                    );
+                  })}
               {(viewMode === 'product' ? productRows.length === 0 : familyRowsGroupedBySku.length === 0) && (
                 <tr>
                   <td colSpan={viewMode === 'product' ? 5 : 4} style={{ padding: '2rem 1rem', textAlign: 'center', color: s.slate400, fontSize: '0.875rem' }}>{translate('noItems')}</td>

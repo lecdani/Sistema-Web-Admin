@@ -11,6 +11,7 @@ import { ordersApi } from '@/shared/services/orders-api';
 import { histpricesApi } from '@/shared/services/histprices-api';
 import { getFromLocalStorage } from '@/shared/services/database';
 import { getBackendAssetUrl } from '@/shared/config/api';
+import { formatFamilyOrderLabel, sameFamilyId } from '@/shared/utils/family-display';
 import { Package } from 'lucide-react';
 
 function getProductImageUrl(product: Product | null | undefined): string {
@@ -126,6 +127,8 @@ interface ProductPosition {
   productName: string;
   sku: string;
   category: string;
+  /** Familia para resumen (id de categoría / familia). */
+  familyId: string;
   toOrder: number;
   price: number;
   imageUrl?: string;
@@ -139,7 +142,16 @@ export const OrderPlanogramView: React.FC<OrderPlanogramViewProps> = ({
   const [grid, setGrid] = useState<ProductPosition[]>([]);
   const [planogramName, setPlanogramName] = useState<string | null>(null);
   const [planogramDescription, setPlanogramDescription] = useState<string | null>(null);
-  const [allCategories, setAllCategories] = useState<{ id: string; name: string }[]>([]);
+  const [allCategories, setAllCategories] = useState<
+    Array<{
+      id: string;
+      name: string;
+      code?: string;
+      shortName?: string;
+      volume?: number;
+      unit?: string;
+    }>
+  >([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
 
@@ -231,7 +243,16 @@ export const OrderPlanogramView: React.FC<OrderPlanogramViewProps> = ({
         try {
           [productsData, categoriesList] = await Promise.all([
             (productsApi.fetchAll() as Promise<Product[]>),
-            categoriesApi.fetchAll().then((list) => list.map((c) => ({ id: c.id, name: c.name }))),
+            categoriesApi.fetchAll().then((list) =>
+              list.map((c) => ({
+                id: c.id,
+                name: c.name,
+                code: String(c.code || c.familyCode || '').trim() || undefined,
+                shortName: (c.shortName || '').trim() || undefined,
+                volume: c.volume != null && Number.isFinite(Number(c.volume)) ? Number(c.volume) : undefined,
+                unit: (c.unit || '').trim() || undefined,
+              }))
+            ),
           ]);
         } catch (_) {
           productsData = (getFromLocalStorage('app-products') || []) as Product[];
@@ -389,6 +410,7 @@ export const OrderPlanogramView: React.FC<OrderPlanogramViewProps> = ({
             const key = pid ? (qtyQueueByProductId.has(pid) ? pid : String(Number(pid))) : '';
             const queue = key ? qtyQueueByProductId.get(key) : undefined;
             const next = queue && queue.length > 0 ? queue.shift()! : null;
+            const familyId = String(product?.familyId ?? product?.categoryId ?? '').trim();
             planogramGrid.push({
               row,
               col,
@@ -399,6 +421,7 @@ export const OrderPlanogramView: React.FC<OrderPlanogramViewProps> = ({
                 String(product?.sku || '').trim() ||
                 String(product?.code || '').trim(),
               category: resolveCategory(product ?? null),
+              familyId,
               toOrder: next?.quantity ?? 0,
               price: next?.price ?? product?.currentPrice ?? 0,
               imageUrl: product ? getProductImageUrl(product) : undefined,
@@ -579,14 +602,23 @@ export const OrderPlanogramView: React.FC<OrderPlanogramViewProps> = ({
               </thead>
               <tbody>
                 {[...allCategories]
-                  .sort((a, b) => a.name.localeCompare(b.name))
+                  .sort((a, b) =>
+                    formatFamilyOrderLabel(a).localeCompare(formatFamilyOrderLabel(b), undefined, {
+                      sensitivity: 'base',
+                    })
+                  )
                   .map((cat) => {
                     const pcs = grid
-                      .filter((item) => (item.category || '').trim() === cat.name)
+                      .filter((item) => {
+                        if (item.familyId && sameFamilyId(item.familyId, cat.id)) return true;
+                        if (!item.familyId && (item.category || '').trim() === cat.name) return true;
+                        return false;
+                      })
                       .reduce((sum, item) => sum + item.toOrder, 0);
+                    const label = formatFamilyOrderLabel(cat) || cat.name;
                     return (
                       <tr key={cat.id} className="border-t border-slate-200 bg-white">
-                        <td className="py-2 px-3 text-slate-900">{cat.name}</td>
+                        <td className="py-2 px-3 text-slate-900">{label}</td>
                         <td className="py-2 px-3 text-right font-medium text-slate-800">{pcs}</td>
                       </tr>
                     );

@@ -138,6 +138,21 @@ function formatFamilyVolumeLine(category: Category): string | null {
   return null;
 }
 
+/** Etiqueta en el desplegable de familia (prioriza nombre corto). */
+function familySelectLabel(c: Category): string {
+  const s = String(c.shortName ?? '').trim();
+  if (s) return s;
+  return String(c.name ?? '').trim() || '—';
+}
+
+/** Recuadro de familia seleccionada: nombre completo — nombre corto. */
+function familyNameDashShort(c: Category): string {
+  const n = String(c.name ?? '').trim();
+  const s = String(c.shortName ?? '').trim();
+  if (n && s) return `${n} - ${s}`;
+  return n || s || '—';
+}
+
 export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) => {
   const router = useRouter();
   const { translate, locale } = useLanguage();
@@ -608,6 +623,8 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
     if (id != null && String(id).trim() !== '') {
       const sid = String(id).trim();
       const match = categories.find((c) => String(c.id).trim() === sid);
+      const short = String(match?.shortName ?? '').trim();
+      if (short) return short;
       if (match?.name) return match.name;
     }
     return (product.category && product.category.trim()) || '-';
@@ -942,12 +959,17 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
                 >
                   <SelectTrigger className={formErrors.categoryId ? 'border-red-500' : ''}>
                     <SelectValue placeholder={translate('selectFamily')}>
-                      {activeCategories.find((c) => c.id === formData.categoryId)?.name}
+                      {(() => {
+                        const sel = activeCategories.find((c) => c.id === formData.categoryId);
+                        return sel ? familySelectLabel(sel) : undefined;
+                      })()}
                     </SelectValue>
                   </SelectTrigger>
                   <SelectContent>
                     {activeCategories.map((c) => (
-                      <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                      <SelectItem key={c.id} value={c.id}>
+                        {familySelectLabel(c)}
+                      </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
@@ -962,11 +984,13 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
                       if (!selectedFamily) return null;
                       return (
                         <div className="text-sm text-indigo-900 font-medium space-y-1">
+                          <div className="font-semibold text-indigo-950">
+                            {familyNameDashShort(selectedFamily)}
+                          </div>
                           <div>
                             {[
                               `SKU: ${selectedFamily.sku || '—'}`,
-                              `${translate('familyCodeLabel')}: ${categoryFamilyCode(selectedFamily) || '—'}`,
-                              selectedFamily.name || '—',
+                              `Cód. ${categoryFamilyCode(selectedFamily) || '—'}`,
                               formatFamilyVolumeLine(selectedFamily),
                             ]
                               .filter(Boolean)
@@ -1529,17 +1553,20 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
                       <div key={c.id} className="flex items-center justify-between px-4 py-3 hover:bg-gray-50 group gap-3">
                         <div className="min-w-0 flex-1">
                           <div className="flex items-center flex-wrap gap-2">
+                            <span className="text-sm font-semibold text-gray-900">{`Cód. ${categoryFamilyCode(c) || '—'}`}</span>
+                            <span className="text-sm font-semibold text-gray-900">{c.shortName || '—'}</span>
                             <span className="text-sm font-semibold text-gray-900">{`SKU: ${c.sku || '—'}`}</span>
-                            <span className="text-sm font-semibold text-gray-900">{`${translate('familyCodeLabel')}: ${categoryFamilyCode(c) || '—'}`}</span>
-                            <span className="text-sm font-semibold text-gray-900">{c.name}</span>
                           </div>
-                          {(c.shortName || c.genericCode) ? (
+                          {(c.genericCode || c.name || familyVolLine) ? (
                             <span className="text-xs text-gray-600 block truncate">
-                              {[c.shortName, c.genericCode ? `${translate('familyGenericCodeLabel')}: ${c.genericCode}` : ''].filter(Boolean).join(' · ')}
+                              {[
+                                c.genericCode ? `${translate('familyGenericCodeLabel')}: ${c.genericCode}` : '',
+                                c.name || '',
+                                familyVolLine || '',
+                              ]
+                                .filter(Boolean)
+                                .join(' · ')}
                             </span>
-                          ) : null}
-                          {familyVolLine ? (
-                            <span className="text-xs text-gray-500 block truncate">{familyVolLine}</span>
                           ) : null}
                           <div className="flex items-center gap-2 mt-1.5 flex-wrap">
                             <span className="text-xs font-medium text-green-700 flex items-center gap-0.5">
@@ -1687,10 +1714,27 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
               <div className="flex gap-4 rounded-xl bg-gray-50/80 border border-gray-100 p-4">
                 <div className="flex-1 min-w-0">
                   <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">{translate('family')}</p>
-                  <p className="flex items-center gap-1.5 mt-1 text-sm font-medium text-gray-900 truncate">
-                    <Tag className="h-4 w-4 text-gray-400 shrink-0" />
-                    {getCategoryName(selectedProduct)}
-                  </p>
+                  {(() => {
+                    const familyId = String(selectedProduct.categoryId ?? selectedProduct.familyId ?? '').trim();
+                    const selectedFamily = familyId
+                      ? categories.find((c) => String(c.id).trim() === familyId)
+                      : undefined;
+                    const familyNames = selectedFamily
+                      ? familyNameDashShort(selectedFamily)
+                      : getCategoryName(selectedProduct);
+                    const familyCode = selectedFamily ? categoryFamilyCode(selectedFamily) : '';
+                    return (
+                      <>
+                        <p className="flex items-center gap-1.5 mt-1 text-sm font-medium text-gray-900 truncate">
+                          <Tag className="h-4 w-4 text-gray-400 shrink-0" />
+                          {familyNames}
+                        </p>
+                        <p className="text-xs text-gray-600 mt-1 truncate">
+                          {`Cód. ${familyCode || '—'}`}
+                        </p>
+                      </>
+                    );
+                  })()}
                 </div>
                 <div className="flex-1 min-w-0">
                   <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">{translate('brandHeader')}</p>

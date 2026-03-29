@@ -5,9 +5,11 @@ import type { Order, Product } from '@/shared/types';
 import { productsApi } from '@/shared/services/products-api';
 import { categoriesApi } from '@/shared/services/categories-api';
 import { getBackendAssetUrl } from '@/shared/config/api';
+import { formatFamilyOrderLabel } from '@/shared/utils/family-display';
 
 interface OrderCatalogGridViewProps {
   order: Order;
+  useAllActiveProducts?: boolean;
 }
 
 function getProductImageUrl(product: Product | null | undefined): string {
@@ -35,16 +37,59 @@ const ROWS = 10;
 const SLOTS = COLS * ROWS;
 const UNCATEGORIZED_KEY = '__uncategorized__';
 
-export const OrderCatalogGridView: React.FC<OrderCatalogGridViewProps> = ({ order }) => {
+export const OrderCatalogGridView: React.FC<OrderCatalogGridViewProps> = ({
+  order,
+  useAllActiveProducts = false,
+}) => {
   const { translate } = useLanguage();
   const [page, setPage] = useState(0);
   const [productMap, setProductMap] = useState<Map<string, Product>>(new Map());
-  const [allCategories, setAllCategories] = useState<{ id: string; name: string }[]>([]);
+  const [allProductsOrdered, setAllProductsOrdered] = useState<Product[]>([]);
+  const [allCategories, setAllCategories] = useState<
+    Array<{
+      id: string;
+      name: string;
+      code?: string;
+      shortName?: string;
+      volume?: number;
+      unit?: string;
+    }>
+  >([]);
 
   const items = Array.isArray(order.items) ? order.items : [];
 
-  /** Orden de lectura: mismo orden que en el pedido (sin reordenar por SKU). */
-  const orderedItems = useMemo(() => [...items], [items]);
+  /**
+   * Orden de lectura:
+   * - Catálogo: todos los productos activos en orden de registro (lista backend),
+   *   con cantidades del pedido/factura.
+   * - Planograma/pedido: respeta el orden de líneas del pedido.
+   */
+  const orderedItems = useMemo(() => {
+    if (!useAllActiveProducts) return [...items];
+    const qtyByProductId = new Map<string, number>();
+    for (const raw of items) {
+      const it = raw as any;
+      const pid = String(it.productId ?? it.ProductId ?? '').trim();
+      if (!pid) continue;
+      const qty = Number(it.quantity ?? it.toOrder ?? 0) || 0;
+      qtyByProductId.set(pid, (qtyByProductId.get(pid) ?? 0) + qty);
+    }
+    return allProductsOrdered
+      .filter((p: any) => p?.isActive !== false)
+      .map((p: any) => {
+        const pid = String(p.id ?? '').trim();
+        const qty = qtyByProductId.get(pid) ?? 0;
+        return {
+          id: pid,
+          productId: pid,
+          productName: String(p.name ?? '').trim() || '—',
+          sku: String(p.code ?? p.sku ?? '').trim(),
+          quantity: qty,
+          toOrder: qty,
+          price: Number(p.currentPrice ?? 0) || 0,
+        };
+      });
+  }, [useAllActiveProducts, items, allProductsOrdered]);
 
   useEffect(() => {
     let mounted = true;
@@ -52,7 +97,7 @@ export const OrderCatalogGridView: React.FC<OrderCatalogGridViewProps> = ({ orde
       try {
         const [products, categoriesList] = await Promise.all([
           productsApi.fetchAll(),
-          categoriesApi.fetchAll().catch(() => [] as { id: string; name: string }[]),
+          categoriesApi.fetchAll().catch(() => [] as any[]),
         ]);
         if (!mounted) return;
         const map = new Map<string, Product>();
@@ -65,10 +110,15 @@ export const OrderCatalogGridView: React.FC<OrderCatalogGridViewProps> = ({ orde
           }
         });
         setProductMap(map);
+        setAllProductsOrdered(products as Product[]);
         setAllCategories(
           (categoriesList || []).map((c: any) => ({
             id: String(c.id),
             name: String(c.name ?? '').trim() || String(c.id),
+            code: String(c.code || c.familyCode || '').trim() || undefined,
+            shortName: String(c.shortName || '').trim() || undefined,
+            volume: c.volume != null && Number.isFinite(Number(c.volume)) ? Number(c.volume) : undefined,
+            unit: String(c.unit || '').trim() || undefined,
           }))
         );
       } catch {
@@ -80,28 +130,8 @@ export const OrderCatalogGridView: React.FC<OrderCatalogGridViewProps> = ({ orde
     };
   }, []);
 
-  const categoryById = useMemo(() => {
-    const m = new Map<string, string>();
-    allCategories.forEach((c) => {
-      m.set(c.id, c.name);
-      m.set(String(Number(c.id)), c.name);
-    });
-    return m;
-  }, [allCategories]);
-
-  const resolveCategoryName = (product: Product | null | undefined, lineCategory?: string): string => {
-    const fromLine = String(lineCategory ?? '').trim();
-    if (fromLine) return fromLine;
-    if (!product) return '';
-    const name = String((product as any).category ?? '').trim();
-    if (name) return name;
-    const id = product.categoryId != null ? String(product.categoryId) : '';
-    if (!id) return '';
-    return categoryById.get(id) ?? categoryById.get(String(Number(id))) ?? '';
-  };
-
-  /** Pcs por familia (todo el pedido, no solo la página de la grilla) — igual criterio que planograma. */
-  const pcsByFamily = useMemo(() => {
+  /** Pcs por id de familia (todo el pedido) — alineado con resumen del planograma. */
+  const pcsByFamilyId = useMemo(() => {
     const acc = new Map<string, number>();
     for (const raw of orderedItems) {
       const it = raw as any;
@@ -109,12 +139,15 @@ export const OrderCatalogGridView: React.FC<OrderCatalogGridViewProps> = ({ orde
       if (!pid) continue;
       const qty = Number(it.quantity ?? it.toOrder ?? 0) || 0;
       const product = productMap.get(pid) || productMap.get(String(Number(pid)));
-      const fam = resolveCategoryName(product ?? null, it.category ?? it.productBrand);
-      const key = fam.trim() || UNCATEGORIZED_KEY;
-      acc.set(key, (acc.get(key) ?? 0) + qty);
+      const fid = String(product?.familyId ?? product?.categoryId ?? '').trim();
+      if (!fid) {
+        acc.set(UNCATEGORIZED_KEY, (acc.get(UNCATEGORIZED_KEY) ?? 0) + qty);
+        continue;
+      }
+      acc.set(fid, (acc.get(fid) ?? 0) + qty);
     }
     return acc;
-  }, [orderedItems, productMap, categoryById]);
+  }, [orderedItems, productMap]);
 
   const totalPages = Math.max(1, Math.ceil(orderedItems.length / SLOTS));
   const currentPage = Math.min(page, totalPages - 1);
@@ -253,7 +286,7 @@ export const OrderCatalogGridView: React.FC<OrderCatalogGridViewProps> = ({ orde
       </div>
 
       {/* Resumen por familia (catálogo): visible en pantalla e impresión */}
-      {(allCategories.length > 0 || pcsByFamily.size > 0) && (
+      {(allCategories.length > 0 || pcsByFamilyId.size > 0) && (
         <div className="mt-6 border border-slate-200 rounded-lg overflow-hidden bg-slate-50/50 print:mt-3 print:border-slate-300 print:break-inside-avoid">
           <h4 className="bg-slate-200 text-slate-800 px-3 py-2 text-xs font-semibold print:text-[10px]">
             {translate('familySummaryCatalog')}
@@ -267,27 +300,45 @@ export const OrderCatalogGridView: React.FC<OrderCatalogGridViewProps> = ({ orde
             </thead>
             <tbody>
               {(() => {
-                let displayRows: { id: string; name: string }[];
+                type RowCat = (typeof allCategories)[number] | { id: string; name: string };
+                let displayRows: RowCat[];
                 if (allCategories.length > 0) {
-                  displayRows = [...allCategories].sort((a, b) => a.name.localeCompare(b.name));
-                  if ((pcsByFamily.get(UNCATEGORIZED_KEY) ?? 0) > 0) {
+                  displayRows = [...allCategories].sort((a, b) =>
+                    formatFamilyOrderLabel(a).localeCompare(formatFamilyOrderLabel(b), undefined, {
+                      sensitivity: 'base',
+                    })
+                  );
+                  if ((pcsByFamilyId.get(UNCATEGORIZED_KEY) ?? 0) > 0) {
                     displayRows = [
                       ...displayRows,
                       { id: UNCATEGORIZED_KEY, name: UNCATEGORIZED_KEY },
                     ];
                   }
                 } else {
-                  displayRows = [...pcsByFamily.keys()]
+                  displayRows = [...pcsByFamilyId.keys()]
+                    .filter((k) => k !== UNCATEGORIZED_KEY)
                     .sort((a, b) => a.localeCompare(b))
-                    .map((name) => ({ id: name, name }));
+                    .map((id) => ({ id, name: id }));
+                  if ((pcsByFamilyId.get(UNCATEGORIZED_KEY) ?? 0) > 0) {
+                    displayRows = [
+                      ...displayRows,
+                      { id: UNCATEGORIZED_KEY, name: UNCATEGORIZED_KEY },
+                    ];
+                  }
                 }
                 return displayRows.map((cat) => {
-                  const rowName =
-                    cat.name === UNCATEGORIZED_KEY ? translate('withoutCategory') : cat.name;
-                  const pcs = pcsByFamily.get(cat.name) ?? 0;
+                  const isUncat = cat.id === UNCATEGORIZED_KEY;
+                  const rowLabel = isUncat
+                    ? translate('withoutCategory')
+                    : formatFamilyOrderLabel(cat) || cat.name;
+                  const pcs = isUncat
+                    ? pcsByFamilyId.get(UNCATEGORIZED_KEY) ?? 0
+                    : pcsByFamilyId.get(cat.id) ??
+                      pcsByFamilyId.get(String(Number(cat.id))) ??
+                      0;
                   return (
                     <tr key={cat.id} className="border-t border-slate-200 bg-white">
-                      <td className="py-2 px-3 text-slate-900">{rowName}</td>
+                      <td className="py-2 px-3 text-slate-900">{rowLabel}</td>
                       <td className="py-2 px-3 text-right font-medium text-slate-800">{pcs}</td>
                     </tr>
                   );

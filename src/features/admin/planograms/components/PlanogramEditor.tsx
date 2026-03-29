@@ -188,43 +188,79 @@ export const PlanogramEditor: React.FC<PlanogramEditorProps> = ({
         });
         planogramId = planogram.id;
 
+        /**
+         * Sincronizar grid ↔ API sin duplicar filas: reutilizar cada distribution_id con PUT
+         * (misma celda, mismo producto movido, o reciclar un registro sobrante). Solo POST si hace falta.
+         * Las filas que sobren se desactivan con el endpoint de desactivar (no con update + isActive).
+         */
         const currentDist = existingDistributions.filter((d) => d.planogramId === planogram.id);
-        for (const d of currentDist) {
-          const cell = grid[d.xPosition]?.[d.yPosition];
-          if (!cell?.product) {
-            // Celda vacía: "desactivar" por update (backend no permite DELETE).
-            // Enviar también productId/planogramId/posiciones para no violar FKs.
+        const desired: { x: number; y: number; productId: string }[] = [];
+        for (let x = 0; x < GRID_SIZE; x++) {
+          for (let y = 0; y < GRID_SIZE; y++) {
+            const cell = grid[x][y];
+            if (cell?.product) desired.push({ x, y, productId: cell.product.id });
+          }
+        }
+
+        const pool = currentDist.map((d) => ({ ...d, used: false as boolean }));
+
+        for (const cell of desired) {
+          let d = pool.find((p) => !p.used && p.xPosition === cell.x && p.yPosition === cell.y);
+          if (d) {
+            if (d.productId !== cell.productId) {
+              await distributionsApi.update(d.id, {
+                planogramId,
+                productId: cell.productId,
+                xPosition: cell.x,
+                yPosition: cell.y,
+              });
+            }
+            d.used = true;
+            continue;
+          }
+          d = pool.find((p) => !p.used && p.productId === cell.productId);
+          if (d) {
+            if (d.xPosition !== cell.x || d.yPosition !== cell.y) {
+              await distributionsApi.update(d.id, {
+                planogramId,
+                productId: cell.productId,
+                xPosition: cell.x,
+                yPosition: cell.y,
+              });
+            }
+            d.used = true;
+            continue;
+          }
+          d = pool.find((p) => !p.used);
+          if (d) {
             await distributionsApi.update(d.id, {
+              planogramId,
+              productId: cell.productId,
+              xPosition: cell.x,
+              yPosition: cell.y,
+            });
+            d.used = true;
+            continue;
+          }
+          await distributionsApi.create({
+            planogramId,
+            productId: cell.productId,
+            xPosition: cell.x,
+            yPosition: cell.y,
+          });
+        }
+
+        for (const d of pool) {
+          if (!d.used) {
+            await distributionsApi.deactivate(d.id, {
               planogramId: d.planogramId,
               productId: d.productId,
               xPosition: d.xPosition,
               yPosition: d.yPosition,
-              isActive: false,
-            });
-          } else if (cell.product.id !== d.productId) {
-            await distributionsApi.update(d.id, {
-              planogramId: planogram.id,
-              productId: cell.product.id,
-              xPosition: d.xPosition,
-              yPosition: d.yPosition
             });
           }
         }
-        for (let x = 0; x < GRID_SIZE; x++) {
-          for (let y = 0; y < GRID_SIZE; y++) {
-            const cell = grid[x][y];
-            if (!cell?.product) continue;
-            const existsAtCell = currentDist.some((d) => d.xPosition === x && d.yPosition === y);
-            if (existsAtCell) continue;
-            // Con duplicados permitidos, siempre crear una distribución nueva para esta celda
-            await distributionsApi.create({
-              planogramId,
-              productId: cell.product.id,
-              xPosition: x,
-              yPosition: y
-            });
-          }
-        }
+
         toast.success(translate('planogramSaved'));
         onSave?.();
       } else {
