@@ -3,9 +3,13 @@ import { Package } from 'lucide-react';
 import { useLanguage } from '@/shared/hooks/useLanguage';
 import type { Order, Product } from '@/shared/types';
 import { productsApi } from '@/shared/services/products-api';
-import { categoriesApi } from '@/shared/services/categories-api';
 import { getBackendAssetUrl } from '@/shared/config/api';
-import { formatFamilyOrderLabel } from '@/shared/utils/family-display';
+import { getProductCodeLine, getProductShortDisplayName } from '@/shared/utils/planogram-grid-display';
+import {
+  collectPresentationRowsFromOrderLines,
+  sumQtyForPresentation,
+} from '@/shared/utils/planogram-presentation-summary';
+import { PresentationSummaryCell } from '@/shared/components/PresentationSummaryCell';
 
 interface OrderCatalogGridViewProps {
   order: Order;
@@ -19,24 +23,23 @@ function getProductImageUrl(product: Product | null | undefined): string {
   return '';
 }
 
-/** Misma lógica de color que OrderPlanogramView (lectura visual idéntica). */
-function getCatalogCellSurface(hasProduct: boolean, qty: number): React.CSSProperties {
+/** Celda catálogo: mismo criterio visual que la grilla de planograma en pedidos. */
+function getCatalogCellSurface(hasProduct: boolean, hasQty: boolean): React.CSSProperties {
   if (!hasProduct) {
-    return { backgroundColor: '#94a3b8', borderColor: '#64748b' };
+    return { backgroundColor: '#ffffff', borderColor: '#d1d5db' };
   }
-  if (qty > 0) {
-    return { backgroundColor: '#eef2ff', borderColor: '#a5b4fc' };
+  if (hasQty) {
+    return { backgroundColor: '#e0e7ff', borderColor: '#6366f1' };
   }
-  return { backgroundColor: '#f1f5f9', borderColor: '#e2e8f0' };
+  return { backgroundColor: '#d1d5db', borderColor: '#525252' };
 }
 
-const CELL_SIZE = 72;
-const CELL_GAP = 8;
+const CELL_W = 78;
+const CELL_H = 66;
+const CELL_GAP = 5;
 const COLS = 10;
 const ROWS = 10;
 const SLOTS = COLS * ROWS;
-const UNCATEGORIZED_KEY = '__uncategorized__';
-
 export const OrderCatalogGridView: React.FC<OrderCatalogGridViewProps> = ({
   order,
   useAllActiveProducts = false,
@@ -45,16 +48,6 @@ export const OrderCatalogGridView: React.FC<OrderCatalogGridViewProps> = ({
   const [page, setPage] = useState(0);
   const [productMap, setProductMap] = useState<Map<string, Product>>(new Map());
   const [allProductsOrdered, setAllProductsOrdered] = useState<Product[]>([]);
-  const [allCategories, setAllCategories] = useState<
-    Array<{
-      id: string;
-      name: string;
-      code?: string;
-      shortName?: string;
-      volume?: number;
-      unit?: string;
-    }>
-  >([]);
 
   const items = Array.isArray(order.items) ? order.items : [];
 
@@ -82,8 +75,8 @@ export const OrderCatalogGridView: React.FC<OrderCatalogGridViewProps> = ({
         return {
           id: pid,
           productId: pid,
-          productName: String(p.name ?? '').trim() || '—',
-          sku: String(p.code ?? p.sku ?? '').trim(),
+          productName: getProductShortDisplayName(p as Product),
+          sku: String(p.sku ?? p.code ?? '').trim(),
           quantity: qty,
           toOrder: qty,
           price: Number(p.currentPrice ?? 0) || 0,
@@ -91,14 +84,27 @@ export const OrderCatalogGridView: React.FC<OrderCatalogGridViewProps> = ({
       });
   }, [useAllActiveProducts, items, allProductsOrdered]);
 
+  const presentationSummaryRows = useMemo(
+    () => collectPresentationRowsFromOrderLines(orderedItems as any[], productMap),
+    [orderedItems, productMap]
+  );
+
+  const presentationRowsWithPcs = useMemo(
+    () =>
+      presentationSummaryRows
+        .map((row) => ({
+          row,
+          pcs: sumQtyForPresentation(orderedItems as any[], productMap, row.presentationId),
+        }))
+        .filter((x) => x.pcs > 0),
+    [presentationSummaryRows, orderedItems, productMap]
+  );
+
   useEffect(() => {
     let mounted = true;
     (async () => {
       try {
-        const [products, categoriesList] = await Promise.all([
-          productsApi.fetchAll(),
-          categoriesApi.fetchAll().catch(() => [] as any[]),
-        ]);
+        const products = await productsApi.fetchAll();
         if (!mounted) return;
         const map = new Map<string, Product>();
         products.forEach((p: any) => {
@@ -111,16 +117,6 @@ export const OrderCatalogGridView: React.FC<OrderCatalogGridViewProps> = ({
         });
         setProductMap(map);
         setAllProductsOrdered(products as Product[]);
-        setAllCategories(
-          (categoriesList || []).map((c: any) => ({
-            id: String(c.id),
-            name: String(c.name ?? '').trim() || String(c.id),
-            code: String(c.code || c.familyCode || '').trim() || undefined,
-            shortName: String(c.shortName || '').trim() || undefined,
-            volume: c.volume != null && Number.isFinite(Number(c.volume)) ? Number(c.volume) : undefined,
-            unit: String(c.unit || '').trim() || undefined,
-          }))
-        );
       } catch {
         // sin datos extra si falla
       }
@@ -129,25 +125,6 @@ export const OrderCatalogGridView: React.FC<OrderCatalogGridViewProps> = ({
       mounted = false;
     };
   }, []);
-
-  /** Pcs por id de familia (todo el pedido) — alineado con resumen del planograma. */
-  const pcsByFamilyId = useMemo(() => {
-    const acc = new Map<string, number>();
-    for (const raw of orderedItems) {
-      const it = raw as any;
-      const pid = String(it.productId ?? it.ProductId ?? '').trim();
-      if (!pid) continue;
-      const qty = Number(it.quantity ?? it.toOrder ?? 0) || 0;
-      const product = productMap.get(pid) || productMap.get(String(Number(pid)));
-      const fid = String(product?.familyId ?? product?.categoryId ?? '').trim();
-      if (!fid) {
-        acc.set(UNCATEGORIZED_KEY, (acc.get(UNCATEGORIZED_KEY) ?? 0) + qty);
-        continue;
-      }
-      acc.set(fid, (acc.get(fid) ?? 0) + qty);
-    }
-    return acc;
-  }, [orderedItems, productMap]);
 
   const totalPages = Math.max(1, Math.ceil(orderedItems.length / SLOTS));
   const currentPage = Math.min(page, totalPages - 1);
@@ -158,12 +135,12 @@ export const OrderCatalogGridView: React.FC<OrderCatalogGridViewProps> = ({
       ? [...pageItems, ...Array(SLOTS - pageItems.length).fill(null)]
       : pageItems;
 
-  const gridWidthPx = COLS * CELL_SIZE + (COLS - 1) * CELL_GAP;
+  const gridWidthPx = COLS * CELL_W + (COLS - 1) * CELL_GAP;
 
   return (
-    <div className="space-y-4 admin-planogram-print-compact">
+    <div className="space-y-2 admin-planogram-print-compact">
       <div className="flex items-center justify-between">
-        <h3 className="font-semibold text-gray-900 text-sm">
+        <h3 className="font-semibold text-gray-900 text-xs">
           {translate('catalogView') || 'Vista de catálogo'}
         </h3>
         {totalPages > 1 && (
@@ -191,15 +168,15 @@ export const OrderCatalogGridView: React.FC<OrderCatalogGridViewProps> = ({
         )}
       </div>
 
-      <div className="bg-white rounded-xl p-3 shadow-sm border border-slate-200 overflow-x-auto flex justify-start md:justify-center print:shadow-none print:border print:break-inside-avoid print:p-1.5">
+      <div className="bg-white rounded-lg p-2 shadow-sm border border-slate-200 overflow-x-auto flex justify-start md:justify-center print:shadow-none print:border print:break-inside-avoid print:p-1">
         <div
           className="mx-auto print:mx-0 flex-none"
           style={{
             width: gridWidthPx,
             minWidth: gridWidthPx,
             display: 'grid',
-            gridTemplateColumns: `repeat(${COLS}, ${CELL_SIZE}px)`,
-            gridTemplateRows: `repeat(${ROWS}, ${CELL_SIZE}px)`,
+            gridTemplateColumns: `repeat(${COLS}, ${CELL_W}px)`,
+            gridTemplateRows: `repeat(${ROWS}, ${CELL_H}px)`,
             gap: CELL_GAP,
             boxSizing: 'content-box',
           }}
@@ -211,11 +188,11 @@ export const OrderCatalogGridView: React.FC<OrderCatalogGridViewProps> = ({
                   key={`empty-${currentPage}-${index}`}
                   className="rounded-lg border border-solid min-h-0 min-w-0 overflow-hidden box-border"
                   style={{
-                    width: CELL_SIZE,
-                    height: CELL_SIZE,
+                    width: CELL_W,
+                    height: CELL_H,
                     padding: 2,
                     boxSizing: 'border-box',
-                    ...getCatalogCellSurface(false, 0),
+                    ...getCatalogCellSurface(false, false),
                   }}
                 />
               );
@@ -226,10 +203,11 @@ export const OrderCatalogGridView: React.FC<OrderCatalogGridViewProps> = ({
             const product =
               productMap.get(productId) || productMap.get(String(Number(productId))) || undefined;
             const imageUrl = getProductImageUrl(product);
-            const skuLabel = String(
-              product?.code ?? (item as any).sku ?? (item as any).code ?? (item as any).productId ?? '—'
-            );
-            const nameLabel = String((item as any).productName ?? '').trim();
+            const codeLine = product ? getProductCodeLine(product) : '—';
+            const nameLabel = product
+              ? getProductShortDisplayName(product)
+              : String((item as any).productName ?? '').trim();
+            const muted = qty <= 0;
 
             return (
               <div
@@ -238,45 +216,62 @@ export const OrderCatalogGridView: React.FC<OrderCatalogGridViewProps> = ({
                   (productId && `prod-${productId}-${index}`) ||
                   `item-${index}`
                 }
-                className="rounded-lg border border-solid flex flex-col items-center justify-center text-center min-h-0 min-w-0 overflow-hidden box-border"
+                className={`rounded-md border border-solid flex flex-col items-center justify-center text-center min-h-0 min-w-0 overflow-hidden box-border ${muted ? 'opacity-[0.48]' : ''}`}
                 style={{
-                  width: CELL_SIZE,
-                  height: CELL_SIZE,
+                  width: CELL_W,
+                  height: CELL_H,
                   padding: 2,
                   boxSizing: 'border-box',
-                  ...getCatalogCellSurface(true, qty),
-                }}
-                title={nameLabel || skuLabel}
+                  ...getCatalogCellSurface(true, qty > 0),
+                  WebkitPrintColorAdjust: 'exact',
+                  printColorAdjust: 'exact',
+                } as React.CSSProperties}
+                title={nameLabel || codeLine}
               >
-                <div className="flex flex-col items-center justify-center gap-0 w-full h-full min-h-0 min-w-0">
-                  <div className="flex flex-row items-center justify-center gap-0.5 w-full shrink-0 min-h-0 px-0.5">
-                    {imageUrl ? (
-                      <img src={imageUrl} alt="" className="w-7 h-7 rounded object-cover shrink-0" />
-                    ) : (
-                      <div className="w-7 h-7 rounded bg-slate-200 flex items-center justify-center shrink-0">
-                        <Package className="h-3.5 w-3.5 text-slate-500" />
+                <div className="text-center w-full h-full flex flex-col justify-center items-center p-0.5 relative min-h-0 min-w-0">
+                  <div className="flex justify-center w-full shrink-0 min-h-0 px-0.5">
+                    <div className="inline-flex flex-row items-center justify-center gap-0.5 max-w-full min-w-0">
+                      {imageUrl ? (
+                        <img
+                          src={imageUrl}
+                          alt=""
+                          className="w-7 h-7 rounded object-cover flex-shrink-0"
+                        />
+                      ) : (
+                        <div className="w-7 h-7 rounded bg-gray-200 flex items-center justify-center flex-shrink-0">
+                          <Package className="h-3.5 w-3.5 text-gray-600" />
+                        </div>
+                      )}
+                      <div className="font-bold text-blue-800 truncate text-[10px] leading-tight max-w-[38px] min-w-0 text-center">
+                        {codeLine}
                       </div>
-                    )}
-                    <span
-                      className="text-[6.5px] leading-tight font-semibold text-slate-900 truncate min-w-0 max-w-[34px] text-center"
-                      title={skuLabel}
-                    >
-                      {skuLabel}
-                    </span>
+                    </div>
                   </div>
                   {nameLabel ? (
-                    <span
-                      className="block w-full text-center text-slate-600 font-normal overflow-hidden line-clamp-2 mt-0.5 px-0.5"
-                      style={{ fontSize: '12px', lineHeight: 1.2, maxHeight: '18px' }}
+                    <div
+                      className="block w-full max-w-full px-0.5 text-blue-900/90 font-bold overflow-hidden mt-0.5"
+                      style={{
+                        fontSize: '7.5px',
+                        lineHeight: 1.15,
+                        whiteSpace: 'normal',
+                        wordBreak: 'break-word',
+                        overflowWrap: 'anywhere',
+                        display: '-webkit-box',
+                        WebkitLineClamp: 2,
+                        WebkitBoxOrient: 'vertical' as const,
+                      }}
                       title={nameLabel}
                     >
                       {nameLabel}
-                    </span>
+                    </div>
                   ) : null}
                   {qty > 0 ? (
-                    <span className="text-[10px] font-bold text-indigo-700 leading-none text-center mt-px">
-                      {qty} {translate('unitsSuffix')}
-                    </span>
+                    <>
+                      <div className="absolute top-0.5 left-0.5 w-2.5 h-2.5 bg-indigo-600 rounded-full shadow-sm" aria-hidden />
+                      <span className="text-[9px] font-bold text-indigo-900 leading-none text-center mt-0.5">
+                        {qty} {translate('unitsSuffix')}
+                      </span>
+                    </>
                   ) : null}
                 </div>
               </div>
@@ -285,65 +280,28 @@ export const OrderCatalogGridView: React.FC<OrderCatalogGridViewProps> = ({
         </div>
       </div>
 
-      {/* Resumen por familia (catálogo): visible en pantalla e impresión */}
-      {(allCategories.length > 0 || pcsByFamilyId.size > 0) && (
-        <div className="mt-6 border border-slate-200 rounded-lg overflow-hidden bg-slate-50/50 print:mt-3 print:border-slate-300 print:break-inside-avoid">
-          <h4 className="bg-slate-200 text-slate-800 px-3 py-2 text-xs font-semibold print:text-[10px]">
+      {/* Solo presentaciones de líneas con cantidad &gt; 0 (como PWA) */}
+      {presentationRowsWithPcs.length > 0 && (
+        <div className="mt-3 border border-slate-200 rounded-lg overflow-hidden bg-slate-50/50 print:mt-2 print:border-slate-300 print:break-inside-avoid">
+          <h4 className="bg-slate-200 text-slate-800 px-3 py-1.5 text-[11px] font-semibold print:text-[10px]">
             {translate('familySummaryCatalog')}
           </h4>
-          <table className="w-full text-sm print:text-xs">
+          <table className="w-full text-xs print:text-[10px]">
             <thead>
               <tr className="bg-slate-100 text-slate-700">
-                <th className="text-left py-2 px-3 font-semibold">{translate('familyCol')}</th>
-                <th className="text-right py-2 px-3 font-semibold w-16">{translate('pcsCol')}</th>
+                <th className="text-left py-1.5 px-2 font-semibold">{translate('familyCol')}</th>
+                <th className="text-right py-1.5 px-2 font-semibold w-14">{translate('pcsCol')}</th>
               </tr>
             </thead>
             <tbody>
-              {(() => {
-                type RowCat = (typeof allCategories)[number] | { id: string; name: string };
-                let displayRows: RowCat[];
-                if (allCategories.length > 0) {
-                  displayRows = [...allCategories].sort((a, b) =>
-                    formatFamilyOrderLabel(a).localeCompare(formatFamilyOrderLabel(b), undefined, {
-                      sensitivity: 'base',
-                    })
-                  );
-                  if ((pcsByFamilyId.get(UNCATEGORIZED_KEY) ?? 0) > 0) {
-                    displayRows = [
-                      ...displayRows,
-                      { id: UNCATEGORIZED_KEY, name: UNCATEGORIZED_KEY },
-                    ];
-                  }
-                } else {
-                  displayRows = [...pcsByFamilyId.keys()]
-                    .filter((k) => k !== UNCATEGORIZED_KEY)
-                    .sort((a, b) => a.localeCompare(b))
-                    .map((id) => ({ id, name: id }));
-                  if ((pcsByFamilyId.get(UNCATEGORIZED_KEY) ?? 0) > 0) {
-                    displayRows = [
-                      ...displayRows,
-                      { id: UNCATEGORIZED_KEY, name: UNCATEGORIZED_KEY },
-                    ];
-                  }
-                }
-                return displayRows.map((cat) => {
-                  const isUncat = cat.id === UNCATEGORIZED_KEY;
-                  const rowLabel = isUncat
-                    ? translate('withoutCategory')
-                    : formatFamilyOrderLabel(cat) || cat.name;
-                  const pcs = isUncat
-                    ? pcsByFamilyId.get(UNCATEGORIZED_KEY) ?? 0
-                    : pcsByFamilyId.get(cat.id) ??
-                      pcsByFamilyId.get(String(Number(cat.id))) ??
-                      0;
-                  return (
-                    <tr key={cat.id} className="border-t border-slate-200 bg-white">
-                      <td className="py-2 px-3 text-slate-900">{rowLabel}</td>
-                      <td className="py-2 px-3 text-right font-medium text-slate-800">{pcs}</td>
-                    </tr>
-                  );
-                });
-              })()}
+              {presentationRowsWithPcs.map(({ row, pcs }) => (
+                <tr key={row.presentationId} className="border-t border-slate-200 bg-white">
+                  <td className="py-1.5 px-2 text-slate-900 align-top">
+                    <PresentationSummaryCell row={row} compact />
+                  </td>
+                  <td className="py-1.5 px-2 text-right font-medium text-slate-800 align-middle">{pcs}</td>
+                </tr>
+              ))}
             </tbody>
           </table>
         </div>

@@ -27,7 +27,7 @@ import { Button } from '@/shared/components/base/Button';
 import { Badge } from '@/shared/components/base/Badge';
 import { Input } from '@/shared/components/base/Input';
 import { Label } from '@/shared/components/base/Label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/shared/components/base/Select';
+import { SearchableSelect } from '@/shared/components/base/Select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/shared/components/base/Tabs';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/shared/components/base/Table';
 import { 
@@ -1038,75 +1038,62 @@ ${salesMetrics.topSellers.map((s, i) =>
             </div>
             <div>
               <Label>{translate('productLabel')}</Label>
-              <Select value={filters.productId} onValueChange={(value) => handleFilterChange('productId', value)}>
-                <SelectTrigger>
-                  <SelectValue placeholder={translate('allShort')}>
-                    {filters.productId === 'all' ? translate('allProducts') : products.find(p => p.id === filters.productId)?.name}
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">{translate('allProducts')}</SelectItem>
-                  {products.map(product => (
-                    <SelectItem key={product.id} value={product.id}>
-                      {product.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <SearchableSelect
+                value={filters.productId}
+                placeholder={translate('allShort')}
+                clearable
+                clearToValue="all"
+                options={[
+                  { value: 'all', label: translate('allProducts') },
+                  ...products.map((p) => ({ value: p.id, label: p.name })),
+                ]}
+                onValueChange={(value) => handleFilterChange('productId', value)}
+              />
             </div>
             <div>
               <Label>{translate('storeHeader')}</Label>
-              <Select value={filters.storeId} onValueChange={(value) => handleFilterChange('storeId', value)}>
-                <SelectTrigger>
-                  <SelectValue placeholder={translate('allShort')}>
-                    {filters.storeId === 'all' ? translate('allStoresReport') : stores.find(s => s.id === filters.storeId)?.name}
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">{translate('allStoresReport')}</SelectItem>
-                  {stores.map(store => (
-                    <SelectItem key={store.id} value={store.id}>
-                      {store.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <SearchableSelect
+                value={filters.storeId}
+                placeholder={translate('allShort')}
+                clearable
+                clearToValue="all"
+                options={[
+                  { value: 'all', label: translate('allStoresReport') },
+                  ...stores.map((s) => ({ value: s.id, label: s.name })),
+                ]}
+                onValueChange={(value) => handleFilterChange('storeId', value)}
+              />
             </div>
             <div>
               <Label>{translate('city')}</Label>
-              <Select value={filters.cityId} onValueChange={(value) => handleFilterChange('cityId', value)}>
-                <SelectTrigger>
-                  <SelectValue placeholder={translate('allShort')}>
-                    {filters.cityId === 'all' ? translate('allCitiesReport') : cities.find(c => c.id === filters.cityId)?.name}
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">{translate('allCitiesReport')}</SelectItem>
-                  {cities.map(city => (
-                    <SelectItem key={city.id} value={city.id}>
-                      {city.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <SearchableSelect
+                value={filters.cityId}
+                placeholder={translate('allShort')}
+                clearable
+                clearToValue="all"
+                options={[
+                  { value: 'all', label: translate('allCitiesReport') },
+                  ...cities.map((c) => ({ value: c.id, label: c.name })),
+                ]}
+                onValueChange={(value) => handleFilterChange('cityId', value)}
+              />
             </div>
             <div>
               <Label>{translate('seller')}</Label>
-              <Select value={filters.sellerId} onValueChange={(value) => handleFilterChange('sellerId', value)}>
-                <SelectTrigger>
-                  <SelectValue placeholder={translate('allShort')}>
-                    {filters.sellerId === 'all' ? translate('allSellers') : (() => { const s = sellers.find(x => x.id === filters.sellerId); return s ? `${s.firstName} ${s.lastName}` : null; })()}
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">{translate('allSellers')}</SelectItem>
-                  {sellers.map(seller => (
-                    <SelectItem key={seller.id} value={seller.id}>
-                      {seller.firstName} {seller.lastName}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <SearchableSelect
+                value={filters.sellerId}
+                placeholder={translate('allShort')}
+                clearable
+                clearToValue="all"
+                options={[
+                  { value: 'all', label: translate('allSellers') },
+                  ...sellers.map((s) => ({
+                    value: s.id,
+                    label: `${s.firstName} ${s.lastName}`,
+                  })),
+                ]}
+                onValueChange={(value) => handleFilterChange('sellerId', value)}
+              />
             </div>
           </div>
           <div className="flex justify-between items-center mt-4 pt-4 border-t">

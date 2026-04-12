@@ -1,6 +1,8 @@
 // Tipos compartidos entre múltiples features
 export interface User {
   id: string;
+  /** Id para auth/admin (p. ej. `userId` o `identityUserId` en el GET; se envía como `userId` al actualizar contraseña). */
+  identityUserId?: string;
   email: string;
   password?: string;
   firstName: string;
@@ -49,8 +51,45 @@ export interface ValidationErrors {
 export interface City {
   id: string;
   name: string;
-  state?: string;
-  country: string;
+  /** Prefijo del estado (ej. CA). */
+  statePrefix?: string;
+  /** Nombre completo del estado (ej. California). */
+  stateFullName?: string;
+  country?: string;
+  /** Código de estado (p. ej. AL) o enum numérico legacy. */
+  state?: string | number;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+/** Opción de `GET /utilities/states` (`value` + `label`) o formato legacy numérico. */
+export interface CityStateOption {
+  value: string | number;
+  code?: string;
+  label: string;
+  /** Entero para POST `state` (p. ej. `id` o `enumValue` del ítem de `GET /utilities/states`). */
+  apiEnumValue?: number;
+}
+
+export interface Area {
+  id: string;
+  name: string;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface Region {
+  id: string;
+  areaId: string;
+  name: string;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface District {
+  id: string;
+  regionId: string;
+  name: string;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -68,9 +107,15 @@ export interface SalesRoute {
 
 export interface Store {
   id: string;
+  storeNumber?: string;
+  zoneNumber?: string;
+  zipCode?: string;
   name: string;
+  street?: string;
+  /** Mantener `address` como alias legacy para vistas existentes. */
   address: string;
   cityId: string;
+  districtId?: string;
   /** Indica si la tienda usa planograma en la PWA/backend. */
   hasPlanogram?: boolean;
   isActive: boolean;
@@ -86,7 +131,10 @@ export interface Brand {
   updatedAt: Date;
 }
 
-/** Familia de productos (FAMILY): alinea con API camelCase y columnas snake_case en BD. */
+/**
+ * Familia (FAMILY en BD): family_id, brand_id, class_id, name (VARCHAR 25), family_code (VARCHAR 4), is_active.
+ * Los campos shortName/genericCode/sku/volume/unit son opcionales solo por compatibilidad con respuestas antiguas.
+ */
 export interface Category {
   id: string;
   /** name en BD (VARCHAR 25) */
@@ -101,21 +149,62 @@ export interface Category {
   sku?: string;
   volume?: number;
   unit?: string;
+  brandId?: string;
+  classId?: string;
+  presentationId?: string;
   isActive: boolean;
   createdAt: Date;
   updatedAt: Date;
 }
 
+export interface ProductClass {
+  id: string;
+  name: string;
+  isActive: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+/** Familia anidada bajo `presentation` (respuesta típica de productos). */
+export interface ProductFamilyEmbed {
+  id?: string;
+  name?: string;
+  familyCode?: string;
+  code?: string;
+  brandId?: string;
+  classId?: string;
+}
+
+/** Presentación embebida en GET `/products/products` (y similares). */
+export interface ProductPresentationEmbed {
+  id?: string;
+  /** Nombre comercial de la presentación (API). */
+  name?: string;
+  sku?: string;
+  genericCode?: string;
+  volume?: number;
+  unit?: string;
+  family?: ProductFamilyEmbed;
+}
+
 export interface Product {
   id: string;
   name: string;
+  /** Nombre corto comercial para listados. */
+  shortName?: string;
   /** Código del producto (identificador comercial, distinto del SKU de familia). */
   code?: string;
   brandId?: string;
   familyId?: string;
   categoryId?: string;
   category?: string;
+  presentationId?: string;
+  /** Objeto anidado cuando el API lo devuelve (ej. genericCode/family). */
+  presentation?: ProductPresentationEmbed;
+  /** SKU del producto (ya no depende de Presentation). */
   sku?: string;
+  /** Código genérico asociado al producto (normalmente por su presentación/familia). */
+  genericCode?: string;
   description?: string;
   /** URL de la imagen del producto (devuelta por getProducts cuando tiene imagen) */
   image?: string;
@@ -209,6 +298,8 @@ export interface Assignment {
   /** Legacy: vendedor directo en la asignación. */
   userId?: string;
   storeId: string;
+  /** Nombre de tienda si la API lo devuelve anidado (evita mostrar solo GUID). */
+  storeName?: string;
   /** Modelo ER: asignación ruta + tienda. */
   salesRouteId?: string;
   createdAt?: Date;

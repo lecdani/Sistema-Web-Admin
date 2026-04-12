@@ -47,7 +47,12 @@ export function UserProfile({ onBack }: UserProfileProps) {
   const [profileLoading, setProfileLoading] = useState(false);
   const [realUserId, setRealUserId] = useState<string | null>(null);
   const [loadDone, setLoadDone] = useState(false);
-  const [formErrors, setFormErrors] = useState<{ email?: string; phone?: string }>({});
+  const [formErrors, setFormErrors] = useState<{
+    firstName?: string;
+    lastName?: string;
+    email?: string;
+    phone?: string;
+  }>({});
 
   const [passwordData, setPasswordData] = useState<PasswordData>({
     currentPassword: '',
@@ -92,7 +97,7 @@ export function UserProfile({ onBack }: UserProfileProps) {
   const handleProfileSave = async () => {
     const validationErrors = validateProfileData(profileData);
     if (Object.keys(validationErrors).length > 0) {
-      toast.error(Object.values(validationErrors)[0]);
+      setFormErrors((prev) => ({ ...prev, ...(validationErrors as any) }));
       return;
     }
 
@@ -107,7 +112,6 @@ export function UserProfile({ onBack }: UserProfileProps) {
       if (otherWithSameEmail) {
         const msg = translate('duplicateEmailMessage');
         setFormErrors((e) => ({ ...e, email: msg }));
-        toast.error(msg);
         return;
       }
       if (newPhoneNorm) {
@@ -117,7 +121,6 @@ export function UserProfile({ onBack }: UserProfileProps) {
         if (otherWithSamePhone) {
           const msg = translate('duplicatePhoneMessage');
           setFormErrors((e) => ({ ...e, phone: msg }));
-          toast.error(msg);
           return;
         }
       }
@@ -226,7 +229,7 @@ export function UserProfile({ onBack }: UserProfileProps) {
         ? translate('currentPasswordDoesNotMatch')
         : (err?.data?.message ?? err?.message ?? translate('errorSaveUser'));
       setPasswordErrors({ current: msg });
-      toast.error(msg);
+      // Evita duplicar toasts: ApiClient ya emite toast global para errores CRUD.
     } finally {
       setPasswordLoading(false);
     }
@@ -310,22 +313,30 @@ export function UserProfile({ onBack }: UserProfileProps) {
               <Input
                 id="firstName"
                 value={profileData.firstName}
-                onChange={(e) => setProfileData((prev) => ({ ...prev, firstName: e.target.value }))}
+                onChange={(e) => {
+                  setProfileData((prev) => ({ ...prev, firstName: e.target.value }));
+                  if (formErrors.firstName) setFormErrors((prev) => ({ ...prev, firstName: undefined }));
+                }}
                 disabled={!isEditingProfile}
-                className={!isEditingProfile ? 'bg-gray-50' : ''}
+                className={!isEditingProfile ? 'bg-gray-50' : formErrors.firstName ? 'border-red-500' : ''}
                 placeholder={translate('firstName')}
               />
+              {formErrors.firstName && <p className="text-sm text-red-600 mt-1">{formErrors.firstName}</p>}
             </div>
             <div>
               <Label htmlFor="lastName">{translate('lastName')} *</Label>
               <Input
                 id="lastName"
                 value={profileData.lastName}
-                onChange={(e) => setProfileData((prev) => ({ ...prev, lastName: e.target.value }))}
+                onChange={(e) => {
+                  setProfileData((prev) => ({ ...prev, lastName: e.target.value }));
+                  if (formErrors.lastName) setFormErrors((prev) => ({ ...prev, lastName: undefined }));
+                }}
                 disabled={!isEditingProfile}
-                className={!isEditingProfile ? 'bg-gray-50' : ''}
+                className={!isEditingProfile ? 'bg-gray-50' : formErrors.lastName ? 'border-red-500' : ''}
                 placeholder={translate('lastName')}
               />
+              {formErrors.lastName && <p className="text-sm text-red-600 mt-1">{formErrors.lastName}</p>}
             </div>
           </div>
           <div>
@@ -384,12 +395,6 @@ export function UserProfile({ onBack }: UserProfileProps) {
                 {passwordChangeSuccess && (
                   <div className="mx-6 mb-4 p-3 rounded-lg bg-green-50 border border-green-200 text-green-800 text-sm">
                     {translate('passwordResetSuccess')}
-                  </div>
-                )}
-                {(passwordErrors.current || passwordErrors.newPassword) && (
-                  <div className="mx-6 mb-4 p-3 rounded-lg bg-red-50 border border-red-200 text-red-800 text-sm space-y-1">
-                    {passwordErrors.current && <p>{translate('currentPasswordDoesNotMatch')}</p>}
-                    {passwordErrors.newPassword && <p>{translate('weakPassword')}: {passwordErrors.newPassword}</p>}
                   </div>
                 )}
                 <div className="space-y-4 px-6 pb-2">

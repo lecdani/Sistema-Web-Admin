@@ -45,7 +45,7 @@ import {
   AlertDialogTrigger,
 } from '@/shared/components/base/AlertDialog';
 import { Label } from '@/shared/components/base/Label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/shared/components/base/Select';
+import { SearchableSelect } from '@/shared/components/base/Select';
 import { User } from '@/shared/types';
 import { useLanguage } from '@/shared/hooks/useLanguage';
 import { usersApi } from '@/shared/services/users-api';
@@ -76,7 +76,7 @@ interface UserFormData {
   lastName: string;
   email: string;
   phone: string;
-  role: 'admin' | 'user';
+  role: '' | 'admin' | 'user';
   password: string;
 }
 
@@ -115,7 +115,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onBack }) => {
     lastName: '',
     email: '',
     phone: '',
-    role: 'user',
+    role: '',
     password: '',
   });
   const [formErrors, setFormErrors] = useState<Partial<Record<keyof UserFormData, string>>>({});
@@ -345,7 +345,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onBack }) => {
       lastName: '',
       email: '',
       phone: '',
-      role: 'user',
+      role: '',
       password: '',
     });
     setFormErrors({});
@@ -370,6 +370,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onBack }) => {
     if (!formData.email.trim()) err.email = translate('emailRequiredShort');
     else if (!/\S+@\S+\.\S+/.test(formData.email)) err.email = translate('emailInvalid');
     if (!formData.phone.trim()) err.phone = translate('phoneRequired');
+    if (!formData.role) err.role = translate('rolePlaceholder');
 
     const emailNorm = formData.email.trim().toLowerCase();
     const existingEmail = users.find(
@@ -405,15 +406,30 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onBack }) => {
         lastName: formData.lastName.trim(),
         email: formData.email.toLowerCase().trim(),
         phone: formData.phone.trim(),
-        role: formData.role,
+        role: formData.role as 'admin' | 'user',
       };
 
       if (editingUser) {
-        if (formData.password.trim()) {
-          userData.password = formData.password.trim();
-        }
         await usersApi.update(editingUser.id, userData);
         toast.success(translate('userSaved'));
+
+        const newPw = formData.password.trim();
+        if (newPw) {
+          let identityId = editingUser.identityUserId?.trim();
+          if (!identityId) {
+            const fresh = await usersApi.getById(editingUser.id);
+            identityId = fresh?.identityUserId?.trim();
+          }
+          if (!identityId) {
+            toast.error(translate('errorIdentityUserIdMissing'));
+          } else {
+            try {
+              await usersApi.adminUpdateUserPassword(identityId, newPw);
+            } catch {
+              toast.error(translate('errorChangePasswordAdmin'));
+            }
+          }
+        }
       } else {
         if (formData.password.trim()) userData.password = formData.password.trim();
         await usersApi.create(userData);
@@ -677,26 +693,27 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onBack }) => {
 
             <div>
               <Label htmlFor="role">{translate('rolePlaceholder')} *</Label>
-              <Select
+              <SearchableSelect
+                id="role"
                 value={formData.role}
-                onValueChange={(value) =>
+                placeholder={translate('rolePlaceholder')}
+                blankDisplayValues={['']}
+                options={[
+                  { value: 'user', label: translate('roleSeller') },
+                  { value: 'admin', label: translate('admin') },
+                ]}
+                onValueChange={(value) => {
                   setFormData((prev) => ({
                     ...prev,
-                    role: value as 'admin' | 'user',
-                  }))
-                }
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder={translate('rolePlaceholder')}>
-                    {formData.role === 'admin' && translate('admin')}
-                    {formData.role === 'user' && translate('roleSeller')}
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="user">{translate('roleSeller')}</SelectItem>
-                  <SelectItem value="admin">{translate('admin')}</SelectItem>
-                </SelectContent>
-              </Select>
+                    role: value as '' | 'admin' | 'user',
+                  }));
+                  if (formErrors.role) setFormErrors((prev) => ({ ...prev, role: undefined }));
+                }}
+                aria-invalid={!!formErrors.role}
+                inputClassName={formErrors.role ? 'border-red-500' : ''}
+                zIndex={60}
+              />
+              {formErrors.role && <p className="text-sm text-red-600 mt-1">{formErrors.role}</p>}
             </div>
 
             <div>
@@ -845,37 +862,39 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onBack }) => {
             </div>
 
             <div className="flex gap-4">
-              <Select value={roleFilter} onValueChange={setRoleFilter}>
-                <SelectTrigger className="w-48">
-                  <Filter className="h-4 w-4 mr-2" />
-                  <SelectValue placeholder={translate('filterByRole')}>
-                    {roleFilter === 'all' && translate('allRoles')}
-                    {roleFilter === 'admin' && translate('roleAdmins')}
-                    {roleFilter === 'user' && translate('roleSellers')}
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">{translate('allRoles')}</SelectItem>
-                  <SelectItem value="admin">{translate('roleAdmins')}</SelectItem>
-                  <SelectItem value="user">{translate('roleSellers')}</SelectItem>
-                </SelectContent>
-              </Select>
+              <div className="flex items-center gap-2 w-48 min-w-0">
+                <Filter className="h-4 w-4 shrink-0 text-gray-500" />
+                <SearchableSelect
+                  className="min-w-0 flex-1"
+                  value={roleFilter}
+                  placeholder={translate('filterByRole')}
+                  clearable
+                  clearToValue="all"
+                  options={[
+                    { value: 'all', label: translate('allRoles') },
+                    { value: 'admin', label: translate('roleAdmins') },
+                    { value: 'user', label: translate('roleSellers') },
+                  ]}
+                  onValueChange={setRoleFilter}
+                />
+              </div>
 
-              <Select value={statusFilter} onValueChange={setStatusFilter}>
-                <SelectTrigger className="w-48">
-                  <Filter className="h-4 w-4 mr-2" />
-                  <SelectValue placeholder={translate('filterByStatus')}>
-                    {statusFilter === 'all' && translate('allStatuses')}
-                    {statusFilter === 'active' && translate('active')}
-                    {statusFilter === 'inactive' && translate('inactive')}
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">{translate('allStatuses')}</SelectItem>
-                  <SelectItem value="active">{translate('active')}</SelectItem>
-                  <SelectItem value="inactive">{translate('inactive')}</SelectItem>
-                </SelectContent>
-              </Select>
+              <div className="flex items-center gap-2 w-48 min-w-0">
+                <Filter className="h-4 w-4 shrink-0 text-gray-500" />
+                <SearchableSelect
+                  className="min-w-0 flex-1"
+                  value={statusFilter}
+                  placeholder={translate('filterByStatus')}
+                  clearable
+                  clearToValue="all"
+                  options={[
+                    { value: 'all', label: translate('allStatuses') },
+                    { value: 'active', label: translate('active') },
+                    { value: 'inactive', label: translate('inactive') },
+                  ]}
+                  onValueChange={setStatusFilter}
+                />
+              </div>
             </div>
           </div>
         </CardContent>

@@ -2,6 +2,14 @@ import { apiClient, API_CONFIG } from '@/shared/config/api';
 import type { Assignment } from '@/shared/types';
 import { getLoggedUser } from '@/shared/utils/auth';
 
+function storeNameFromNested(raw: any): string | undefined {
+  const st = raw?.store ?? raw?.Store ?? raw?.storeInfo ?? raw?.StoreInfo;
+  if (!st || typeof st !== 'object') return undefined;
+  const name = st?.name ?? st?.Name ?? st?.storeName ?? st?.StoreName;
+  const s = name != null ? String(name).trim() : '';
+  return s || undefined;
+}
+
 function toAssignment(raw: any): Assignment | null {
   const id = String(raw?.id ?? raw?.Id ?? raw?.assignmentId ?? raw?.AssignmentId ?? '').trim();
   const userId = String(
@@ -31,6 +39,10 @@ function toAssignment(raw: any): Assignment | null {
   const storeId = String(raw?.storeId ?? raw?.StoreId ?? '').trim();
   if (!storeId) return null;
   if (!userId && !salesRouteId) return null;
+  const flatSn = raw?.storeName ?? raw?.StoreName;
+  const storeName =
+    storeNameFromNested(raw) ??
+    (flatSn != null && String(flatSn).trim() ? String(flatSn).trim() : undefined);
   const syntheticId =
     id ||
     (salesRouteId ? `${salesRouteId}::${storeId}` : userId ? `${userId}::${storeId}` : storeId);
@@ -38,6 +50,7 @@ function toAssignment(raw: any): Assignment | null {
     id: syntheticId,
     userId: userId || undefined,
     storeId,
+    storeName: storeName || undefined,
     salesRouteId: salesRouteId || undefined,
     createdAt: raw?.createdAt ? new Date(raw.createdAt) : raw?.CreatedAt ? new Date(raw.CreatedAt) : undefined,
   };

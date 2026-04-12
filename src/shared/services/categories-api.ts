@@ -3,32 +3,24 @@ import type { Category } from '@/shared/types';
 
 const E = API_CONFIG.ENDPOINTS.FAMILIES;
 
+/** Body alineado con tabla FAMILY: name, family_code, brand_id, class_id. */
 export type FamilyWritePayload = {
   name: string;
-  shortName: string;
   familyCode: string;
-  genericCode: string;
-  sku: string;
-  volume: number;
-  unit: string;
+  brandId: string;
+  classId: string;
 };
 
 function buildFamilyJsonBody(p: FamilyWritePayload): Record<string, unknown> {
   return {
     name: p.name,
     Name: p.name,
-    shortName: p.shortName,
-    ShortName: p.shortName,
     familyCode: p.familyCode,
     FamilyCode: p.familyCode,
-    genericCode: p.genericCode,
-    GenericCode: p.genericCode,
-    sku: p.sku,
-    Sku: p.sku,
-    volume: p.volume,
-    Volume: p.volume,
-    unit: p.unit,
-    Unit: p.unit,
+    brandId: p.brandId,
+    BrandId: p.brandId,
+    classId: p.classId,
+    ClassId: p.classId,
   };
 }
 
@@ -38,10 +30,6 @@ function mergeFamilyResponseWithPayload(raw: Record<string, any>, payload: Recor
     raw.name = payload.name;
     raw.Name = payload.Name;
   }
-  if (!String(raw.shortName ?? raw.ShortName ?? '').trim() && String(payload.shortName ?? '').trim()) {
-    raw.shortName = payload.shortName;
-    raw.ShortName = payload.ShortName;
-  }
   const pCode = String(payload.familyCode ?? payload.code ?? '').trim();
   if (!String(raw.familyCode ?? raw.FamilyCode ?? raw.family_code ?? '').trim() && pCode) {
     raw.familyCode = pCode;
@@ -49,21 +37,23 @@ function mergeFamilyResponseWithPayload(raw: Record<string, any>, payload: Recor
     raw.code = pCode;
     raw.Code = pCode;
   }
-  if (!String(raw.genericCode ?? raw.GenericCode ?? raw.generic_code ?? '').trim() && String(payload.genericCode ?? '').trim()) {
-    raw.genericCode = payload.genericCode;
-    raw.GenericCode = payload.GenericCode;
+  if (!String(raw.brandId ?? raw.BrandId ?? '').trim() && String(payload.brandId ?? '').trim()) {
+    raw.brandId = payload.brandId;
+    raw.BrandId = payload.BrandId;
   }
-  if (!String(raw.sku ?? raw.Sku ?? '').trim()) {
-    raw.sku = payload.sku;
-    raw.Sku = payload.Sku;
+  if (!String(raw.classId ?? raw.ClassId ?? '').trim() && String(payload.classId ?? '').trim()) {
+    raw.classId = payload.classId;
+    raw.ClassId = payload.ClassId;
   }
-  if (raw.volume == null && raw.Volume == null) {
-    raw.volume = payload.volume;
-    raw.Volume = payload.Volume;
+  const bid = brandIdFromRaw(raw);
+  const cid = classIdFromRaw(raw);
+  if (bid) {
+    raw.brandId = bid;
+    raw.BrandId = bid;
   }
-  if (!String(raw.unit ?? raw.Unit ?? '').trim() && String(payload.unit ?? '').trim()) {
-    raw.unit = payload.unit;
-    raw.Unit = payload.Unit;
+  if (cid) {
+    raw.classId = cid;
+    raw.ClassId = cid;
   }
 }
 
@@ -77,6 +67,28 @@ function unwrapCreatedFamilyBody(res: any): Record<string, any> | null {
   const inner = res.data ?? res.Data ?? res.item ?? res.Item;
   if (inner && typeof inner === 'object' && !Array.isArray(inner)) return { ...inner };
   return { ...res };
+}
+
+function brandIdFromRaw(raw: any): string | undefined {
+  const flat = raw?.brandId ?? raw?.BrandId;
+  if (flat != null && String(flat).trim() !== '') return String(flat).trim();
+  const b = raw?.brand ?? raw?.Brand;
+  if (b && (b.id != null || b.Id != null)) {
+    const id = String(b.id ?? b.Id ?? '').trim();
+    return id || undefined;
+  }
+  return undefined;
+}
+
+function classIdFromRaw(raw: any): string | undefined {
+  const flat = raw?.classId ?? raw?.ClassId;
+  if (flat != null && String(flat).trim() !== '') return String(flat).trim();
+  const c = raw?.class ?? raw?.Class;
+  if (c && (c.id != null || c.Id != null)) {
+    const id = String(c.id ?? c.Id ?? '').trim();
+    return id || undefined;
+  }
+  return undefined;
 }
 
 function toCategory(raw: any): Category {
@@ -108,6 +120,9 @@ function toCategory(raw: any): Category {
     sku: String(raw.sku ?? raw.Sku ?? '').trim() || undefined,
     volume: Number(raw.volume ?? raw.Volume ?? 0) || undefined,
     unit: String(raw.unit ?? raw.Unit ?? '').trim() || undefined,
+    brandId: brandIdFromRaw(raw),
+    classId: classIdFromRaw(raw),
+    presentationId: raw.presentationId ?? raw.PresentationId ?? undefined,
     isActive: typeof raw.isActive === 'boolean' ? raw.isActive : (raw.IsActive ?? true),
     createdAt: raw.createdAt ? new Date(raw.createdAt) : raw.CreatedAt ? new Date(raw.CreatedAt) : new Date(),
     updatedAt: raw.updatedAt ? new Date(raw.updatedAt) : raw.UpdatedAt ? new Date(raw.UpdatedAt) : new Date()
@@ -132,16 +147,13 @@ export async function fetchCategoryById(id: string): Promise<Category | null> {
   }
 }
 
-/** Crea una familia (POST body: name, shortName, familyCode, genericCode, sku, volume, unit). */
+/** Crea una familia (POST: name, familyCode, brandId, classId). */
 export async function createCategory(data: FamilyWritePayload): Promise<Category> {
   const p: FamilyWritePayload = {
     name: (data.name ?? '').trim() || 'Familia',
-    shortName: String(data.shortName ?? '').trim(),
     familyCode: String(data.familyCode ?? '').trim(),
-    genericCode: String(data.genericCode ?? '').trim(),
-    sku: String(data.sku ?? '').trim(),
-    volume: Number(data.volume ?? 0),
-    unit: String(data.unit ?? '').trim(),
+    brandId: String(data.brandId ?? '').trim(),
+    classId: String(data.classId ?? '').trim(),
   };
   const payload = buildFamilyJsonBody(p);
   const res = await apiClient.post<any>(E.CREATE, payload);
@@ -160,12 +172,9 @@ export async function updateCategory(id: string, data: FamilyWritePayload): Prom
   const endpoint = E.UPDATE.replace('{id}', encodeURIComponent(id));
   const p: FamilyWritePayload = {
     name: (data.name ?? '').trim(),
-    shortName: String(data.shortName ?? '').trim(),
     familyCode: String(data.familyCode ?? '').trim(),
-    genericCode: String(data.genericCode ?? '').trim(),
-    sku: String(data.sku ?? '').trim(),
-    volume: Number(data.volume ?? 0),
-    unit: String(data.unit ?? '').trim(),
+    brandId: String(data.brandId ?? '').trim(),
+    classId: String(data.classId ?? '').trim(),
   };
   const payload = { id, Id: id, ...buildFamilyJsonBody(p) };
   const res = await apiClient.put<any>(endpoint, payload);
@@ -188,10 +197,17 @@ export async function toggleCategoryActive(id: string): Promise<void> {
   await apiClient.put(endpoint, { id });
 }
 
+/** Elimina una familia (DELETE /families/families/{id}); el servidor puede exigir que no haya presentaciones ni productos. */
+export async function deleteCategory(id: string): Promise<void> {
+  const endpoint = E.DELETE.replace('{id}', encodeURIComponent(id));
+  await apiClient.delete(endpoint);
+}
+
 export const categoriesApi = {
   fetchAll: fetchCategories,
   getById: fetchCategoryById,
   create: createCategory,
   update: updateCategory,
-  toggleActive: toggleCategoryActive
+  toggleActive: toggleCategoryActive,
+  delete: deleteCategory,
 };

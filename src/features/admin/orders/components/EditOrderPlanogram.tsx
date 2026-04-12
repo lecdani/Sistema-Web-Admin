@@ -14,6 +14,7 @@ import { getBackendAssetUrl } from '@/shared/config/api';
 import { toast } from 'sonner';
 import { useLanguage } from '@/shared/hooks/useLanguage';
 import { ProductModalOrderEdit, ProductPositionEdit } from './ProductModalOrderEdit';
+import { getProductCodeLine, getProductShortDisplayName } from '@/shared/utils/planogram-grid-display';
 
 function getProductImageUrl(product: Product | null | undefined): string {
   if (!product) return '';
@@ -28,9 +29,10 @@ interface EditOrderPlanogramProps {
   onSaved: (orderId: string) => void;
 }
 
-const cellSize = 64;
-const gap = 8;
-const gridTotal = 10 * cellSize + 9 * gap;
+const cellW = 96;
+const cellH = 80;
+const gap = 6;
+const gridTotal = 10 * cellW + 9 * gap;
 
 export function EditOrderPlanogram({ order, onClose, onSaved }: EditOrderPlanogramProps) {
   const { translate } = useLanguage();
@@ -126,8 +128,12 @@ export function EditOrderPlanogram({ order, onClose, onSaved }: EditOrderPlanogr
           let price = Number(item.price ?? 0) || 0;
           if (!price) {
             try {
-              const latest = await histpricesApi.getLatest(id);
-              if (latest?.price != null) price = latest.price;
+              const prod = getProduct(id);
+              const presId = String(prod?.presentationId ?? '').trim();
+              if (presId) {
+                const latest = await histpricesApi.getLatest(presId);
+                if (latest?.price != null) price = latest.price;
+              }
             } catch {}
           }
           const q = Number(item.quantity ?? item.toOrder ?? 0) || 0;
@@ -138,10 +144,13 @@ export function EditOrderPlanogram({ order, onClose, onSaved }: EditOrderPlanogr
               String(d?.productId ?? d?.ProductId ?? '') === id &&
               Number(d?.quantity ?? d?.Quantity ?? 0) === q
           );
+          const pr = getProduct(id);
           arr.push({
             orderDetailId: String(detailByPid?.orderDetailId ?? detailByPid?.OrderDetailId ?? detailByPid?.id ?? detailByPid?.Id ?? '').trim() || undefined,
-            productName: (item.productName ?? item.sku ?? getProduct(id)?.name ?? '').trim(),
-            sku: item.sku ?? getProduct(id)?.code ?? getProduct(id)?.sku ?? '',
+            productName: pr
+              ? getProductShortDisplayName(pr)
+              : (item.productName ?? item.sku ?? '').trim(),
+            sku: String(item.sku ?? pr?.sku ?? pr?.code ?? '').trim() || '',
             quantity: q,
             price,
             row: detailByPid?.row ?? detailByPid?.Row ?? detailByPid?.xPosition ?? detailByPid?.XPosition,
@@ -176,8 +185,17 @@ export function EditOrderPlanogram({ order, onClose, onSaved }: EditOrderPlanogr
               col,
               orderDetailId: next?.orderDetailId,
               productId: product?.id ?? '',
-              productName: next?.productName ?? product?.name ?? product?.code ?? product?.sku ?? '',
-              sku: next?.sku ?? product?.code ?? product?.sku ?? '',
+              productName: product
+                ? getProductShortDisplayName(product)
+                : String(next?.productName ?? '').trim(),
+              sku:
+                String(next?.sku ?? '').trim() ||
+                String(product?.sku ?? '').trim() ||
+                String(product?.code ?? '').trim() ||
+                '',
+              codeLine: product
+                ? getProductCodeLine(product)
+                : String(next?.sku ?? '').trim() || '—',
               toOrder: next?.quantity ?? 0,
               price: next?.price ?? product?.currentPrice ?? 0,
               imageUrl: product ? getProductImageUrl(product) : undefined,
@@ -217,9 +235,8 @@ export function EditOrderPlanogram({ order, onClose, onSaved }: EditOrderPlanogr
   };
 
   const getCellStyle = (item: ProductPositionEdit): React.CSSProperties => {
-    if (!item.productId) return { backgroundColor: '#94a3b8', borderColor: '#64748b' };
-    if (item.toOrder > 0) return { backgroundColor: '#e0e7ff', borderColor: '#818cf8' };
-    return { backgroundColor: '#f8fafc', borderColor: '#e2e8f0' };
+    if (!item.productId) return { backgroundColor: '#ffffff', borderColor: '#d1d5db' };
+    return { backgroundColor: '#d1d5db', borderColor: '#525252' };
   };
 
   const orderItems = planogramData.filter((i) => i.productId && (i.toOrder > 0 || !!i.orderDetailId));
@@ -428,7 +445,7 @@ export function EditOrderPlanogram({ order, onClose, onSaved }: EditOrderPlanogr
             className="rounded-lg border border-gray-200 bg-gray-50/80 p-3 shadow-sm inline-block"
             style={{
               display: 'grid',
-              gridTemplateColumns: `repeat(10, ${cellSize}px)`,
+              gridTemplateColumns: `repeat(10, ${cellW}px)`,
               gap: `${gap}px`,
             }}
           >
@@ -442,38 +459,58 @@ export function EditOrderPlanogram({ order, onClose, onSaved }: EditOrderPlanogr
                 }}
                 className={`rounded-md border transition-colors min-w-0 ${item.productId ? 'hover:bg-indigo-50/70 cursor-pointer' : 'cursor-default'}`}
                 style={{
-                  width: cellSize,
-                  height: cellSize,
+                  width: cellW,
+                  height: cellH,
                   ...getCellStyle(item),
                   display: 'flex',
                   flexDirection: 'column',
                   alignItems: 'center',
                   justifyContent: 'center',
-                  padding: 5,
+                  padding: 4,
                   textAlign: 'center',
                   overflow: 'hidden',
                 }}
               >
                 {item.productId ? (
-                  <>
+                  <div className="text-center w-full h-full flex flex-col justify-center items-center p-0.5 relative min-h-0 min-w-0">
                     {item.imageUrl ? (
                       <img
                         src={item.imageUrl}
                         alt=""
-                        className="w-6 h-6 rounded object-cover flex-shrink-0 mx-auto"
+                        className="w-8 h-8 mx-auto rounded object-cover flex-shrink-0 mb-0.5"
                       />
                     ) : (
-                      <div className="w-6 h-6 rounded bg-gray-200 flex items-center justify-center flex-shrink-0 mx-auto">
-                        <Package className="h-3 w-3 text-gray-500" />
+                      <div className="w-8 h-8 mx-auto rounded bg-gray-200 flex items-center justify-center flex-shrink-0 mb-0.5">
+                        <Package className="h-4 w-4 text-gray-600" />
                       </div>
                     )}
-                    <span className="text-[10px] leading-snug font-medium text-gray-900 line-clamp-2 w-full break-words mt-0.5">
-                      {item.productName || item.sku}
-                    </span>
+                    <div className="font-bold text-blue-800 truncate text-[10px] leading-tight w-full max-w-full px-0.5">
+                      {(item.codeLine ?? item.sku) || '—'}
+                    </div>
+                    {(item.productName || '').trim() ? (
+                      <div
+                        className="block w-full max-w-full px-0.5 text-blue-900/90 font-bold overflow-hidden mt-0.5"
+                        style={{
+                          fontSize: '7px',
+                          lineHeight: 1.1,
+                          whiteSpace: 'normal',
+                          wordBreak: 'break-word',
+                          overflowWrap: 'anywhere',
+                          display: '-webkit-box',
+                          WebkitLineClamp: 2,
+                          WebkitBoxOrient: 'vertical' as const,
+                        }}
+                      >
+                        {(item.productName || '').trim()}
+                      </div>
+                    ) : null}
                     {item.toOrder > 0 && (
-                      <span className="text-[10px] font-semibold text-indigo-600 mt-0.5">{item.toOrder} u</span>
+                      <>
+                        <div className="absolute top-1 left-1 w-3 h-3 bg-blue-600 rounded-full shadow-md" aria-hidden />
+                        <span className="text-[10px] font-bold text-blue-900 mt-0.5">{item.toOrder} u</span>
+                      </>
                     )}
-                  </>
+                  </div>
                 ) : null}
               </button>
             ))}

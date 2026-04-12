@@ -21,9 +21,14 @@ function toStore(raw: any): Store {
 
     return {
         id: String(raw.id ?? raw.Id ?? ''),
+        storeNumber: String(raw.storeNumber ?? raw.StoreNumber ?? '').trim() || undefined,
+        zoneNumber: String(raw.zoneNumber ?? raw.ZoneNumber ?? '').trim() || undefined,
+        zipCode: String(raw.zipCode ?? raw.ZipCode ?? '').trim() || undefined,
         name: String(raw.name ?? raw.Name ?? ''),
-        address: String(raw.address ?? raw.Address ?? ''),
+        street: String(raw.street ?? raw.Street ?? '').trim() || undefined,
+        address: String(raw.address ?? raw.Address ?? raw.street ?? raw.Street ?? '').trim(),
         cityId: String(raw.cityId ?? raw.CityId ?? ''),
+        districtId: String(raw.districtId ?? raw.DistrictId ?? '').trim() || undefined,
         hasPlanogram,
         isActive: typeof raw.isActive === 'boolean' ? raw.isActive : (raw.IsActive ?? true),
         createdAt: raw.createdAt ? new Date(raw.createdAt) : raw.CreatedAt ? new Date(raw.CreatedAt) : new Date(),
@@ -33,10 +38,21 @@ function toStore(raw: any): Store {
 
 function toPayload(data: Partial<Store>) {
     return {
+        storeNumber: data.storeNumber?.trim(),
+        StoreNumber: data.storeNumber?.trim(),
+        zoneNumber: data.zoneNumber?.trim(),
+        ZoneNumber: data.zoneNumber?.trim(),
+        zipCode: data.zipCode?.trim(),
+        ZipCode: data.zipCode?.trim(),
         name: data.name?.trim(),
-        address: data.address?.trim(),
+        street: (data.street ?? data.address)?.trim(),
+        Street: (data.street ?? data.address)?.trim(),
         cityId: data.cityId,
+        CityId: data.cityId,
+        districtId: data.districtId,
+        DistrictId: data.districtId,
         hasPlanogram: data.hasPlanogram ?? false,
+        HasPlanogram: data.hasPlanogram ?? false,
         isActive: data.isActive
     };
 }
@@ -51,17 +67,6 @@ export async function fetchStores(): Promise<Store[]> {
 /** Obtiene una tienda por id */
 export async function fetchStoreById(id: string): Promise<Store | null> {
     const endpoint = E.GET_BY_ID.replace('{id}', encodeURIComponent(id));
-    try {
-        const res = await apiClient.get<any>(endpoint);
-        return res ? toStore(res) : null;
-    } catch {
-        return null;
-    }
-}
-
-/** Obtiene una tienda por nombre */
-export async function fetchStoreByName(name: string): Promise<Store | null> {
-    const endpoint = E.GET_BY_NAME.replace('{name}', encodeURIComponent(name));
     try {
         const res = await apiClient.get<any>(endpoint);
         return res ? toStore(res) : null;
@@ -106,6 +111,7 @@ export async function updateStore(id: string, data: Partial<Store>): Promise<Sto
             name: data.name || '',
             address: data.address || '',
             cityId: data.cityId || '',
+            districtId: data.districtId || '',
             isActive: data.isActive ?? true,
             createdAt: new Date(),
             updatedAt: new Date(),
@@ -134,12 +140,24 @@ export async function fetchStoresByCity(cityId: string): Promise<Store[]> {
     }
 }
 
+/** Obtiene tiendas por distrito */
+export async function fetchStoresByDistrict(districtId: string): Promise<Store[]> {
+    const endpoint = E.GET_BY_DISTRICT.replace('{districtId}', encodeURIComponent(districtId));
+    try {
+        const res = await apiClient.get<any>(endpoint);
+        const list = Array.isArray(res) ? res : res?.data ?? res?.items ?? [];
+        return (list as any[]).map(toStore);
+    } catch {
+        return [];
+    }
+}
+
 export const storesApi = {
     fetchAll: fetchStores,
     getById: fetchStoreById,
-    getByName: fetchStoreByName,
     create: createStore,
     update: updateStore,
     deactivate: deactivateStore,
-    getByCity: fetchStoresByCity
+    getByCity: fetchStoresByCity,
+    getByDistrict: fetchStoresByDistrict
 };

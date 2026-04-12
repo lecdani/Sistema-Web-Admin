@@ -755,6 +755,30 @@ export async function isPoAlreadyUsed(
   });
 }
 
+/** Indica si un producto aparece en al menos un pedido (por order details). */
+export async function isProductUsedInAnyOrder(productId: string): Promise<boolean> {
+  const pid = String(productId || '').trim();
+  if (!pid) return false;
+  try {
+    const raw = await apiClient.get<any>('/orders/orders');
+    const list = normalizeOrderListResponse(raw);
+    const pidNorm = pid.toLowerCase();
+    for (const order of list) {
+      const details = extractOrderDetailsFromRaw(order);
+      if (
+        details.some(
+          (d: any) => String(d?.productId ?? d?.ProductId ?? '').trim().toLowerCase() === pidNorm
+        )
+      ) {
+        return true;
+      }
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
 // ============================
 // Tipos y helpers para CRUD de pedidos (API real, compartido con la PWA)
 // ============================
@@ -1258,9 +1282,9 @@ async function computeMonetaryTotalsFromOrderRaw(raw: any): Promise<{ subtotal: 
     if (!(price > 0) && pid) {
       try {
         const product = await productsApi.getById(pid);
-        const fid = String((product as any)?.familyId ?? product?.categoryId ?? '').trim();
-        if (fid) {
-          const hp = await histpricesApi.getLatest(fid);
+        const presId = String((product as any)?.presentationId ?? '').trim();
+        if (presId) {
+          const hp = await histpricesApi.getLatest(presId);
           price = hp?.price ?? 0;
         }
       } catch {
@@ -1859,6 +1883,7 @@ export const ordersApi = {
     items: Array<{
       qty: number;
       code: string;
+      sku?: string;
       description: string;
       price: number;
       amount: number;
@@ -1959,25 +1984,31 @@ export const ordersApi = {
           description = (product.name || product.sku || '').trim();
         }
         description = description || '—';
-        // SKU comercial preferente; si falta todo, usar productId para cruzar planograma/factura (misma línea útil que UUID en PWA).
-        const codeFromSku =
-          String(orderItem?.sku || '').trim() ||
-          String(product?.sku || '').trim() ||
-          String(d?.sku ?? d?.Sku ?? d?.product?.sku ?? d?.Product?.Sku ?? '').trim() ||
-          String(product?.code || '').trim() ||
-          '';
-        const code = codeFromSku || (pid ? String(pid) : '—');
+        const detailSku = String(d?.sku ?? d?.Sku ?? d?.product?.sku ?? d?.Product?.Sku ?? '').trim();
+        const orderSku = String(orderItem?.sku || '').trim();
+        const productSku = String(product?.sku || '').trim();
+        const productCode = String(product?.code || '').trim();
+        const skuField = orderSku || detailSku || productSku || undefined;
+        const code = orderSku || detailSku || productCode || (pid ? String(pid) : '') || '—';
         if ((price === 0 || amount === 0) && pid) {
           let latestPrice = orderItem?.price && orderItem.price > 0 ? orderItem.price : 0;
           if (!(latestPrice > 0)) {
             const p = product ?? (await productsApi.getById(pid).catch(() => null));
-            const familyId = String((p as any)?.familyId ?? p?.categoryId ?? '').trim();
-            latestPrice = familyId ? await histpricesApi.getLatest(familyId).then((pr) => pr?.price ?? 0) : 0;
+            const presId = String((p as any)?.presentationId ?? '').trim();
+            latestPrice = presId ? await histpricesApi.getLatest(presId).then((pr) => pr?.price ?? 0) : 0;
           }
           price = latestPrice;
           amount = qty * price;
         }
-        return { qty, code, description, price, amount };
+        return {
+          qty,
+          code,
+          ...(skuField ? { sku: skuField } : {}),
+          description,
+          price,
+          amount,
+          ...(pid ? { productId: String(pid).trim() } : {}),
+        };
       })
     );
 
@@ -2315,8 +2346,8 @@ export const ordersApi = {
           const pid = String(d?.productId ?? d?.ProductId ?? '').trim();
           if (pid) {
             const product = await productsApi.getById(pid);
-            const familyId = String((product as any)?.familyId ?? product?.categoryId ?? '').trim();
-            const latest = familyId ? await histpricesApi.getLatest(familyId) : null;
+            const presId = String((product as any)?.presentationId ?? '').trim();
+            const latest = presId ? await histpricesApi.getLatest(presId) : null;
             const p = latest?.price ?? 0;
             if (p > 0) {
               unitPrice = p;

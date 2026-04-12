@@ -44,7 +44,9 @@ import { toast } from '@/shared/components/base/Toast';
 import { planogramsApi } from '@/shared/services/planograms-api';
 import { distributionsApi } from '@/shared/services/distributions-api';
 import { productsApi } from '@/shared/services/products-api';
+import { brandsApi } from '@/shared/services/brands-api';
 import { fetchAllOrderSummaries } from '@/shared/services/orders-api';
+import { findEternalBrandId } from '@/shared/utils/eternal-brand';
 import { PlanogramEditor } from './components/PlanogramEditor';
 import { PlanogramViewer } from './components/PlanogramViewer';
 
@@ -67,6 +69,7 @@ export const PlanogramManagement: React.FC<PlanogramManagementProps> = ({ onBack
   const [selectedPlanogram, setSelectedPlanogram] = useState<PlanogramWithDistribution | null>(null);
   const [editingPlanogram, setEditingPlanogram] = useState<Planogram | null>(null);
   const [ordersWithPlanogram, setOrdersWithPlanogram] = useState<{ planogramId?: string }[]>([]);
+  const [planogramBrandId, setPlanogramBrandId] = useState<string | undefined>(undefined);
 
   useEffect(() => {
     loadData();
@@ -80,14 +83,16 @@ export const PlanogramManagement: React.FC<PlanogramManagementProps> = ({ onBack
 
   const loadData = async () => {
     try {
-      const [planogramData, productData, orderSummaries] = await Promise.all([
+      const [planogramData, productData, orderSummaries, brandList] = await Promise.all([
         planogramsApi.fetchAll(),
         productsApi.fetchAll(),
-        fetchAllOrderSummaries()
+        fetchAllOrderSummaries(),
+        brandsApi.fetchAll().catch(() => []),
       ]);
       setPlanograms(planogramData);
       setProducts(productData);
       setOrdersWithPlanogram(orderSummaries);
+      setPlanogramBrandId(findEternalBrandId(brandList));
       const distArrays = await Promise.all(planogramData.map((p) => distributionsApi.getByPlanogram(p.id)));
       setDistributions(distArrays.flat());
     } catch (error) {
@@ -258,6 +263,7 @@ export const PlanogramManagement: React.FC<PlanogramManagementProps> = ({ onBack
             <div className="flex-1 overflow-auto p-6 bg-gray-50">
               <PlanogramEditor 
                 products={products.filter(p => p.isActive)}
+                planogramBrandId={planogramBrandId}
                 onSave={handlePlanogramCreated}
                 onCancel={() => setShowCreateDialog(false)}
               />
@@ -596,6 +602,7 @@ export const PlanogramManagement: React.FC<PlanogramManagementProps> = ({ onBack
             <div className="flex-1 overflow-hidden p-4">
               <PlanogramEditor 
                 products={products.filter(p => p.isActive)}
+                planogramBrandId={planogramBrandId}
                 planogram={editingPlanogram}
                 existingDistributions={distributions.filter((d) => d.planogramId === editingPlanogram.id)}
                 onSave={handlePlanogramUpdated}

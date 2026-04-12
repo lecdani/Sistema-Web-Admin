@@ -76,8 +76,19 @@ function toUser(raw: any): User {
     const rawRole = String(raw.rol ?? raw.Rol ?? raw.role ?? raw.Role ?? 'user').toLowerCase();
     const role: 'admin' | 'user' = rawRole.startsWith('admin') ? 'admin' : 'user'; // cualquier otro (Vendedor, etc.) se trata como usuario normal
 
+    const identityUserId =
+        pickGuidish(
+            raw.identityUserId ??
+                raw.IdentityUserId ??
+                raw.identity_user_id ??
+                raw.Identity_User_Id ??
+                raw.userId ??
+                raw.UserId
+        ) ?? undefined;
+
     return {
         id: String(raw.id ?? raw.Id ?? ''),
+        identityUserId,
         email: String(raw.email ?? raw.Email ?? ''),
         firstName: String(raw.name ?? raw.Name ?? raw.firstName ?? raw.FirstName ?? ''),
         lastName: String(raw.lastName ?? raw.LastName ?? ''),
@@ -205,10 +216,11 @@ export async function createUser(data: Omit<User, 'id' | 'createdAt' | 'updatedA
     } as User;
 }
 
-/** Actualiza un usuario */
+/** Actualiza un usuario (la contraseña no va en el PUT; usar `adminUpdateUserPassword` con el userId que devuelve el GET). */
 export async function updateUser(id: string, data: Partial<User> & { password?: string }): Promise<User> {
+    const { password: _omitPassword, ...rest } = data;
     const endpoint = E.UPDATE.replace('{id}', encodeURIComponent(id));
-    const payload = { id, ...toPayload(data) };
+    const payload = { id, ...toPayload(rest) };
 
     const res = await apiClient.put<any>(endpoint, payload);
 
@@ -311,6 +323,17 @@ export async function updateProfile(data: Partial<User> & { address?: string }):
     } as User;
 }
 
+/** Admin: POST /auth/admin/update-user-password — cuerpo `{ userId, newPassword }`. */
+export async function adminUpdateUserPassword(userId: string, newPassword: string): Promise<void> {
+    const uid = String(userId ?? '').trim();
+    const pw = String(newPassword ?? '');
+    const endpoint = API_CONFIG.ENDPOINTS.AUTH.UPDATE_USER_PASSWORD;
+    await apiClient.post(endpoint, {
+        userId: uid,
+        newPassword: pw,
+    });
+}
+
 /** Cambia la contraseña (POST /auth/change-password). Misma lógica que en login/reset. */
 export async function changePassword(params: {
     email: string;
@@ -344,5 +367,6 @@ export const usersApi = {
     getProfile,
     updateProfile,
     changePassword,
-    changePasswordByEmail
+    changePasswordByEmail,
+    adminUpdateUserPassword
 };

@@ -7,7 +7,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/sha
 import { Badge } from '@/shared/components/base/Badge';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/shared/components/base/Dialog';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/shared/components/base/Table';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/shared/components/base/Select';
+import { SearchableSelect } from '@/shared/components/base/Select';
 import { Textarea } from '@/shared/components/base/Textarea';
 import { 
   ArrowLeft,
@@ -540,61 +540,64 @@ export function PODManagement({ onBack }: PODManagementProps) {
             </div>
             
             <div className="flex gap-4">
-              <Select value={filters.sellerId} onValueChange={(value) => setFilters(prev => ({ ...prev, sellerId: value }))}>
-                <SelectTrigger className="w-48">
-                  <UserIcon className="h-4 w-4 mr-2" />
-                  <SelectValue placeholder={translate('filterBySeller')}>
-                    {filters.sellerId === 'all' ? translate('allSellers') : (() => { const u = users.filter(x => x.role === 'user').find((x) => x.id === filters.sellerId); return u ? `${u.firstName} ${u.lastName}` : null; })()}
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">{translate('allSellers')}</SelectItem>
-                  {users.filter(u => u.role === 'user').map((user) => (
-                    <SelectItem key={user.id} value={user.id}>
-                      {user.firstName} {user.lastName}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <div className="flex items-center gap-2 w-48 min-w-0">
+                <UserIcon className="h-4 w-4 shrink-0 text-gray-500" />
+                <SearchableSelect
+                  className="min-w-0 flex-1"
+                  value={filters.sellerId}
+                  placeholder={translate('filterBySeller')}
+                  clearable
+                  clearToValue="all"
+                  options={[
+                    { value: 'all', label: translate('allSellers') },
+                    ...users
+                      .filter((u) => u.role === 'user')
+                      .map((u) => ({
+                        value: u.id,
+                        label: `${u.firstName} ${u.lastName}`,
+                      })),
+                  ]}
+                  onValueChange={(value) => setFilters((prev) => ({ ...prev, sellerId: value }))}
+                />
+              </div>
 
-              <Select value={filters.storeId} onValueChange={(value) => setFilters(prev => ({ ...prev, storeId: value }))}>
-                <SelectTrigger className="w-48">
-                  <StoreIcon className="h-4 w-4 mr-2" />
-                  <SelectValue placeholder={translate('filterByStore')}>
-                    {filters.storeId === 'all' ? translate('allStores') : stores.find((s) => s.id === filters.storeId)?.name}
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">{translate('allStores')}</SelectItem>
-                  {stores.map((store) => (
-                    <SelectItem key={store.id} value={store.id}>
-                      {store.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <div className="flex items-center gap-2 w-48 min-w-0">
+                <StoreIcon className="h-4 w-4 shrink-0 text-gray-500" />
+                <SearchableSelect
+                  className="min-w-0 flex-1"
+                  value={filters.storeId}
+                  placeholder={translate('filterByStore')}
+                  clearable
+                  clearToValue="all"
+                  options={[
+                    { value: 'all', label: translate('allStores') },
+                    ...stores.map((s) => ({ value: s.id, label: s.name })),
+                  ]}
+                  onValueChange={(value) => setFilters((prev) => ({ ...prev, storeId: value }))}
+                />
+              </div>
 
-              <Select 
-                value={filters.isValidated === undefined ? 'all' : filters.isValidated.toString()} 
-                onValueChange={(value) => setFilters(prev => ({ 
-                  ...prev, 
-                  isValidated: value === 'all' ? undefined : value === 'true' 
-                }))}
-              >
-                <SelectTrigger className="w-48">
-                  <Filter className="h-4 w-4 mr-2" />
-                  <SelectValue placeholder={translate('filterByStatus')}>
-                    {filters.isValidated === undefined && translate('allStatuses')}
-                    {filters.isValidated === true && translate('validatedFilter')}
-                    {filters.isValidated === false && translate('pendingFilter')}
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">{translate('allStatuses')}</SelectItem>
-                  <SelectItem value="true">{translate('validatedFilter')}</SelectItem>
-                  <SelectItem value="false">{translate('pendingFilter')}</SelectItem>
-                </SelectContent>
-              </Select>
+              <div className="flex items-center gap-2 w-48 min-w-0">
+                <Filter className="h-4 w-4 shrink-0 text-gray-500" />
+                <SearchableSelect
+                  className="min-w-0 flex-1"
+                  value={filters.isValidated === undefined ? 'all' : filters.isValidated.toString()}
+                  placeholder={translate('filterByStatus')}
+                  clearable
+                  clearToValue="all"
+                  options={[
+                    { value: 'all', label: translate('allStatuses') },
+                    { value: 'true', label: translate('validatedFilter') },
+                    { value: 'false', label: translate('pendingFilter') },
+                  ]}
+                  onValueChange={(value) =>
+                    setFilters((prev) => ({
+                      ...prev,
+                      isValidated: value === 'all' ? undefined : value === 'true',
+                    }))
+                  }
+                />
+              </div>
             </div>
           </div>
         </CardContent>
@@ -887,35 +890,30 @@ export function PODManagement({ onBack }: PODManagementProps) {
           <div className="space-y-4 py-2">
             <div>
               <Label>{translate('storeLabel')} *</Label>
-              <Select
+              <SearchableSelect
                 value={uploadPodForm.storeId}
+                placeholder={translate('selectStore') || 'Seleccionar tienda'}
+                disabled={!stores.length}
+                options={stores.map((s) => ({ value: s.id, label: s.name }))}
                 onValueChange={(v) => setUploadPodForm((f) => ({ ...f, storeId: v }))}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder={translate('selectStore') || 'Seleccionar tienda'} />
-                </SelectTrigger>
-                <SelectContent>
-                  {stores.map((s) => (
-                    <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+                zIndex={60}
+              />
             </div>
             <div>
               <Label>{translate('sellerLabel')} *</Label>
-              <Select
+              <SearchableSelect
                 value={uploadPodForm.salespersonId}
+                placeholder={translate('selectSeller') || 'Seleccionar vendedor'}
+                disabled={!users.filter((u) => u.role === 'user').length}
+                options={users
+                  .filter((u) => u.role === 'user')
+                  .map((u) => ({
+                    value: u.id,
+                    label: `${u.firstName} ${u.lastName}`,
+                  }))}
                 onValueChange={(v) => setUploadPodForm((f) => ({ ...f, salespersonId: v }))}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder={translate('selectSeller') || 'Seleccionar vendedor'} />
-                </SelectTrigger>
-                <SelectContent>
-                  {users.filter((u) => u.role === 'user').map((u) => (
-                    <SelectItem key={u.id} value={u.id}>{u.firstName} {u.lastName}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+                zIndex={60}
+              />
             </div>
             <div>
               <Label>PO *</Label>

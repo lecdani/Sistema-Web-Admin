@@ -1,18 +1,21 @@
-import React, { useState, useEffect } from 'react';
-import { Loader2 } from 'lucide-react';
+import React, { useState, useEffect, useMemo } from 'react';
+import { Loader2, Package } from 'lucide-react';
 import { Badge } from '@/shared/components/base/Badge';
 import { useLanguage } from '@/shared/hooks/useLanguage';
 import { Order, Planogram, Distribution, Product } from '@/shared/types';
 import { planogramsApi } from '@/shared/services/planograms-api';
 import { distributionsApi } from '@/shared/services/distributions-api';
 import { productsApi } from '@/shared/services/products-api';
-import { categoriesApi } from '@/shared/services/categories-api';
 import { ordersApi } from '@/shared/services/orders-api';
 import { histpricesApi } from '@/shared/services/histprices-api';
 import { getFromLocalStorage } from '@/shared/services/database';
 import { getBackendAssetUrl } from '@/shared/config/api';
-import { formatFamilyOrderLabel, sameFamilyId } from '@/shared/utils/family-display';
-import { Package } from 'lucide-react';
+import { getProductCodeLine, getProductShortDisplayName } from '@/shared/utils/planogram-grid-display';
+import {
+  collectPresentationRowsFromGrid,
+  sumQtyForPresentation,
+} from '@/shared/utils/planogram-presentation-summary';
+import { PresentationSummaryCell } from '@/shared/components/PresentationSummaryCell';
 
 function getProductImageUrl(product: Product | null | undefined): string {
   if (!product) return '';
@@ -101,7 +104,9 @@ function buildQuantitiesQueueFromInvoiceLines(
     const prod = getProduct(productId);
     const qty = Number(line.qty) || 0;
     const price = Number(line.price) || 0;
-    const name = (line.description || (oi as any)?.productName || prod?.name || code).trim();
+    const name = prod
+      ? getProductShortDisplayName(prod as Product)
+      : (line.description || (oi as any)?.productName || code).trim();
     const sku = String(
       (oi as any)?.sku || prod?.sku || (prod as Product | undefined)?.code || code
     ).trim();
@@ -124,14 +129,27 @@ interface ProductPosition {
   row: number;
   col: number;
   productId: string;
+  /** Texto de respaldo si el producto no está en catálogo. */
   productName: string;
   sku: string;
-  category: string;
-  /** Familia para resumen (id de categoría / familia). */
-  familyId: string;
   toOrder: number;
   price: number;
   imageUrl?: string;
+}
+
+async function resolvePriceFromHistOrProduct(
+  basePrice: number,
+  product: Product | null | undefined
+): Promise<number> {
+  if (basePrice > 0) return basePrice;
+  const presId = String(product?.presentationId ?? '').trim();
+  if (!presId) return 0;
+  try {
+    const hp = await histpricesApi.getLatest(presId);
+    return hp?.price ?? 0;
+  } catch {
+    return 0;
+  }
 }
 
 export const OrderPlanogramView: React.FC<OrderPlanogramViewProps> = ({
@@ -142,18 +160,14 @@ export const OrderPlanogramView: React.FC<OrderPlanogramViewProps> = ({
   const [grid, setGrid] = useState<ProductPosition[]>([]);
   const [planogramName, setPlanogramName] = useState<string | null>(null);
   const [planogramDescription, setPlanogramDescription] = useState<string | null>(null);
-  const [allCategories, setAllCategories] = useState<
-    Array<{
-      id: string;
-      name: string;
-      code?: string;
-      shortName?: string;
-      volume?: number;
-      unit?: string;
-    }>
-  >([]);
+  const [productMap, setProductMap] = useState<Map<string, Product>>(() => new Map());
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
+
+  const presentationSummaryRows = useMemo(
+    () => collectPresentationRowsFromGrid(grid.filter((c) => String(c.productId).trim()), productMap),
+    [grid, productMap]
+  );
 
   useEffect(() => {
     let mounted = true;
@@ -187,7 +201,6 @@ export const OrderPlanogramView: React.FC<OrderPlanogramViewProps> = ({
           return;
         }
 
-
         const planogramIdFromOrder: string =
           (apiOrder.planogramId && String(apiOrder.planogramId).trim()) ||
           (order.planogramId && String(order.planogramId).trim()) ||
@@ -212,7 +225,7 @@ export const OrderPlanogramView: React.FC<OrderPlanogramViewProps> = ({
           }
           if (!mounted || !planogramsData.length) {
             setLoadError(translate('noActivePlanogramActivate'));
-      setLoading(false);
+            setLoading(false);
             return;
           }
           planogram =
@@ -223,7 +236,7 @@ export const OrderPlanogramView: React.FC<OrderPlanogramViewProps> = ({
 
         if (!planogram) {
           setLoadError(translate('noActivePlanogramActivate'));
-      setLoading(false);
+          setLoading(false);
           return;
         }
         setPlanogramName(planogram.name ?? null);
@@ -239,53 +252,21 @@ export const OrderPlanogramView: React.FC<OrderPlanogramViewProps> = ({
         if (!mounted) return;
 
         let productsData: Product[] = [];
-        let categoriesList: { id: string; name: string }[] = [];
         try {
-          [productsData, categoriesList] = await Promise.all([
-            (productsApi.fetchAll() as Promise<Product[]>),
-            categoriesApi.fetchAll().then((list) =>
-              list.map((c) => ({
-                id: c.id,
-                name: c.name,
-                code: String(c.code || c.familyCode || '').trim() || undefined,
-                shortName: (c.shortName || '').trim() || undefined,
-                volume: c.volume != null && Number.isFinite(Number(c.volume)) ? Number(c.volume) : undefined,
-                unit: (c.unit || '').trim() || undefined,
-              }))
-            ),
-          ]);
+          productsData = (await (productsApi.fetchAll() as Promise<Product[]>)) ?? [];
         } catch (_) {
           productsData = (getFromLocalStorage('app-products') || []) as Product[];
-          categoriesList = [];
         }
         if (!mounted) return;
-        setAllCategories(categoriesList);
-
-        const categoryById = new Map<string, string>();
-        categoriesList.forEach((c) => {
-          categoryById.set(c.id, c.name);
-          categoryById.set(String(Number(c.id)), c.name);
-        });
-        const resolveCategory = (p: Product | null): string => {
-          if (!p) return '';
-          const name = (p.category || '').trim();
-          if (name) return name;
-          const id = p.categoryId != null ? String(p.categoryId) : '';
-          return id ? (categoryById.get(id) ?? categoryById.get(String(Number(id))) ?? '') : '';
-        };
 
         const productMap = new Map<string, Product>();
         productsData.forEach((p) => {
           productMap.set(String(p.id), p);
           if (typeof p.id === 'string' && /^\d+$/.test(p.id)) productMap.set(String(Number(p.id)), p);
         });
+        if (mounted) setProductMap(new Map(productMap));
         const getProduct = (id: string) => productMap.get(id) || productMap.get(String(Number(id)));
 
-        // IMPORTANTE:
-        // No agrupar por productId aquí. Con planogramas que permiten duplicados,
-        // el backend puede devolver múltiples líneas con el mismo producto. Si colapsamos en Map,
-        // la cantidad se "replica" en todas las celdas donde aparezca ese producto.
-        // Usamos una cola (queue) por productId y vamos consumiendo por celda.
         const qtyQueueByProductId = new Map<
           string,
           Array<{ productName: string; sku: string; quantity: number; price: number }>
@@ -321,25 +302,13 @@ export const OrderPlanogramView: React.FC<OrderPlanogramViewProps> = ({
             }
           }
 
-          /**
-           * Si hay líneas de factura pero no hubo cruce, NO usar cantidades del pedido inicial (comportamiento PWA).
-           * Solo rellenar desde el pedido si no hay factura usable.
-           */
           if (!usedInvoiceQuantities && !(invDisplay?.items?.length)) {
             for (const item of items) {
               const id = String(item.productId ?? item.ProductId ?? item.product_id ?? '');
               if (!id) continue;
               let price = Number(item.price ?? item.unitPrice ?? 0) || 0;
               const p = getProduct(id);
-              if (!price) {
-                const familyId = String(p?.familyId ?? p?.categoryId ?? '').trim();
-                if (familyId) {
-                  try {
-                    const hp = await histpricesApi.getLatest(familyId);
-                    price = hp?.price ?? 0;
-                  } catch (_) {}
-                }
-              }
+              price = await resolvePriceFromHistOrProduct(price, p ?? null);
               const name = (item.productName ?? item.sku ?? p?.name ?? '').trim();
               const sku = String(item.sku ?? p?.sku ?? p?.code ?? '').trim();
               const qty = Number(item.quantity ?? item.toOrder ?? item.Quantity ?? 0) || 0;
@@ -350,7 +319,6 @@ export const OrderPlanogramView: React.FC<OrderPlanogramViewProps> = ({
               }
             }
           } else if (usedInvoiceQuantities) {
-            // Completar precios faltantes en cola
             for (const [id, arr] of qtyQueueByProductId.entries()) {
               const nextArr = await Promise.all(
                 arr.map(async (row) => {
@@ -359,13 +327,7 @@ export const OrderPlanogramView: React.FC<OrderPlanogramViewProps> = ({
                   let price = Number(oi?.price ?? oi?.unitPrice ?? 0) || 0;
                   if (!price) {
                     const productForPrice = getProduct(id);
-                    const familyId = String(productForPrice?.familyId ?? productForPrice?.categoryId ?? '').trim();
-                    if (familyId) {
-                      try {
-                        const hp = await histpricesApi.getLatest(familyId);
-                        price = hp?.price ?? 0;
-                      } catch (_) {}
-                    }
+                    price = await resolvePriceFromHistOrProduct(0, productForPrice ?? null);
                   }
                   return { ...row, price };
                 })
@@ -379,15 +341,7 @@ export const OrderPlanogramView: React.FC<OrderPlanogramViewProps> = ({
             if (id) {
               let price = Number(item.price ?? item.unitPrice ?? 0) || 0;
               const p = getProduct(id);
-              if (!price) {
-                const familyId = String(p?.familyId ?? p?.categoryId ?? '').trim();
-                if (familyId) {
-                  try {
-                    const hp = await histpricesApi.getLatest(familyId);
-                    price = hp?.price ?? 0;
-                  } catch (_) {}
-                }
-              }
+              price = await resolvePriceFromHistOrProduct(price, p ?? null);
               const name = (item.productName ?? item.sku ?? p?.name ?? '').trim();
               const sku = String(item.sku ?? p?.sku ?? p?.code ?? '').trim();
               const qty = item.quantity ?? item.toOrder ?? item.Quantity ?? 0;
@@ -406,22 +360,19 @@ export const OrderPlanogramView: React.FC<OrderPlanogramViewProps> = ({
           for (let col = 0; col < 10; col++) {
             const dist = distList.find((d) => d.xPosition === row && d.yPosition === col);
             const product = dist ? getProduct(dist.productId) : null;
-            const pid = product ? (String(product.id) || '') : '';
+            const pid = product ? String(product.id) || '' : '';
             const key = pid ? (qtyQueueByProductId.has(pid) ? pid : String(Number(pid))) : '';
             const queue = key ? qtyQueueByProductId.get(key) : undefined;
             const next = queue && queue.length > 0 ? queue.shift()! : null;
-            const familyId = String(product?.familyId ?? product?.categoryId ?? '').trim();
             planogramGrid.push({
               row,
               col,
               productId: product?.id ?? '',
-              productName: next?.productName ?? product?.name ?? '',
+              productName: (next?.productName ?? '').trim(),
               sku:
                 String(next?.sku || '').trim() ||
                 String(product?.sku || '').trim() ||
                 String(product?.code || '').trim(),
-              category: resolveCategory(product ?? null),
-              familyId,
               toOrder: next?.quantity ?? 0,
               price: next?.price ?? product?.currentPrice ?? 0,
               imageUrl: product ? getProductImageUrl(product) : undefined,
@@ -436,18 +387,20 @@ export const OrderPlanogramView: React.FC<OrderPlanogramViewProps> = ({
         if (mounted) setLoading(false);
       }
     })();
-    return () => { mounted = false; };
+    return () => {
+      mounted = false;
+    };
   }, [order.id, order.planogramId, quantitySource]);
 
-  /** Colores hex iguales a Tailwind PWA (slate-400/500, indigo-50/300, slate-100/200). */
+  /** Celdas vacías del planograma; con producto mismo tono que gestión de planograma (ocupada / sin pedido). */
   const getCellSurface = (item: ProductPosition): React.CSSProperties => {
     if (!item.productId) {
       return { backgroundColor: '#94a3b8', borderColor: '#64748b' };
     }
     if (item.toOrder > 0) {
-      return { backgroundColor: '#eef2ff', borderColor: '#a5b4fc' };
+      return { backgroundColor: '#e0e7ff', borderColor: '#6366f1' };
     }
-    return { backgroundColor: '#f1f5f9', borderColor: '#e2e8f0' };
+    return { backgroundColor: '#d1d5db', borderColor: '#525252' };
   };
 
   if (loading) {
@@ -476,7 +429,7 @@ export const OrderPlanogramView: React.FC<OrderPlanogramViewProps> = ({
   const totalValue = grid.reduce((s, i) => s + i.toOrder * i.price, 0);
   const productsWithQty = grid.filter((i) => i.productId && i.toOrder > 0).length;
 
-  /** Grilla 10×10 fija (misma idea que antes en admin + proporción PWA): evita que el modal rompa `grid-cols-10`. */
+  /** Grilla 10×10 fija: evita que el modal rompa `grid-cols-10`. */
   const cellSize = 72;
   const cellGap = 8;
   const gridWidthPx = 10 * cellSize + 9 * cellGap;
@@ -503,7 +456,7 @@ export const OrderPlanogramView: React.FC<OrderPlanogramViewProps> = ({
           <div className="bg-slate-50 rounded-lg p-2 text-center print:p-1.5">
             <p className="text-xs text-slate-500 mb-0.5 print:text-[9px] print:mb-0">{translate('productsLabel')}</p>
             <p className="text-sm text-slate-900 print:text-xs">{productsWithQty}</p>
-            </div>
+          </div>
           <div className="bg-indigo-50 rounded-lg p-2 text-center print:p-1.5">
             <p className="text-xs text-indigo-600 mb-0.5 print:text-[9px] print:mb-0">{translate('quantityUnits')}</p>
             <p className="text-sm text-indigo-900 print:text-xs">{totalToOrder}</p>
@@ -529,54 +482,84 @@ export const OrderPlanogramView: React.FC<OrderPlanogramViewProps> = ({
               boxSizing: 'content-box',
             }}
           >
-            {grid.map((item) => (
-              <div
-                key={`${item.row}-${item.col}`}
-                className="rounded-lg border border-solid flex flex-col items-center justify-center text-center min-h-0 min-w-0 overflow-hidden box-border"
-                style={{
-                  width: cellSize,
-                  height: cellSize,
-                  padding: 2,
-                  boxSizing: 'border-box',
-                  ...getCellSurface(item),
-                }}
-                title={item.productName ? `${item.productName}` : item.sku}
-              >
-                {item.productId ? (
-                  <div className="flex flex-col items-center justify-center gap-0 w-full h-full min-h-0 min-w-0">
-                    <div className="flex flex-row items-center justify-center gap-0.5 w-full shrink-0 min-h-0 px-0.5">
-                      {item.imageUrl ? (
-                        <img src={item.imageUrl} alt="" className="w-7 h-7 rounded object-cover shrink-0" />
-                      ) : (
-                        <div className="w-7 h-7 rounded bg-slate-200 flex items-center justify-center shrink-0">
-                          <Package className="h-3.5 w-3.5 text-slate-500" />
+            {grid.map((item) => {
+              const p =
+                item.productId &&
+                (productMap.get(String(item.productId)) || productMap.get(String(Number(item.productId))));
+              const nameLabel = p
+                ? getProductShortDisplayName(p)
+                : (item.productName || '').trim();
+              const codeLine = p ? getProductCodeLine(p) : '—';
+              const muted = !!(item.productId && item.toOrder <= 0);
+              return (
+                <div
+                  key={`${item.row}-${item.col}`}
+                  className={`rounded-lg border border-solid flex flex-col items-center justify-center text-center min-h-0 min-w-0 overflow-hidden box-border ${muted ? 'opacity-[0.48]' : ''}`}
+                  style={{
+                    width: cellSize,
+                    height: cellSize,
+                    padding: 2,
+                    boxSizing: 'border-box',
+                    ...getCellSurface(item),
+                    WebkitPrintColorAdjust: 'exact',
+                    printColorAdjust: 'exact',
+                  } as React.CSSProperties}
+                  title={nameLabel ? `${nameLabel} (${codeLine})` : codeLine}
+                >
+                  {item.productId ? (
+                    <div className="text-center w-full h-full flex flex-col justify-center p-0.5 relative min-h-0 min-w-0">
+                      <div className="flex justify-center w-full shrink-0 min-h-0 px-0.5">
+                        <div className="inline-flex flex-row items-center justify-center gap-0.5 max-w-full min-w-0">
+                          {item.imageUrl ? (
+                            <img
+                              src={item.imageUrl}
+                              alt=""
+                              className="w-8 h-8 rounded object-cover flex-shrink-0"
+                            />
+                          ) : (
+                            <div className="w-8 h-8 rounded bg-gray-200 flex items-center justify-center flex-shrink-0">
+                              <Package className="h-4 w-4 text-gray-600" />
+                            </div>
+                          )}
+                          <div className="font-bold text-blue-800 truncate text-[10px] leading-tight max-w-[42px] min-w-0 text-center">
+                            {codeLine}
+                          </div>
                         </div>
-                      )}
-                      <span
-                        className="text-[6.5px] leading-tight font-semibold text-slate-900 truncate min-w-0 max-w-[34px] text-center"
-                        title={item.sku || undefined}
-                      >
-                        {item.sku || '—'}
-                      </span>
+                      </div>
+                      {nameLabel ? (
+                        <div
+                          className="block w-full max-w-full px-0.5 text-blue-700/90 font-bold overflow-hidden mt-0.5"
+                          style={{
+                            fontSize: '7px',
+                            lineHeight: 1.1,
+                            whiteSpace: 'normal',
+                            wordBreak: 'break-word',
+                            overflowWrap: 'anywhere',
+                            display: '-webkit-box',
+                            WebkitLineClamp: 2,
+                            WebkitBoxOrient: 'vertical' as const,
+                          }}
+                          title={nameLabel}
+                        >
+                          {nameLabel}
+                        </div>
+                      ) : null}
+                      {item.toOrder > 0 ? (
+                        <>
+                          <div
+                            className="absolute top-0.5 left-0.5 w-2.5 h-2.5 bg-indigo-600 rounded-full shadow-sm"
+                            aria-hidden
+                          />
+                          <span className="text-[10px] font-bold text-indigo-800 leading-none text-center mt-0.5">
+                            {item.toOrder} {translate('unitsSuffix')}
+                          </span>
+                        </>
+                      ) : null}
                     </div>
-                    {(item.productName || '').trim() ? (
-                      <span
-                        className="block w-full text-center text-slate-600 font-normal overflow-hidden line-clamp-2 mt-0.5 px-0.5"
-                        style={{ fontSize: '12px', lineHeight: 1.2, maxHeight: '18px' }}
-                        title={item.productName}
-                      >
-                        {item.productName}
-                      </span>
-                    ) : null}
-                    {item.toOrder > 0 ? (
-                      <span className="text-[10px] font-bold text-indigo-700 leading-none text-center mt-px">
-                        {item.toOrder} {translate('unitsSuffix')}
-                      </span>
-                    ) : null}
-                  </div>
-                ) : null}
-              </div>
-            ))}
+                  ) : null}
+                </div>
+              );
+            })}
           </div>
         </div>
         <div className="mt-4 flex flex-wrap gap-4 text-xs text-slate-500 print:hidden">
@@ -585,13 +568,13 @@ export const OrderPlanogramView: React.FC<OrderPlanogramViewProps> = ({
             {translate('noQuantity')}
           </span>
           <span className="flex items-center gap-1.5">
-            <span className="w-3 h-3 rounded bg-indigo-50 border border-indigo-300" />
+            <span className="w-3 h-3 rounded bg-indigo-200 border border-indigo-600" />
             {translate('withQuantity')}
           </span>
-      </div>
+        </div>
 
-        {/* Resumen por familia/categoría: visible también al imprimir pedido inicial */}
-        {allCategories.length > 0 && (
+        {/* Presentaciones que aparecen en el planograma (celdas con producto), como en la PWA */}
+        {presentationSummaryRows.length > 0 && (
           <div className="mt-6 border border-slate-200 rounded-lg overflow-hidden bg-slate-50/50 print:mt-3 print:border-slate-300 print:break-inside-avoid">
             <table className="w-full text-sm print:text-xs">
               <thead>
@@ -601,28 +584,17 @@ export const OrderPlanogramView: React.FC<OrderPlanogramViewProps> = ({
                 </tr>
               </thead>
               <tbody>
-                {[...allCategories]
-                  .sort((a, b) =>
-                    formatFamilyOrderLabel(a).localeCompare(formatFamilyOrderLabel(b), undefined, {
-                      sensitivity: 'base',
-                    })
-                  )
-                  .map((cat) => {
-                    const pcs = grid
-                      .filter((item) => {
-                        if (item.familyId && sameFamilyId(item.familyId, cat.id)) return true;
-                        if (!item.familyId && (item.category || '').trim() === cat.name) return true;
-                        return false;
-                      })
-                      .reduce((sum, item) => sum + item.toOrder, 0);
-                    const label = formatFamilyOrderLabel(cat) || cat.name;
-                    return (
-                      <tr key={cat.id} className="border-t border-slate-200 bg-white">
-                        <td className="py-2 px-3 text-slate-900">{label}</td>
-                        <td className="py-2 px-3 text-right font-medium text-slate-800">{pcs}</td>
-                      </tr>
-                    );
-                  })}
+                {presentationSummaryRows.map((row) => {
+                  const pcs = sumQtyForPresentation(grid, productMap, row.presentationId);
+                  return (
+                    <tr key={row.presentationId} className="border-t border-slate-200 bg-white">
+                      <td className="py-2 px-3 text-slate-900 align-top">
+                        <PresentationSummaryCell row={row} />
+                      </td>
+                      <td className="py-2 px-3 text-right font-medium text-slate-800 align-middle">{pcs}</td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>

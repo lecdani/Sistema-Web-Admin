@@ -28,6 +28,17 @@ const GRID_SIZE = 10;
 
 export const PlanogramViewer: React.FC<PlanogramViewerProps> = ({ planogram }) => {
   const { translate } = useLanguage();
+
+  const getProductShortDisplayName = (product: Product): string => {
+    const short = String(product.shortName ?? '').trim();
+    if (short) return short;
+    return String(product.name ?? '').trim() || '—';
+  };
+
+  const getProductCodeLine = (product: Product): string => {
+    const code = String(product.code ?? '').trim();
+    return code || '—';
+  };
   // Crear grilla visual
   const createGrid = () => {
     const grid: (Product | null)[][] = [];
@@ -157,11 +168,11 @@ export const PlanogramViewer: React.FC<PlanogramViewerProps> = ({ planogram }) =
             <div className="inline-block border-4 border-gray-800 bg-white shadow-2xl rounded-lg overflow-hidden">
               {/* Header con letras (A-J) */}
               <div className="flex">
-                <div className="w-12 h-10 bg-gray-400 border-r-4 border-b-4 border-gray-800 flex items-center justify-center font-bold text-gray-900">
+                <div className="w-16 h-12 bg-gray-400 border-r-4 border-b-4 border-gray-800 flex items-center justify-center font-bold text-gray-900">
                   
                 </div>
                 {[...Array(GRID_SIZE)].map((_, i) => (
-                  <div key={i} className="w-20 h-10 bg-gray-400 border-r-2 border-b-4 border-gray-800 flex items-center justify-center font-bold text-gray-900">
+                  <div key={i} className="w-24 h-12 bg-gray-400 border-r-2 border-b-4 border-gray-800 flex items-center justify-center font-bold text-gray-900 text-lg">
                     {String.fromCharCode(65 + i)}
                   </div>
                 ))}
@@ -171,7 +182,7 @@ export const PlanogramViewer: React.FC<PlanogramViewerProps> = ({ planogram }) =
               {grid.map((row, x) => (
                 <div key={x} className="flex">
                   {/* Número de fila */}
-                  <div className="w-12 h-16 bg-gray-400 border-r-4 border-b-2 border-gray-800 flex items-center justify-center font-bold text-gray-900">
+                  <div className="w-16 h-20 bg-gray-400 border-r-4 border-b-2 border-gray-800 flex items-center justify-center font-bold text-gray-900 text-lg">
                     {x + 1}
                   </div>
                   
@@ -183,37 +194,50 @@ export const PlanogramViewer: React.FC<PlanogramViewerProps> = ({ planogram }) =
                     return (
                       <div
                         key={`${x}-${y}`}
-                        className={`w-20 h-16 border-r-2 border-b-2 border-gray-600 flex flex-col items-center justify-center relative group transition-all cursor-default ${ 
+                        className={`w-24 h-20 border-r-2 border-b-2 border-gray-600 flex flex-col items-center justify-center relative group transition-all cursor-default ${ 
                           isOccupied 
-                            ? 'bg-green-200 hover:bg-green-300 border-green-600' 
+                            ? 'bg-gray-300 hover:bg-gray-400 border-gray-600'
                             : 'bg-white hover:bg-blue-50'
                         }`}
                         title={
                           product 
-                            ? `${product.name} (${product.code || product.sku}) - Celda ${cellRef}` 
+                            ? `${getProductShortDisplayName(product)} (${getProductCodeLine(product)}) - Celda ${cellRef}` 
                             : translate('cellEmpty').replace('{ref}', cellRef)
                         }
                       >
                         {product ? (
-                          <div className="text-center w-full h-full flex flex-col justify-center p-0.5 relative">
+                          <div className="text-center w-full h-full flex flex-col justify-center p-1 relative">
                             {product.image ? (
                               <img
                                 src={getBackendAssetUrl(product.image)}
                                 alt=""
-                                className="w-6 h-6 mx-auto rounded object-cover flex-shrink-0 mb-0.5"
+                                className="w-8 h-8 mx-auto rounded object-cover flex-shrink-0 mb-0.5"
                               />
                             ) : (
-                              <div className="w-6 h-6 mx-auto rounded bg-green-100 flex items-center justify-center flex-shrink-0 mb-0.5">
-                                <Package className="h-3 w-3 text-green-600" />
+                              <div className="w-8 h-8 mx-auto rounded bg-gray-200 flex items-center justify-center flex-shrink-0 mb-0.5">
+                                <Package className="h-4 w-4 text-gray-600" />
                               </div>
                             )}
-                            <div className="font-bold text-green-800 truncate text-[10px] leading-tight">
-                              {product.code || product.sku}
+                            <div className="font-bold text-blue-800 truncate text-[10px] leading-tight">
+                              {getProductCodeLine(product)}
                             </div>
-                            <div className="text-[9px] text-green-700 truncate leading-tight">
-                              {product.name.split(' ').slice(0, 2).join(' ')}
+                            <div
+                              className="block w-full max-w-full px-0.5 text-blue-700/90 normal-case font-bold overflow-hidden"
+                              style={{
+                                fontSize: '7px',
+                                lineHeight: 1.1,
+                                whiteSpace: 'normal',
+                                wordBreak: 'break-word',
+                                overflowWrap: 'anywhere',
+                                display: '-webkit-box',
+                                WebkitLineClamp: 2,
+                                WebkitBoxOrient: 'vertical',
+                              }}
+                              title={getProductShortDisplayName(product)}
+                            >
+                              {getProductShortDisplayName(product)}
                             </div>
-                            <div className="absolute top-0.5 right-0.5 w-2.5 h-2.5 bg-green-600 rounded-full shadow-md"></div>
+                            <div className="absolute top-1 left-1 w-3 h-3 bg-blue-600 rounded-full shadow-md"></div>
                           </div>
                         ) : (
                           <div className="text-gray-400 text-xs font-medium">
@@ -230,7 +254,7 @@ export const PlanogramViewer: React.FC<PlanogramViewerProps> = ({ planogram }) =
         </div>
 
         {/* Panel Lateral COMPACTO - Solo Productos */}
-        <div className="w-56 flex-shrink-0">
+        <div className="w-[24rem] min-w-[24rem] max-w-[24rem] flex-none">
           <Card className="h-full flex flex-col">
             <CardHeader className="pb-2 flex-shrink-0 p-2">
               <CardTitle className="text-xs flex items-center gap-1.5">
@@ -249,7 +273,7 @@ export const PlanogramViewer: React.FC<PlanogramViewerProps> = ({ planogram }) =
                         : '';
 
                       return (
-                        <div key={product.id} className="p-1.5 border rounded text-[10px] hover:bg-gray-50 transition-colors">
+                        <div key={product.id} className="p-1.5 border rounded text-[10px] bg-white border-gray-200 hover:border-blue-300 hover:bg-blue-50 transition-colors">
                           <div className="flex gap-2 items-start">
                             <div className="flex-shrink-0 w-9 h-9 rounded overflow-hidden bg-gray-100 flex items-center justify-center">
                               {product.image ? (
@@ -259,10 +283,14 @@ export const PlanogramViewer: React.FC<PlanogramViewerProps> = ({ planogram }) =
                               )}
                             </div>
                             <div className="flex-1 min-w-0 space-y-0.5">
-                              <div className="font-medium truncate text-gray-900 text-xs leading-tight">{product.name}</div>
-                              <div className="text-gray-500 leading-tight">{product.code || product.sku}</div>
+                              <div className="font-medium truncate text-gray-900 text-xs leading-tight">
+                                {getProductShortDisplayName(product)}
+                              </div>
+                              <div className="text-gray-500 leading-tight text-[10px] font-mono tabular-nums">
+                                {getProductCodeLine(product)}
+                              </div>
                               <div className="flex items-center justify-between gap-1">
-                              <Badge className={`${getCategoryColor(product.category)} text-[9px] py-0 px-1`}>
+                              <Badge variant="outline" className="text-[9px] py-0 px-1">
                                 {product.category}
                               </Badge>
                               {position && (

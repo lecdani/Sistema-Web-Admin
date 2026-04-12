@@ -1,6 +1,10 @@
 import type { Assignment } from '@/shared/types';
 import type { User } from '@/shared/types';
 
+function normId(v: string | undefined | null): string {
+  return String(v ?? '').trim().toLowerCase();
+}
+
 /** Asignación pertenece al vendedor (por userId legacy o por salesRouteId del usuario). */
 export function assignmentBelongsToUser(a: Assignment, user: User): boolean {
   if (a.userId != null && String(a.userId) === String(user.id)) return true;
@@ -28,17 +32,17 @@ export function storeAssignedToOtherRoute(
   storeId: string,
   currentRouteId: string
 ): boolean {
-  const sid = String(storeId).trim();
-  const rid = String(currentRouteId).trim();
+  const sid = normId(storeId);
+  const rid = normId(currentRouteId);
   if (!sid || !rid) return false;
   return assignments.some((a) => {
-    if (String(a.storeId) !== sid) return false;
-    const ar = String(a.salesRouteId ?? '').trim();
+    if (normId(a.storeId) !== sid) return false;
+    const ar = normId(a.salesRouteId);
     return ar !== '' && ar !== rid;
   });
 }
 
 export function assignmentsForRoute(assignments: Assignment[], routeId: string): Assignment[] {
-  const r = String(routeId).trim();
-  return assignments.filter((a) => String(a.salesRouteId ?? '').trim() === r);
+  const r = normId(routeId);
+  return assignments.filter((a) => normId(a.salesRouteId) === r);
 }

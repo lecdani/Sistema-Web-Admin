@@ -4,7 +4,6 @@ import { Badge } from '@/shared/components/base/Badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/shared/components/base/Tabs';
 import { Alert, AlertDescription } from '@/shared/components/base/Alert';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/shared/components/base/Card';
-import { Label } from '@/shared/components/base/Label';
 import {
   ShoppingCart,
   FileText,
@@ -17,6 +16,7 @@ import {
   ImagePlus,
   X,
   Save,
+  List,
 } from 'lucide-react';
 import { useLanguage } from '@/shared/hooks/useLanguage';
 import {
@@ -39,8 +39,10 @@ import { salesRoutesApi } from '@/shared/services/sales-routes-api';
 import { Invoice } from './components/Invoice';
 import { OrderPlanogramView } from './components/OrderPlanogramView';
 import { OrderCatalogGridView } from './components/OrderCatalogGridView';
-import type { Order } from '@/shared/types';
-import { sameFamilyId } from '@/shared/utils/family-display';
+import { OrderCatalogListView } from './components/OrderCatalogListView';
+import type { Order, Product } from '@/shared/types';
+import { familyVolumeLabel, sameFamilyId } from '@/shared/utils/family-display';
+import { getPresentationSummaryKey, getProductFromMap } from '@/shared/utils/planogram-presentation-summary';
 
 interface OrderDetailViewProps {
   orderId: string;
@@ -64,7 +66,15 @@ export function OrderDetailView({ orderId, onClose, onOrderUpdated }: OrderDetai
     invoiceId?: string;
     storeId?: string;
     pod?: string;
-    items: Array<{ qty: number; code: string; description: string; price: number; amount: number }>;
+    items: Array<{
+      qty: number;
+      code: string;
+      sku?: string;
+      description: string;
+      price: number;
+      amount: number;
+      productId?: string;
+    }>;
   } | null>(null);
   const [podImageError, setPodImageError] = useState(false);
   const [storeNameDisplay, setStoreNameDisplay] = useState<string>('');
@@ -77,11 +87,13 @@ export function OrderDetailView({ orderId, onClose, onOrderUpdated }: OrderDetai
   const [emergencyPodPreview, setEmergencyPodPreview] = useState<string | null>(null);
   const [emergencyPodUploading, setEmergencyPodUploading] = useState(false);
   const [activeTab, setActiveTab] = useState('summary');
-  const [invoiceViewMode, setInvoiceViewMode] = useState<'product' | 'family'>('product');
+  const [invoiceViewMode, setInvoiceViewMode] = useState<'product' | 'family'>('family');
   const [invoicePrintLayout, setInvoicePrintLayout] = useState<'normal' | 'ticket'>('normal');
   const [storeHasPlanogram, setStoreHasPlanogram] = useState<boolean | null>(null);
   /** Id de factura resuelto al cargar (pedido + factura + lista), para POD aunque el pedido no traiga invoiceId. */
   const [podInvoiceIdForUpload, setPodInvoiceIdForUpload] = useState('');
+  /** Productos del pedido para SKU / nombre completo / clave de presentación en factura. */
+  const [invoiceProductById, setInvoiceProductById] = useState<Map<string, Product>>(new Map());
   const emergencyPodInputRef = useRef<HTMLInputElement>(null);
   const [discrepancies, setDiscrepancies] = useState<OrderDiscrepancyItem[]>([]);
   const [discrepanciesLoaded, setDiscrepanciesLoaded] = useState(false);
@@ -96,6 +108,45 @@ export function OrderDetailView({ orderId, onClose, onOrderUpdated }: OrderDetai
       unit?: string;
     }>
   >([]);
+
+  const orderProductIdsKey = useMemo(() => {
+    if (!order?.items?.length) return '';
+    return [
+      ...new Set(order.items.map((i: any) => String(i.productId || '').trim()).filter(Boolean)),
+    ]
+      .sort()
+      .join(',');
+  }, [order?.items]);
+
+  useEffect(() => {
+    if (!orderProductIdsKey) {
+      setInvoiceProductById(new Map());
+      return;
+    }
+    let cancelled = false;
+    const ids = orderProductIdsKey.split(',').filter(Boolean);
+    (async () => {
+      const m = new Map<string, Product>();
+      await Promise.all(
+        ids.map(async (id) => {
+          try {
+            const p = await productsApi.getById(id);
+            if (p && !cancelled) {
+              m.set(id, p);
+              const n = Number(id);
+              if (!Number.isNaN(n)) m.set(String(n), p);
+            }
+          } catch {
+            /* ignore */
+          }
+        })
+      );
+      if (!cancelled) setInvoiceProductById(m);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [order?.id, orderProductIdsKey]);
 
   useEffect(() => {
     const load = async () => {
@@ -156,8 +207,9 @@ export function OrderDetailView({ orderId, onClose, onOrderUpdated }: OrderDetai
                   category = categoryById.get(id) ?? categoryById.get(String(Number(id))) ?? '';
                 }
                 if (!price) {
-                  if (familyId) {
-                    const latest = await histpricesApi.getLatest(familyId);
+                  const presId = String((product as any)?.presentationId ?? '').trim();
+                  if (presId) {
+                    const latest = await histpricesApi.getLatest(presId);
                     price = latest?.price ?? 0;
                   }
                 }
@@ -425,13 +477,100 @@ export function OrderDetailView({ orderId, onClose, onOrderUpdated }: OrderDetai
   }, [discrepancies, order?.items, invoiceDisplay?.items]);
 
   const hasInvoiceLines = !!(invoiceDisplay?.items && invoiceDisplay.items.length > 0);
-  /** Pedido creado desde planograma (PWA): factura y vista planograma solo en este caso. */
+  /** Pedido creado desde planograma (PWA): incluye planogram_id en el pedido. */
   const orderFromPlanogram = !!(String((order as any)?.planogramId ?? '').trim());
   const isCatalogStore = storeHasPlanogram === false;
+  /** Tienda con planograma pero pedido desde catálogo (sin planogram_id) → vista catálogo + resumen de todas las familias. */
+  const showPlanogramOrderView = !isCatalogStore && orderFromPlanogram;
   const catalogInvoicedItems = useMemo(() => {
     if (!order?.items?.length || !invoiceDisplay?.items?.length) return null;
     return applyInvoiceQtyToOrderItems(order.items as any[], invoiceDisplay.items);
   }, [order?.items, invoiceDisplay?.items]);
+
+  /** Productos distintos con cantidad &gt; 0 (evita contar líneas duplicadas o vacías como en catálogo). */
+  const orderLineMetrics = useMemo(() => {
+    const items = order?.items ?? [];
+    const qtyByPid = new Map<string, number>();
+    for (const raw of items) {
+      const pid = String((raw as any).productId ?? (raw as any).ProductId ?? '').trim();
+      if (!pid) continue;
+      const q = Number((raw as any).quantity ?? (raw as any).toOrder ?? 0) || 0;
+      qtyByPid.set(pid, (qtyByPid.get(pid) ?? 0) + q);
+    }
+    const distinctProductsWithQty = [...qtyByPid.values()].filter((q) => q > 0).length;
+    const totalUnits = [...qtyByPid.values()].reduce((a, b) => a + b, 0);
+    return { distinctProductsWithQty, totalUnits, rawLines: items.length };
+  }, [order?.items]);
+
+  /** Mismo criterio que líneas de factura: agrupa por código de línea para productos distintos y unidades. */
+  const invoiceLineMetrics = useMemo(() => {
+    const items = invoiceDisplay?.items ?? [];
+    const qtyByCode = new Map<string, number>();
+    for (const line of items) {
+      const code = String(line.code || (line as { sku?: string }).sku || '').trim();
+      if (!code || code === '—') continue;
+      const q = Number(line.qty) || 0;
+      if (q <= 0) continue;
+      qtyByCode.set(code, (qtyByCode.get(code) ?? 0) + q);
+    }
+    const distinctProductsWithQty = qtyByCode.size;
+    const totalUnits = [...qtyByCode.values()].reduce((a, b) => a + b, 0);
+    return { distinctProductsWithQty, totalUnits, rawLines: items.length };
+  }, [invoiceDisplay?.items]);
+
+  const financialLineMetrics =
+    hasInvoiceLines && invoiceLineMetrics.rawLines > 0 ? invoiceLineMetrics : orderLineMetrics;
+
+  const computedFromItemsPre = useMemo(() => {
+    const arr = order?.items ?? [];
+    return arr.reduce(
+      (sum, i) => sum + (i.quantity ?? i.toOrder ?? 0) * (i.price ?? 0),
+      0
+    );
+  }, [order?.items]);
+
+  const sumInvoiceLinesAmount = useMemo(() => {
+    const lines = invoiceDisplay?.items ?? [];
+    return lines.reduce((s, i) => {
+      const amt = Number(i.amount) || 0;
+      if (amt > 0) return s + amt;
+      const q = Number(i.qty) || 0;
+      const p = Number(i.price) || 0;
+      return s + q * p;
+    }, 0);
+  }, [invoiceDisplay?.items]);
+
+  const displaySubtotal = useMemo(() => {
+    if (hasInvoiceLines && invoiceDisplay) {
+      const inv = Number(invoiceDisplay.subtotal);
+      if (inv > 0) return inv;
+      if (sumInvoiceLinesAmount > 0) return sumInvoiceLinesAmount;
+    }
+    const sub = order?.subtotal ?? 0;
+    return sub > 0 ? sub : computedFromItemsPre;
+  }, [
+    hasInvoiceLines,
+    invoiceDisplay,
+    order?.subtotal,
+    computedFromItemsPre,
+    sumInvoiceLinesAmount,
+  ]);
+
+  const displayTotal = useMemo(() => {
+    if (hasInvoiceLines && invoiceDisplay) {
+      const inv = Number(invoiceDisplay.total);
+      if (inv > 0) return inv;
+      if (sumInvoiceLinesAmount > 0) return sumInvoiceLinesAmount;
+    }
+    const tot = order?.total ?? 0;
+    return tot > 0 ? tot : computedFromItemsPre;
+  }, [
+    hasInvoiceLines,
+    invoiceDisplay,
+    order?.total,
+    computedFromItemsPre,
+    sumInvoiceLinesAmount,
+  ]);
 
   useEffect(() => {
     if (activeTab !== 'invoice-doc') return;
@@ -482,20 +621,7 @@ export function OrderDetailView({ orderId, onClose, onOrderUpdated }: OrderDetai
     return <Badge variant="secondary" className={config.color}>{config.label}</Badge>;
   };
 
-  // Total y subtotal: factura → pedido → calculado desde items (siempre mostrar algo)
   const items = order.items || [];
-  const computedFromItems = items.reduce(
-    (sum, i) => sum + (i.quantity ?? i.toOrder ?? 0) * (i.price ?? 0),
-    0
-  );
-  const displaySubtotal =
-    (invoiceDisplay?.subtotal ?? order.subtotal ?? 0) > 0
-      ? (invoiceDisplay?.subtotal ?? order.subtotal ?? 0)
-      : computedFromItems;
-  const displayTotal =
-    (invoiceDisplay?.total ?? order.total ?? 0) > 0
-      ? (invoiceDisplay?.total ?? order.total ?? 0)
-      : computedFromItems;
 
   // POD: igual que PWA — orden, factura o vacío. Imagen desde S3 vía images/url (mismo que productos).
   const displayPod = (order.podImageUrl || order.podFileName || (invoiceDisplay?.pod ?? '') || '').trim();
@@ -510,10 +636,10 @@ export function OrderDetailView({ orderId, onClose, onOrderUpdated }: OrderDetai
   /** Solo si hay ruta de imagen; `podUploaded` sin ruta no bloquea la carga de emergencia. */
   const hasPodEvidence = !!displayPod;
 
-  // Fecha factura como en PWA (en-US)
+  /** Factura siempre en inglés (fecha). */
   const formatInvoiceDate = (d: string) => {
     if (!d) return '—';
-    return d.includes(',') ? d : new Date(d).toLocaleDateString(locale);
+    return d.includes(',') ? d : new Date(d).toLocaleDateString('en-US');
   };
 
   const rawInvoiceIdForPod =
@@ -591,9 +717,9 @@ export function OrderDetailView({ orderId, onClose, onOrderUpdated }: OrderDetai
   };
 
   return (
-    <div className="space-y-0">
-      <div className="bg-gradient-to-r from-indigo-600 to-blue-600 rounded-t-lg p-6 text-white">
-        <div className="flex items-center justify-between">
+    <div className="space-y-0 min-w-0">
+      <div className="bg-gradient-to-r from-indigo-600 to-blue-600 rounded-t-lg p-6 pr-14 sm:pr-16 text-white">
+        <div className="flex items-center justify-between gap-4">
           <div className="flex items-center gap-4">
             <div className="bg-white/20 p-3 rounded-lg">
               <ShoppingCart className="h-6 w-6" />
@@ -604,8 +730,8 @@ export function OrderDetailView({ orderId, onClose, onOrderUpdated }: OrderDetai
               </h2>
               <p className="text-blue-100 text-sm mt-1">
                 {translate('createdOn')} {new Date(order.date || (order as any).createdAt).toLocaleDateString(locale, {
-                  day: 'numeric',
-                  month: 'long',
+                  day: 'numeric', 
+                  month: 'long', 
                   year: 'numeric',
                   hour: '2-digit',
                   minute: '2-digit'
@@ -649,9 +775,9 @@ export function OrderDetailView({ orderId, onClose, onOrderUpdated }: OrderDetai
             <>
               {!isCatalogStore && orderFromPlanogram ? (
                 <TabsTrigger value="invoice-doc" className="flex items-center gap-2 px-4 sm:px-6 py-3 rounded-none border-b-2 border-transparent data-[state=active]:border-indigo-600 data-[state=active]:bg-white data-[state=active]:text-indigo-600">
-                  <FileText className="h-4 w-4" />
+            <FileText className="h-4 w-4" />
                   {translate('invoiceLabel')}
-                </TabsTrigger>
+          </TabsTrigger>
               ) : null}
               <TabsTrigger value="planogram-invoice" className="flex items-center gap-2 px-4 sm:px-6 py-3 rounded-none border-b-2 border-transparent data-[state=active]:border-indigo-600 data-[state=active]:bg-white data-[state=active]:text-indigo-600">
                 <Layout className="h-4 w-4" />
@@ -669,6 +795,15 @@ export function OrderDetailView({ orderId, onClose, onOrderUpdated }: OrderDetai
             <Layout className="h-4 w-4" />
             {translate('orderTabInitial')}
           </TabsTrigger>
+          {!showPlanogramOrderView ? (
+            <TabsTrigger
+              value="catalog-list"
+              className="flex items-center gap-2 px-4 sm:px-6 py-3 rounded-none border-b-2 border-transparent data-[state=active]:border-indigo-600 data-[state=active]:bg-white data-[state=active]:text-indigo-600"
+            >
+              <List className="h-4 w-4" />
+              {translate('orderTabCatalogList')}
+            </TabsTrigger>
+          ) : null}
         </TabsList>
 
         <TabsContent value="summary" className="p-6 space-y-0 mt-0">
@@ -691,7 +826,7 @@ export function OrderDetailView({ orderId, onClose, onOrderUpdated }: OrderDetai
                         ? (displayInvoiceNumber || '—')
                         : (displayPo || '—')}
                     </span>
-                  </div>
+                </div>
                 </div>
                 {/* 2. Estado */}
                 <div className="flex justify-between items-center">
@@ -744,8 +879,18 @@ export function OrderDetailView({ orderId, onClose, onOrderUpdated }: OrderDetai
               <div className="space-y-3">
                 <div className="flex justify-between items-center">
                   <span className="text-gray-600 text-sm">{translate('productsLabel')}:</span>
-                  <span className="font-medium text-gray-900">{(order.items || []).length} {translate('itemsCount')}</span>
+                  <span className="font-medium text-gray-900">
+                    {financialLineMetrics.distinctProductsWithQty > 0
+                      ? `${financialLineMetrics.distinctProductsWithQty} ${translate('itemsCount')}`
+                      : `${financialLineMetrics.rawLines} ${translate('itemsCount')}`}
+                  </span>
                 </div>
+                {financialLineMetrics.totalUnits > 0 ? (
+                  <div className="flex justify-between items-center">
+                    <span className="text-gray-600 text-sm">{translate('totalUnitsLabel')}:</span>
+                    <span className="font-medium text-gray-900">{financialLineMetrics.totalUnits}</span>
+                  </div>
+                ) : null}
                 <div className="flex justify-between items-center">
                   <span className="text-gray-600 text-sm">{translate('subtotal')}:</span>
                   <span className="font-medium text-gray-900">${displaySubtotal.toFixed(2)}</span>
@@ -791,7 +936,7 @@ export function OrderDetailView({ orderId, onClose, onOrderUpdated }: OrderDetai
                             <td className="py-2 px-3 text-gray-900">
                               <span className="font-bold text-gray-900 font-mono text-xs mr-2">
                                 {r.sku?.trim() || '—'}
-                              </span>
+                        </span>
                               <span className="text-gray-800">{r.productName?.trim() || '—'}</span>
                             </td>
                             <td className="py-2 px-3 text-right">{r.orderedQty}</td>
@@ -803,16 +948,16 @@ export function OrderDetailView({ orderId, onClose, onOrderUpdated }: OrderDetai
                         ))}
                       </tbody>
                     </table>
-                  )}
-                </div>
-              </div>
-            </div>
+                      )}
+                    </div>
+                      </div>
+                      </div>
           ) : null}
         </TabsContent>
 
         <TabsContent value="initial" className="p-6 mt-0 space-y-4">
           <div className="flex flex-wrap gap-2 print:hidden">
-            <Button
+                <Button 
               type="button"
               variant="outline"
               size="sm"
@@ -823,19 +968,19 @@ export function OrderDetailView({ orderId, onClose, onOrderUpdated }: OrderDetai
             >
               <Printer className="h-4 w-4 mr-2" />
               {translate('printOrderTab')}
-            </Button>
-          </div>
+                </Button>
+              </div>
           {!!displayPo && (
             <div className="print:hidden">
               <Alert className="border-slate-200 bg-white">
                 <AlertDescription className="text-slate-700">
                   <span className="font-semibold">{translate('poNumber')}:</span> {displayPo}
-                </AlertDescription>
-              </Alert>
+              </AlertDescription>
+            </Alert>
             </div>
           )}
           <div id="admin-order-initial-print-root">
-          {!isCatalogStore ? (
+          {showPlanogramOrderView ? (
             <OrderPlanogramView
               quantitySource="order"
               order={
@@ -888,6 +1033,12 @@ export function OrderDetailView({ orderId, onClose, onOrderUpdated }: OrderDetai
           </div>
         </TabsContent>
 
+        {!showPlanogramOrderView ? (
+          <TabsContent value="catalog-list" className="p-6 mt-0 space-y-4">
+            <OrderCatalogListView order={order} />
+          </TabsContent>
+        ) : null}
+
         {showInvoicedTabs ? (
         <>
         {!isCatalogStore && orderFromPlanogram ? (
@@ -905,9 +1056,11 @@ export function OrderDetailView({ orderId, onClose, onOrderUpdated }: OrderDetai
                       const q = it.quantity ?? it.toOrder ?? 0;
                       const p = Number(it.price) || 0;
                       const sku = String(it.sku ?? it.Sku ?? '').trim();
+                      const pid = String(it.productId ?? it.ProductId ?? '').trim();
                       return {
                         qty: q,
-                        code: sku || '—',
+                        code: sku || pid || '—',
+                        ...(sku ? { sku } : {}),
                         description: it.productName || '—',
                         price: p,
                         amount: q * p,
@@ -928,7 +1081,15 @@ export function OrderDetailView({ orderId, onClose, onOrderUpdated }: OrderDetai
             const toInvoiceRows = (inv.items || []).map((line: any, idx: number) => {
               const code = String(line.code || '').trim();
               const normCode = code.replace(/-/g, '').toLowerCase();
+              const linePid = String(line.productId ?? '').trim();
               const oi =
+                (linePid
+                  ? order.items.find(
+                      (x: any) =>
+                        String(x.productId ?? x.ProductId ?? '') === linePid ||
+                        String(x.productId ?? x.ProductId ?? '') === String(Number(linePid))
+                    )
+                  : undefined) ||
                 order.items.find((x: any) => String(x.sku || '').trim() === code) ||
                 order.items.find((x: any) => String(x.productId) === code) ||
                 (code.length >= 8
@@ -937,18 +1098,27 @@ export function OrderDetailView({ orderId, onClose, onOrderUpdated }: OrderDetai
                       return pid && (pid === normCode || String(x.productId) === code);
                     })
                   : undefined);
+              const pidEff = linePid || String(oi?.productId || '').trim();
+              const pRow = getProductFromMap(invoiceProductById, pidEff);
+              const lineSku = String(line.sku || '').trim();
+              const displaySku =
+                lineSku || String(pRow?.sku ?? oi?.sku ?? '').trim();
+              const productName = String(
+                pRow?.name || line.description || oi?.productName || '—'
+              ).trim() || '—';
               return {
                 key: `line-${idx}`,
-                productId: String(oi?.productId || line?.productId || ''),
-                productName: String(line.description || oi?.productName || '—'),
-                sku: String(line.code || '').trim(),
+                productId: pidEff,
+                productName,
+                matchKey: code,
+                displaySku,
                 qty: Number(line.qty) || 0,
                 price: Number(line.price) || 0,
                 lineTotal: Number(line.amount) || (Number(line.qty) || 0) * (Number(line.price) || 0),
               };
             });
             const invoiceRowMatchesOrderItem = (row: (typeof toInvoiceRows)[0], item: any) => {
-              const code = String(row.sku || '').trim();
+              const code = String(row.matchKey || '').trim();
               const norm = code.replace(/-/g, '').toLowerCase();
               const pid = String(item.productId || '').replace(/-/g, '').toLowerCase();
               if (String(item.sku || '').trim() === code) return true;
@@ -958,7 +1128,10 @@ export function OrderDetailView({ orderId, onClose, onOrderUpdated }: OrderDetai
               return false;
             };
             const invoiceItems = toInvoiceRows.map((row) => {
-              const matched = order.items.find((item: any) => invoiceRowMatchesOrderItem(row, item)) as any;
+              let matched = order.items.find((item: any) => invoiceRowMatchesOrderItem(row, item)) as any;
+              if (!matched && row.productId) {
+                matched = order.items.find((item: any) => String(item.productId) === String(row.productId)) as any;
+              }
               const familyId = String(
                 matched?.familyId ?? matched?.FamilyId ?? matched?.categoryId ?? matched?.CategoryId ?? ''
               ).trim();
@@ -973,18 +1146,42 @@ export function OrderDetailView({ orderId, onClose, onOrderUpdated }: OrderDetai
               const familyVolume =
                 fam?.volume != null && Number.isFinite(Number(fam.volume)) ? Number(fam.volume) : undefined;
               const familyUnit = fam?.unit?.trim() || undefined;
+              const pid = String(row.productId || '').trim();
+              const p = getProductFromMap(invoiceProductById, pid);
+              let familyInvoiceKey = getPresentationSummaryKey(p);
+              if (!familyInvoiceKey) {
+                familyInvoiceKey = pid ? `pid:${pid}` : `row:${row.matchKey}`;
+              }
+              const pres = (p as any)?.presentation ?? {};
+              const pv =
+                pres.volume != null && Number.isFinite(Number(pres.volume))
+                  ? Number(pres.volume)
+                  : undefined;
+              const pu = String(pres.unit ?? '').trim() || undefined;
+              const volPart = familyVolumeLabel(pv ?? familyVolume, pu || familyUnit);
+              const presName = String(pres.name ?? '').trim() || String(fam?.name ?? '').trim();
+              const presentationLabel =
+                [presName, volPart].filter(Boolean).join(' · ') || familyName || undefined;
+              const commercialSku = String(row.displaySku || p?.sku || '').trim();
+              const presentationGenericCode =
+                String(p?.presentation?.genericCode ?? p?.genericCode ?? '').trim() || undefined;
               return {
                 qty: row.qty,
-                code: row.sku,
+                code: row.matchKey,
+                ...(commercialSku ? { sku: commercialSku } : {}),
                 description: row.productName,
                 price: row.price,
                 amount: row.lineTotal,
+                familyId: familyId || undefined,
                 familyName,
                 familyCode,
                 familySku,
                 familyShortName,
                 familyVolume,
                 familyUnit,
+                familyInvoiceKey,
+                presentationLabel,
+                presentationGenericCode,
               };
             });
             return (
@@ -997,35 +1194,35 @@ export function OrderDetailView({ orderId, onClose, onOrderUpdated }: OrderDetai
                         <button
                           type="button"
                           className={`px-3 py-1.5 text-xs font-medium ${
-                            invoiceViewMode === 'product' ? 'bg-slate-800 text-white' : 'bg-white text-slate-700'
-                          }`}
-                          onClick={() => setInvoiceViewMode('product')}
-                        >
-                          {translate('invoiceTabProducts')}
-                        </button>
-                        <button
-                          type="button"
-                          className={`px-3 py-1.5 text-xs font-medium border-l border-slate-200 ${
                             invoiceViewMode === 'family' ? 'bg-slate-800 text-white' : 'bg-white text-slate-700'
                           }`}
                           onClick={() => setInvoiceViewMode('family')}
                         >
                           {translate('invoiceTabFamilies')}
                         </button>
+                        <button
+                          type="button"
+                          className={`px-3 py-1.5 text-xs font-medium border-l border-slate-200 ${
+                            invoiceViewMode === 'product' ? 'bg-slate-800 text-white' : 'bg-white text-slate-700'
+                          }`}
+                          onClick={() => setInvoiceViewMode('product')}
+                        >
+                          {translate('invoiceTabProducts')}
+                        </button>
                       </div>
-                      <Button
-                        variant="outline"
+                <Button 
+                  variant="outline"
                         size="sm"
                         onClick={() => {
                           setInvoicePrintLayout('normal');
                           window.print();
                         }}
-                        className="gap-2"
-                      >
+                  className="gap-2"
+                >
                         <Download className="h-4 w-4" />
                         {translate('printDownload')}
-                      </Button>
-                      <Button
+                </Button>
+                <Button 
                         variant="outline"
                         size="sm"
                         onClick={() => {
@@ -1044,17 +1241,15 @@ export function OrderDetailView({ orderId, onClose, onOrderUpdated }: OrderDetai
                       >
                         <Printer className="h-4 w-4" />
                         {translate('printTicket')}
-                      </Button>
-                    </div>
+                </Button>
+              </div>
                   </div>
                 </CardHeader>
                 <CardContent className="p-0">
                   <Invoice
                     invoiceNumber={String(inv.invoiceNumber)}
                     date={formatInvoiceDate(invoiceDateStr)}
-                    vendorName={sellerPersonName}
-                    vendorRouteCode={sellerRouteCode}
-                    vendorPersonName={sellerPersonName}
+                    vendorCode={sellerRouteCode || '—'}
                     storeName={storeNameDisplay || order.storeName || '—'}
                     storeAddress={storeAddressDisplay || order.storeAddress || ''}
                     items={invoiceItems}
@@ -1083,14 +1278,14 @@ export function OrderDetailView({ orderId, onClose, onOrderUpdated }: OrderDetai
               <Printer className="h-4 w-4 mr-2" />
               {translate('printOrderTab')}
             </Button>
-          </div>
+                </div>
           {!hasInvoiceLines ? (
             <Alert className="border-amber-200 bg-amber-50">
               <AlertCircle className="h-4 w-4 text-amber-600" />
               <AlertDescription className="text-amber-900 ml-2">{translate('noInvoiceYetAdmin')}</AlertDescription>
             </Alert>
           ) : null}
-          {hasInvoiceLines && !isCatalogStore ? (
+          {hasInvoiceLines && showPlanogramOrderView ? (
             <div id="admin-planogram-print-root" className="space-y-2">
               <h3 className="text-sm font-semibold text-slate-800 print:hidden">{translate('planogram')}</h3>
               <OrderPlanogramView
@@ -1123,8 +1318,8 @@ export function OrderDetailView({ orderId, onClose, onOrderUpdated }: OrderDetai
                   } as Order
                 }
               />
-            </div>
-          ) : hasInvoiceLines && catalogInvoicedItems?.length ? (
+                  </div>
+          ) : hasInvoiceLines && !showPlanogramOrderView && catalogInvoicedItems?.length ? (
             <div id="admin-planogram-print-root" className="space-y-2">
               <OrderCatalogGridView
                 useAllActiveProducts
@@ -1143,159 +1338,187 @@ export function OrderDetailView({ orderId, onClose, onOrderUpdated }: OrderDetai
                   } as any
                 }
               />
-            </div>
+                </div>
           ) : null}
         </TabsContent>
 
-        <TabsContent value="pod-only" className="p-6 mt-0">
-          <Card>
-            <CardHeader className="border-b border-gray-100 bg-gray-50/90 py-4">
-              <CardTitle className="text-base">{translate('podTitle')}</CardTitle>
-              <CardDescription>
-                {displayPod
-                  ? translate('receiptRegistered')
-                  : canShowEmergencyPodUpload
+        <TabsContent
+          value="pod-only"
+          className="p-6 mt-0 min-w-0"
+          onClick={(e) => e.stopPropagation()}
+          onPointerDown={(e) => e.stopPropagation()}
+        >
+          <Card className="w-full border-slate-200 shadow-sm overflow-hidden">
+            <CardHeader className="border-b border-slate-100 bg-slate-50/90 px-6 py-4">
+              <div className="flex flex-wrap items-center gap-2 gap-y-1">
+                <CardTitle className="text-base font-semibold text-slate-900">{translate('podTitle')}</CardTitle>
+                {displayPod ? (
+                  <span className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-0.5 text-xs font-medium text-emerald-800">
+                    <CheckCircle className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                    {translate('receiptRegistered')}
+                  </span>
+                ) : null}
+              </div>
+              {!displayPod ? (
+                <CardDescription className="text-sm text-slate-600 mt-1.5 leading-relaxed">
+                  {canShowEmergencyPodUpload
                     ? translate('productImageHint')
                     : !invoiceIdForPod
                       ? translate('podEmergencyInvoiceMissing')
                       : translate('noPODRegistered')}
-              </CardDescription>
+                </CardDescription>
+              ) : null}
             </CardHeader>
-            <CardContent
-              className="pt-6 space-y-6"
-              onClick={(e) => e.stopPropagation()}
-              onPointerDown={(e) => e.stopPropagation()}
-            >
+            <CardContent className="p-6 space-y-6">
               {displayPod ? (
-                <div className="space-y-4">
-                  <div className="flex items-center gap-2 rounded-lg border border-green-200 bg-green-50 px-4 py-3">
-                    <CheckCircle className="h-5 w-5 text-green-600 shrink-0" />
-                    <p className="text-sm text-green-900">{translate('receiptRegistered')}</p>
-                  </div>
+                <>
                   {isPodPath ? (
-                    <p className="text-xs text-gray-500 font-mono break-all">{displayPod}</p>
+                    <div className="rounded-md bg-slate-50 border border-slate-200 px-3 py-2">
+                      <p className="text-[11px] font-medium text-slate-500 uppercase tracking-wide mb-1">
+                        {translate('pathLabel')}
+                      </p>
+                      <p className="text-xs text-slate-700 font-mono break-all leading-relaxed">{displayPod}</p>
+                    </div>
                   ) : null}
                   {podImageUrl ? (
-                    <div className="relative w-full max-w-2xl rounded-lg border-2 border-dashed border-gray-200 bg-gray-50 overflow-hidden min-h-[240px] flex items-center justify-center p-3">
+                    <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-4 sm:p-5">
                       {podImageError ? (
-                        <div className="flex flex-col items-center justify-center py-8 px-4 text-center">
-                          <p className="text-sm text-amber-800 mb-1">{translate('imageLoadError')}</p>
-                          <p className="text-xs text-gray-500 mb-2">{translate('pathLabel')}: {displayPod}</p>
-                          <a
-                            href={podImageUrl}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-sm text-indigo-600 hover:text-indigo-800 underline break-all"
-                          >
-                            {translate('openLink')}
-                          </a>
+                        <div className="flex flex-col items-center justify-center gap-3 py-8 text-center">
+                          <p className="text-sm text-amber-800">{translate('imageLoadError')}</p>
+                          <Button variant="outline" size="sm" asChild>
+                            <a href={podImageUrl} target="_blank" rel="noopener noreferrer">
+                              {translate('openLink')}
+                            </a>
+                          </Button>
                         </div>
                       ) : (
-                        <img
-                          key={podImageUrl}
-                          src={podImageUrl}
-                          alt={translate('podTitle')}
-                          className="w-full max-w-full max-h-[480px] object-contain"
-                          style={{ minHeight: '240px' }}
-                          referrerPolicy="no-referrer"
-                          loading="lazy"
-                          decoding="async"
-                          onLoad={() => setPodImageError(false)}
-                          onError={() => setPodImageError(true)}
-                        />
+                        <div className="flex justify-center">
+                          <img
+                            key={podImageUrl}
+                            src={podImageUrl}
+                            alt={translate('podTitle')}
+                            className="max-h-[min(360px,50vh)] w-auto max-w-full rounded-lg border border-slate-200/80 bg-white object-contain shadow-sm"
+                            referrerPolicy="no-referrer"
+                            loading="lazy"
+                            decoding="async"
+                            onLoad={() => setPodImageError(false)}
+                            onError={() => setPodImageError(true)}
+                          />
+                        </div>
                       )}
                     </div>
                   ) : null}
-                </div>
+                </>
               ) : canShowEmergencyPodUpload ? (
-                <div className="space-y-6">
-                  <div className="space-y-3">
-                    <Label className="text-gray-900">{translate('podEmergencySelectImage')}</Label>
-                    <input
-                      ref={emergencyPodInputRef}
-                      type="file"
-                      accept="image/*,.heic,.heif"
-                      className="hidden"
-                      onChange={handleEmergencyPodFileChange}
-                    />
-                    <div className="flex flex-col sm:flex-row sm:items-start gap-4">
-                      <div className="shrink-0 w-full sm:w-40 aspect-square max-w-[11rem] mx-auto sm:mx-0 rounded-lg border-2 border-dashed border-gray-200 bg-gray-50 overflow-hidden">
-                        {emergencyPodPreview ? (
-                          <div className="relative size-full min-h-[10rem]">
-                            {/* eslint-disable-next-line @next/next/no-img-element */}
-                            <img
-                              src={emergencyPodPreview}
-                              alt=""
-                              className="absolute inset-0 size-full object-cover"
-                            />
-                            {emergencyPodUploading ? (
-                              <div className="absolute inset-0 bg-black/40 flex items-center justify-center">
-                                <span className="text-white text-sm font-medium">{translate('uploading')}</span>
-                              </div>
-                            ) : null}
-                            <Button
-                              type="button"
-                              variant="outline"
-                              size="icon"
-                              className="absolute top-1.5 right-1.5 h-8 w-8 rounded-full bg-white shadow border-gray-300 hover:bg-gray-100"
-                              onClick={clearEmergencyPodSelection}
-                              disabled={emergencyPodUploading}
-                              title={translate('cancel')}
-                            >
-                              <X className="h-4 w-4" />
-                            </Button>
-                          </div>
-                        ) : (
-                          <div className="flex flex-col items-center justify-center text-center p-4 h-full min-h-[10rem] text-gray-400">
-                            <ImagePlus className="h-10 w-10 mb-2 opacity-60" />
-                            <span className="text-xs">{translate('noImageSelected')}</span>
-                          </div>
-                        )}
-                      </div>
-                      <div className="flex flex-col gap-3 flex-1 min-w-0">
-                        <Button
+                <>
+                  <Alert className="flex items-start gap-3 border-amber-200 bg-amber-50 text-amber-950">
+                    <AlertCircle className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
+                    <AlertDescription className="flex-1 min-w-0 space-y-2 text-amber-950 [&_p]:leading-relaxed m-0">
+                      <p className="text-sm font-semibold text-amber-950">{translate('podEmergencyUploadTitle')}</p>
+                      <p className="text-sm text-amber-900/95">{translate('podAdminWarning')}</p>
+                      <p className="text-xs text-amber-900/85">{translate('podEmergencyUploadDesc')}</p>
+                    </AlertDescription>
+                  </Alert>
+                  <input
+                    ref={emergencyPodInputRef}
+                    type="file"
+                    accept="image/*,.heic,.heif"
+                    className="hidden"
+                    onChange={handleEmergencyPodFileChange}
+                  />
+                  <div className="grid w-full gap-6 lg:grid-cols-2 lg:gap-8 lg:items-stretch min-w-0">
+                    <div className="relative min-h-[220px] w-full min-w-0 overflow-hidden rounded-xl border-2 border-dashed border-slate-200 bg-slate-50 transition-colors hover:border-slate-300">
+                      {emergencyPodPreview ? (
+                        <div className="relative size-full min-h-[220px]">
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img
+                            src={emergencyPodPreview}
+                            alt=""
+                            className="absolute inset-0 size-full object-contain bg-slate-100/80"
+                          />
+                          {emergencyPodUploading ? (
+                            <div className="absolute inset-0 flex items-center justify-center bg-slate-900/50 backdrop-blur-[1px] z-[1]">
+                              <span className="rounded-md bg-white/95 px-3 py-1.5 text-sm font-medium text-slate-800 shadow-sm">
+                                {translate('uploading')}
+                              </span>
+                            </div>
+                          ) : null}
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="icon"
+                            className="absolute right-3 top-3 z-[2] h-9 w-9 rounded-full border-slate-200 bg-white shadow-md hover:bg-slate-50"
+                            onClick={clearEmergencyPodSelection}
+                            disabled={emergencyPodUploading}
+                            title={translate('cancel')}
+                          >
+                            <X className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      ) : (
+                        <button
                           type="button"
-                          variant="outline"
-                          size="sm"
-                          className="w-fit"
+                          className="flex min-h-[220px] w-full flex-col items-center justify-center gap-3 p-8 text-slate-500 transition-colors hover:bg-slate-100/80 hover:text-slate-700"
                           onClick={() => emergencyPodInputRef.current?.click()}
                           disabled={emergencyPodUploading}
                         >
-                          <ImagePlus className="h-4 w-4 mr-2" />
-                          {emergencyPodFile ? translate('changeImage') : translate('selectImage')}
-                        </Button>
-                        <p className="text-xs text-gray-500">{translate('productImageHint')}</p>
-                        {emergencyPodFile && !emergencyPodUploading ? (
-                          <p className="text-xs text-green-700 font-medium truncate" title={emergencyPodFile.name}>
-                            {emergencyPodFile.name}
-                          </p>
-                        ) : null}
-                        <Button
-                          type="button"
-                          size="sm"
-                          className="w-fit bg-indigo-600 hover:bg-indigo-700"
-                          disabled={!emergencyPodFile || emergencyPodUploading}
-                          onClick={() => void handleEmergencyPodSubmit()}
-                        >
-                          <Save className="h-4 w-4 mr-2" />
-                          {emergencyPodUploading ? translate('uploading') : translate('podEmergencySubmit')}
-                        </Button>
+                          <div className="flex h-14 w-14 items-center justify-center rounded-full bg-slate-200/80 text-slate-600">
+                            <ImagePlus className="h-7 w-7" />
+                          </div>
+                          <span className="text-base font-medium">{translate('selectImage')}</span>
+                        </button>
+                      )}
+                    </div>
+                    <div className="flex min-w-0 flex-col justify-center gap-4">
+                      <div>
+                        <p className="text-sm font-semibold text-slate-900 mb-3">{translate('podEmergencySelectImage')}</p>
+                        <div className="flex flex-wrap gap-2">
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="gap-2"
+                            onClick={() => emergencyPodInputRef.current?.click()}
+                            disabled={emergencyPodUploading}
+                          >
+                            <ImagePlus className="h-4 w-4 shrink-0" />
+                            {emergencyPodFile ? translate('changeImage') : translate('selectImage')}
+                          </Button>
+                          <Button
+                            type="button"
+                            size="sm"
+                            className="gap-2 bg-indigo-600 hover:bg-indigo-700"
+                            disabled={!emergencyPodFile || emergencyPodUploading}
+                            onClick={() => void handleEmergencyPodSubmit()}
+                          >
+                            <Save className="h-4 w-4 shrink-0" />
+                            {emergencyPodUploading ? translate('uploading') : translate('podEmergencySubmit')}
+                          </Button>
+                        </div>
                       </div>
+                      {emergencyPodFile && !emergencyPodUploading ? (
+                        <p className="text-sm text-emerald-700 font-medium break-all" title={emergencyPodFile.name}>
+                          {emergencyPodFile.name}
+                        </p>
+                      ) : null}
+                      <p className="text-sm text-slate-500 leading-relaxed">{translate('productImageHint')}</p>
                     </div>
                   </div>
-                  <Alert className="border-amber-200 bg-amber-50 text-amber-950">
-                    <AlertCircle className="h-4 w-4 text-amber-700" />
-                    <AlertDescription className="text-amber-950 ml-2 space-y-1.5 [&_p]:text-sm">
-                      <p className="font-semibold text-amber-950">{translate('podEmergencyUploadTitle')}</p>
-                      <p className="text-amber-900/95">{translate('podAdminWarning')}</p>
-                      <p className="text-amber-900/90 text-xs">{translate('podEmergencyUploadDesc')}</p>
-                    </AlertDescription>
-                  </Alert>
-                </div>
+                </>
               ) : !invoiceIdForPod ? (
-                <p className="text-sm text-gray-600">{translate('podEmergencyInvoiceMissing')}</p>
+                <Alert className="flex items-start gap-3 border-amber-200 bg-amber-50">
+                  <AlertCircle className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
+                  <AlertDescription className="text-amber-900 text-sm leading-relaxed m-0 flex-1 min-w-0">
+                    {translate('podEmergencyInvoiceMissing')}
+                  </AlertDescription>
+                </Alert>
               ) : (
-                <p className="text-sm text-gray-600">{translate('noPODRegistered')}</p>
+                <Alert className="flex items-start gap-3 border-slate-200 bg-slate-50">
+                  <AlertCircle className="h-4 w-4 text-slate-500 shrink-0 mt-0.5" />
+                  <AlertDescription className="text-slate-700 text-sm leading-relaxed m-0 flex-1 min-w-0">
+                    {translate('noPODRegistered')}
+                  </AlertDescription>
+                </Alert>
               )}
             </CardContent>
           </Card>

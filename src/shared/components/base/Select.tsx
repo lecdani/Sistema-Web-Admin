@@ -222,3 +222,6 @@ export const SelectItem = React.forwardRef<HTMLDivElement, SelectItemProps>(
 );
 
 SelectItem.displayName = 'SelectItem';
+
+export { SearchableSelect, SEARCHABLE_SELECT_DEFAULT_BLANK_VALUES } from './SearchableSelect';
+export type { SearchableSelectOption } from './SearchableSelect';

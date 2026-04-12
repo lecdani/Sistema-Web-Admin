@@ -7,7 +7,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/sha
 import { Badge } from '@/shared/components/base/Badge';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/shared/components/base/Dialog';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/shared/components/base/Table';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/shared/components/base/Select';
+import { SearchableSelect } from '@/shared/components/base/Select';
 import { 
   ArrowLeft,
   FileText,
@@ -380,59 +380,59 @@ export function InvoiceManagement({ onBack }: InvoiceManagementProps) {
             </div>
             
             <div className="flex gap-4">
-              <Select value={filters.sellerId} onValueChange={(value) => setFilters(prev => ({ ...prev, sellerId: value }))}>
-                <SelectTrigger className="w-48">
-                  <UserIcon className="h-4 w-4 mr-2" />
-                  <SelectValue placeholder={translate('filterBySeller')}>
-                    {filters.sellerId === 'all' ? translate('allSellers') : (() => { const u = users.find((x) => x.id === filters.sellerId); return u ? `${u.firstName} ${u.lastName}` : null; })()}
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">{translate('allSellers')}</SelectItem>
-                  {users.map((user) => (
-                    <SelectItem key={user.id} value={user.id}>
-                      {user.firstName} {user.lastName}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <div className="flex items-center gap-2 w-48 min-w-0">
+                <UserIcon className="h-4 w-4 shrink-0 text-gray-500" />
+                <SearchableSelect
+                  className="min-w-0 flex-1"
+                  value={filters.sellerId}
+                  placeholder={translate('filterBySeller')}
+                  clearable
+                  clearToValue="all"
+                  options={[
+                    { value: 'all', label: translate('allSellers') },
+                    ...users.map((u) => ({
+                      value: u.id,
+                      label: `${u.firstName} ${u.lastName}`,
+                    })),
+                  ]}
+                  onValueChange={(value) => setFilters((prev) => ({ ...prev, sellerId: value }))}
+                />
+              </div>
 
-              <Select value={filters.storeId} onValueChange={(value) => setFilters(prev => ({ ...prev, storeId: value }))}>
-                <SelectTrigger className="w-48">
-                  <StoreIcon className="h-4 w-4 mr-2" />
-                  <SelectValue placeholder={translate('filterByStore')}>
-                    {filters.storeId === 'all' ? translate('allStores') : stores.find((s) => s.id === filters.storeId)?.name}
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">{translate('allStores')}</SelectItem>
-                  {stores.map((store) => (
-                    <SelectItem key={store.id} value={store.id}>
-                      {store.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <div className="flex items-center gap-2 w-48 min-w-0">
+                <StoreIcon className="h-4 w-4 shrink-0 text-gray-500" />
+                <SearchableSelect
+                  className="min-w-0 flex-1"
+                  value={filters.storeId}
+                  placeholder={translate('filterByStore')}
+                  clearable
+                  clearToValue="all"
+                  options={[
+                    { value: 'all', label: translate('allStores') },
+                    ...stores.map((s) => ({ value: s.id, label: s.name })),
+                  ]}
+                  onValueChange={(value) => setFilters((prev) => ({ ...prev, storeId: value }))}
+                />
+              </div>
 
-              <Select value={filters.status} onValueChange={(value) => setFilters(prev => ({ ...prev, status: value }))}>
-                <SelectTrigger className="w-48">
-                  <Filter className="h-4 w-4 mr-2" />
-                  <SelectValue placeholder={translate('filterByStatus')}>
-                    {filters.status === 'all' && translate('allStatuses')}
-                    {filters.status === 'draft' && translate('statusDraft')}
-                    {filters.status === 'sent' && translate('statusSent')}
-                    {filters.status === 'paid' && translate('statusPaid')}
-                    {filters.status === 'cancelled' && translate('statusCancelled')}
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">{translate('allStatuses')}</SelectItem>
-                  <SelectItem value="draft">{translate('statusDraft')}</SelectItem>
-                  <SelectItem value="sent">{translate('statusSent')}</SelectItem>
-                  <SelectItem value="paid">{translate('statusPaid')}</SelectItem>
-                  <SelectItem value="cancelled">{translate('statusCancelled')}</SelectItem>
-                </SelectContent>
-              </Select>
+              <div className="flex items-center gap-2 w-48 min-w-0">
+                <Filter className="h-4 w-4 shrink-0 text-gray-500" />
+                <SearchableSelect
+                  className="min-w-0 flex-1"
+                  value={filters.status}
+                  placeholder={translate('filterByStatus')}
+                  clearable
+                  clearToValue="all"
+                  options={[
+                    { value: 'all', label: translate('allStatuses') },
+                    { value: 'draft', label: translate('statusDraft') },
+                    { value: 'sent', label: translate('statusSent') },
+                    { value: 'paid', label: translate('statusPaid') },
+                    { value: 'cancelled', label: translate('statusCancelled') },
+                  ]}
+                  onValueChange={(value) => setFilters((prev) => ({ ...prev, status: value }))}
+                />
+              </div>
             </div>
           </div>
         </CardContent>

@@ -30,13 +30,7 @@ import {
   DialogTitle,
   DialogClose,
 } from '@/shared/components/base/Dialog';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/shared/components/base/Select';
+import { SearchableSelect } from '@/shared/components/base/Select';
 import { Badge } from '@/shared/components/base/Badge';
 import {
   AlertDialog,
@@ -59,6 +53,16 @@ import { assignmentsApi } from '@/shared/services/assignments-api';
 import { fetchAllOrderSummaries } from '@/shared/services/orders-api';
 import type { Assignment, City, SalesRoute, Store, User } from '@/shared/types';
 import { assignmentsForRoute, storeAssignedToOtherRoute } from '@/shared/utils/assignment-match';
+
+/** Compara ids de API (GUID) sin depender de mayúsculas/minúsculas. */
+function storeIdEquals(a: string | undefined, b: string | undefined): boolean {
+  return String(a ?? '').trim().toLowerCase() === String(b ?? '').trim().toLowerCase();
+}
+
+function findStoreById(storesList: Store[], id: string): Store | undefined {
+  const n = String(id).trim().toLowerCase();
+  return storesList.find((s) => String(s.id).trim().toLowerCase() === n);
+}
 
 interface SalesRouteManagementProps {
   onBack?: () => void;
@@ -86,7 +90,8 @@ export function SalesRouteManagement({ onBack }: SalesRouteManagementProps) {
 
   const [showStoresDialog, setShowStoresDialog] = useState(false);
   const [storesRoute, setStoresRoute] = useState<SalesRoute | null>(null);
-  const [stores, setStores] = useState<Store[]>([]);
+  /** Catálogo completo para resolver nombres (incl. inactivas); el desplegable solo lista activas. */
+  const [storesCatalog, setStoresCatalog] = useState<Store[]>([]);
   const [assignments, setAssignments] = useState<Assignment[]>([]);
   const [storesLoading, setStoresLoading] = useState(false);
   const [selectedStoreToAdd, setSelectedStoreToAdd] = useState('');
@@ -125,15 +130,17 @@ export function SalesRouteManagement({ onBack }: SalesRouteManagementProps) {
   const loadInitial = async () => {
     setLoading(true);
     try {
-      const [rList, cList, uList, orderSummaries] = await Promise.all([
+      const [rList, cList, uList, orderSummaries, assignList] = await Promise.all([
         salesRoutesApi.fetchAll(),
         citiesApi.fetchAll(),
         usersApi.fetchAll(),
         fetchAllOrderSummaries(),
+        assignmentsApi.fetchAll(),
       ]);
       setRoutes(rList);
       setCities(cList);
       setAllUsers(uList);
+      setAssignments(assignList);
       const normKey = (id: string | undefined) => String(id ?? '').trim().toLowerCase();
       const sellerIdToRouteId = new Map<string, string>();
       for (const u of uList) {
@@ -159,6 +166,7 @@ export function SalesRouteManagement({ onBack }: SalesRouteManagementProps) {
       setCities([]);
       setAllUsers([]);
       setRouteIdsWithOrders(new Set());
+      setAssignments([]);
     } finally {
       setLoading(false);
     }
@@ -186,6 +194,14 @@ export function SalesRouteManagement({ onBack }: SalesRouteManagementProps) {
     return `${shown}${extra}`;
   };
 
+  const routeHasAssignedStores = (routeId: string) =>
+    assignmentsForRoute(assignments, routeId).length > 0;
+
+  const routeCanDelete = (r: SalesRoute) =>
+    !routeHasAssociatedOrders(r.id) &&
+    sellersAssignedToRoute(r.id).length === 0 &&
+    !routeHasAssignedStores(r.id);
+
   const cityLabel = (cityId: string) => {
     const c = cities.find((x) => String(x.id) === String(cityId));
     return c?.name || cityId || '—';
@@ -211,6 +227,20 @@ export function SalesRouteManagement({ onBack }: SalesRouteManagementProps) {
       toast.error(translate('salesRouteCityRequired'));
       return;
     }
+    const cityExists = cities.some((c) => String(c.id) === cityIdCreate);
+    if (!cityExists) {
+      toast.error(translate('salesRouteCityRequired'));
+      return;
+    }
+    const dup = routes.some(
+      (r) =>
+        String(r.cityId) === cityIdCreate &&
+        r.name.trim().toLowerCase() === name.toLowerCase()
+    );
+    if (dup) {
+      toast.error('Ya existe una ruta con ese nombre en la ciudad seleccionada.');
+      return;
+    }
     setFormSaving(true);
     try {
       await salesRoutesApi.create({ name, cityId: cityIdCreate });
@@ -219,7 +249,12 @@ export function SalesRouteManagement({ onBack }: SalesRouteManagementProps) {
       await loadInitial();
     } catch (e: any) {
       console.error(e);
-      toast.error(e?.data?.message ?? e?.message ?? translate('errorSaveSalesRoute'));
+      const rawMsg = String(e?.data?.message ?? e?.message ?? '').toLowerCase();
+      if (rawMsg.includes('entity changes') || rawMsg.includes('inner exception')) {
+        toast.error('No se pudo crear la ruta. Revisa si el nombre o código ya existe para esa ciudad.');
+      } else {
+        toast.error(e?.data?.message ?? e?.message ?? translate('errorSaveSalesRoute'));
+      }
     } finally {
       setFormSaving(false);
     }
@@ -254,12 +289,12 @@ export function SalesRouteManagement({ onBack }: SalesRouteManagementProps) {
         storesApi.fetchAll(),
         assignmentsApi.fetchAll(),
       ]);
-      setStores(storesData.filter((s) => s.isActive));
+      setStoresCatalog(storesData);
       setAssignments(allAssignments);
     } catch (e) {
       console.error(e);
       toast.error(translate('errorLoadAssignments'));
-      setStores([]);
+      setStoresCatalog([]);
       setAssignments([]);
     } finally {
       setStoresLoading(false);
@@ -414,39 +449,37 @@ export function SalesRouteManagement({ onBack }: SalesRouteManagementProps) {
               </div>
             </div>
             <div className="flex flex-col sm:flex-row gap-4">
-              <Select value={statusFilter} onValueChange={setStatusFilter}>
-                <SelectTrigger className="w-full sm:w-48">
-                  <Filter className="h-4 w-4 mr-2" />
-                  <SelectValue placeholder={translate('filterByStatus')}>
-                    {statusFilter === 'all' && translate('allStatuses')}
-                    {statusFilter === 'active' && translate('activeStores')}
-                    {statusFilter === 'inactive' && translate('inactiveStores')}
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">{translate('allStatuses')}</SelectItem>
-                  <SelectItem value="active">{translate('activeStores')}</SelectItem>
-                  <SelectItem value="inactive">{translate('inactiveStores')}</SelectItem>
-                </SelectContent>
-              </Select>
-              <Select value={cityFilter} onValueChange={setCityFilter}>
-                <SelectTrigger className="w-full sm:w-48">
-                  <MapPin className="h-4 w-4 mr-2" />
-                  <SelectValue placeholder={translate('filterByCity')}>
-                    {cityFilter === 'all'
-                      ? translate('allCities')
-                      : cities.find((c) => String(c.id) === String(cityFilter))?.name}
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">{translate('allCities')}</SelectItem>
-                  {cities.map((city) => (
-                    <SelectItem key={city.id} value={String(city.id)}>
-                      {city.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <div className="flex items-center gap-2 w-full sm:w-48 min-w-0">
+                <Filter className="h-4 w-4 shrink-0 text-gray-500" />
+                <SearchableSelect
+                  className="min-w-0 flex-1"
+                  value={statusFilter}
+                  placeholder={translate('filterByStatus')}
+                  clearable
+                  clearToValue="all"
+                  options={[
+                    { value: 'all', label: translate('allStatuses') },
+                    { value: 'active', label: translate('activeStores') },
+                    { value: 'inactive', label: translate('inactiveStores') },
+                  ]}
+                  onValueChange={setStatusFilter}
+                />
+              </div>
+              <div className="flex items-center gap-2 w-full sm:w-48 min-w-0">
+                <MapPin className="h-4 w-4 shrink-0 text-gray-500" />
+                <SearchableSelect
+                  className="min-w-0 flex-1"
+                  value={cityFilter}
+                  placeholder={translate('filterByCity')}
+                  clearable
+                  clearToValue="all"
+                  options={[
+                    { value: 'all', label: translate('allCities') },
+                    ...cities.map((city) => ({ value: String(city.id), label: city.name })),
+                  ]}
+                  onValueChange={setCityFilter}
+                />
+              </div>
             </div>
           </div>
         </CardContent>
@@ -525,7 +558,7 @@ export function SalesRouteManagement({ onBack }: SalesRouteManagementProps) {
                         <Button size="sm" variant="outline" onClick={() => void handleToggle(r)} title={translate('status')}>
                           {r.isActive ? <PowerOff className="h-4 w-4" /> : <Power className="h-4 w-4" />}
                         </Button>
-                        {!routeHasAssociatedOrders(r.id) ? (
+                        {routeCanDelete(r) && (
                           <AlertDialog>
                             <AlertDialogTrigger asChild>
                               <Button size="sm" variant="outline" className="text-red-600 hover:text-red-700" title={translate('delete')}>
@@ -535,7 +568,7 @@ export function SalesRouteManagement({ onBack }: SalesRouteManagementProps) {
                             <AlertDialogContent>
                               <AlertDialogHeader>
                                 <AlertDialogTitle>{translate('confirmDeleteSalesRoute')}</AlertDialogTitle>
-                                <AlertDialogDescription>{translate('confirmDeleteSalesRouteDesc')}</AlertDialogDescription>
+                                <AlertDialogDescription>{translate('confirmDeleteSalesRouteDescEmpty')}</AlertDialogDescription>
                               </AlertDialogHeader>
                               <AlertDialogFooter>
                                 <AlertDialogCancel>{translate('cancel')}</AlertDialogCancel>
@@ -548,7 +581,7 @@ export function SalesRouteManagement({ onBack }: SalesRouteManagementProps) {
                               </AlertDialogFooter>
                             </AlertDialogContent>
                           </AlertDialog>
-                        ) : null}
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -613,26 +646,15 @@ export function SalesRouteManagement({ onBack }: SalesRouteManagementProps) {
             </div>
             <div className="space-y-2">
               <Label>{translate('salesRouteCityLabel')} *</Label>
-              <Select value={formCityId || undefined} onValueChange={setFormCityId}>
-                <SelectTrigger className="h-10">
-                  <SelectValue placeholder={translate('selectCity')}>
-                    {(() => {
-                      const c = cities.find((x) => String(x.id) === String(formCityId));
-                      return c
-                        ? `${c.name}${c.country ? ` - ${c.country}` : ''}`
-                        : undefined;
-                    })()}
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  {cities.map((c) => (
-                    <SelectItem key={String(c.id)} value={String(c.id)}>
-                      {c.name}
-                      {c.country ? ` - ${c.country}` : ''}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <SearchableSelect
+                value={formCityId}
+                placeholder={translate('selectCity')}
+                disabled={!cities.length}
+                options={cities.map((c) => ({ value: String(c.id), label: c.name }))}
+                onValueChange={setFormCityId}
+                inputClassName="h-10"
+                zIndex={60}
+              />
             </div>
           </div>
           <DialogFooter>
@@ -670,37 +692,37 @@ export function SalesRouteManagement({ onBack }: SalesRouteManagementProps) {
           <div className="space-y-4 px-6 py-4">
             <div className="border border-gray-200 rounded-lg p-4 bg-gray-50">
               <p className="text-sm font-semibold mb-2">{translate('addStoreToRoute')}</p>
-              <div className="flex gap-2 flex-col sm:flex-row">
-                <Select value={selectedStoreToAdd || undefined} onValueChange={setSelectedStoreToAdd}>
-                  <SelectTrigger className="flex-1 bg-white">
-                    <SelectValue placeholder={translate('selectStore')}>
-                      {(() => {
-                        const s = stores.find((x) => String(x.id) === String(selectedStoreToAdd));
-                        return s?.name ?? undefined;
-                      })()}
-                    </SelectValue>
-                  </SelectTrigger>
-                  <SelectContent className="max-h-[280px]">
-                    {storesRoute &&
-                      stores
-                        .filter((s) => {
-                          const mine = new Set(routeAssignments.map((a) => String(a.storeId)));
-                          const sameCity =
-                            !storesRoute.cityId || String(s.cityId) === String(storesRoute.cityId);
-                          return (
-                            sameCity &&
-                            !mine.has(String(s.id)) &&
-                            !storeAssignedToOtherRoute(assignments, String(s.id), storesRoute.id)
-                          );
-                        })
-                        .sort((a, b) => a.name.localeCompare(b.name))
-                        .map((s) => (
-                          <SelectItem key={String(s.id)} value={String(s.id)}>
-                            {s.name}
-                          </SelectItem>
-                        ))}
-                  </SelectContent>
-                </Select>
+              <div className="flex gap-3 flex-col sm:flex-row">
+                <SearchableSelect
+                  className="flex-1 min-w-0 bg-white"
+                  value={selectedStoreToAdd}
+                  placeholder={translate('selectStore')}
+                  disabled={!storesRoute || storesLoading}
+                  options={
+                    storesRoute
+                      ? storesCatalog
+                          .filter((s) => s.isActive)
+                          .filter((s) => {
+                            const assignedHere = routeAssignments.some((a) => storeIdEquals(a.storeId, s.id));
+                            const sameCity =
+                              !storesRoute.cityId || String(s.cityId) === String(storesRoute.cityId);
+                            return (
+                              sameCity &&
+                              !assignedHere &&
+                              !storeAssignedToOtherRoute(assignments, String(s.id), storesRoute.id)
+                            );
+                          })
+                          .sort((a, b) => a.name.localeCompare(b.name))
+                          .map((s) => ({
+                            value: String(s.id),
+                            label: s.name?.trim() || translate('assignedStoreNameFallback'),
+                          }))
+                      : []
+                  }
+                  onValueChange={setSelectedStoreToAdd}
+                  maxListHeight="min(17.5rem, 50vh)"
+                  zIndex={10000}
+                />
                 <Button
                   onClick={() => void handleAddStore()}
                   disabled={!storesRoute || !selectedStoreToAdd || storesLoading}
@@ -723,13 +745,17 @@ export function SalesRouteManagement({ onBack }: SalesRouteManagementProps) {
                 {routeAssignments
                   .map((a) => ({
                     a,
-                    store: stores.find((s) => String(s.id) === String(a.storeId)),
+                    store: findStoreById(storesCatalog, String(a.storeId)),
                   }))
-                  .sort((x, y) => (x.store?.name || '').localeCompare(y.store?.name || ''))
+                  .sort((x, y) =>
+                    (x.store?.name || x.a.storeName || '').localeCompare(y.store?.name || y.a.storeName || '')
+                  )
                   .map(({ a, store }) => (
                     <div key={a.id} className="px-4 py-3 flex justify-between gap-2 items-center">
                       <div className="min-w-0">
-                        <p className="text-sm font-medium truncate">{store?.name ?? a.storeId}</p>
+                        <p className="text-sm font-medium truncate">
+                          {store?.name?.trim() || a.storeName?.trim() || translate('assignedStoreNameFallback')}
+                        </p>
                         {store?.address && <p className="text-xs text-gray-500 truncate">{store.address}</p>}
                       </div>
                       <Button

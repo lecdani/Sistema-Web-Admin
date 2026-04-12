@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useMemo } from 'react';
 import {
   Save,
   X,
@@ -7,7 +7,9 @@ import {
   Trash2,
   RotateCcw,
   Info,
-  Building
+  Building,
+  Filter,
+  Search as SearchIcon
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/shared/components/base/Card';
 import { Button } from '@/shared/components/base/Button';
@@ -15,7 +17,7 @@ import { Input } from '@/shared/components/base/Input';
 import { Label } from '@/shared/components/base/Label';
 import { Textarea } from '@/shared/components/base/Textarea';
 import { Badge } from '@/shared/components/base/Badge';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/shared/components/base/Select';
+import { SearchableSelect } from '@/shared/components/base/Select';
 import { ScrollArea } from '@/shared/components/base/ScrollArea';
 import { Product, Planogram, Distribution } from '@/shared/types';
 import { useLanguage } from '@/shared/hooks/useLanguage';
@@ -23,12 +25,15 @@ import { toast } from '@/shared/components/base/Toast';
 import { planogramsApi } from '@/shared/services/planograms-api';
 import { distributionsApi } from '@/shared/services/distributions-api';
 import { getBackendAssetUrl } from '@/shared/config/api';
+import { productBelongsToBrandId } from '@/shared/utils/eternal-brand';
 
 interface PlanogramEditorProps {
   products: Product[];
   planogram?: Planogram;
   /** Distribuciones actuales del planograma (para edición, desde API) */
   existingDistributions?: Distribution[];
+  /** Solo productos de esta marca (p. ej. Eternal) en la paleta y nuevas celdas. */
+  planogramBrandId?: string;
   onSave?: (createdName?: string) => void;
   onCancel: () => void;
 }
@@ -50,6 +55,7 @@ export const PlanogramEditor: React.FC<PlanogramEditorProps> = ({
   products,
   planogram,
   existingDistributions = [],
+  planogramBrandId,
   onSave,
   onCancel
 }) => {
@@ -79,23 +85,69 @@ export const PlanogramEditor: React.FC<PlanogramEditorProps> = ({
 
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [categoryFilter, setCategoryFilter] = useState<string>('all');
+  const [productSearch, setProductSearch] = useState('');
+  const [showValidation, setShowValidation] = useState(false);
   const [draggedProduct, setDraggedProduct] = useState<Product | null>(null);
+
+  const paletteProducts = useMemo(() => {
+    const active = products.filter((p) => p.isActive);
+    if (!planogramBrandId) return active;
+    return active.filter((p) => productBelongsToBrandId(p, planogramBrandId));
+  }, [products, planogramBrandId]);
 
   // Obtener categorías únicas
   const getUniqueCategories = () => {
-    const categories = products.map(p => p.category).filter(Boolean);
+    const categories = paletteProducts.map(p => p.category).filter(Boolean);
     return [...new Set(categories)].sort();
   };
 
-  // Filtrar productos por categoría
-  const filteredProducts = categoryFilter === 'all' 
-    ? products 
-    : products.filter(p => p.category === categoryFilter);
+  const getProductShortDisplayName = (product: Product): string => {
+    const short = String(product.shortName ?? '').trim();
+    if (short) return short;
+    return String(product.name ?? '').trim() || '—';
+  };
+
+  const getProductCodeLine = (product: Product): string => {
+    const code = String(product.code ?? '').trim();
+    return code || '—';
+  };
+
+  // Filtrar productos por categoría + búsqueda libre
+  const filteredProducts = paletteProducts.filter((p) => {
+    const byCategory = categoryFilter === 'all' || p.category === categoryFilter;
+    if (!byCategory) return false;
+    const q = productSearch.trim().toLowerCase();
+    if (!q) return true;
+    const text = [
+      getProductShortDisplayName(p),
+      String(p.name ?? ''),
+      String(p.code ?? ''),
+      String(p.sku ?? ''),
+    ]
+      .join(' ')
+      .toLowerCase();
+    return text.includes(q);
+  });
 
   // Validar formulario
   const validateForm = (): boolean => {
-    if (!formData.name.trim()) {
-      toast.error(translate('planogramNameRequired'));
+    const missing: string[] = [];
+    if (!formData.name.trim()) missing.push('Nombre del planograma');
+    if (getProductsInGrid().size === 0) missing.push('Al menos un producto en la grilla');
+    if (planogramBrandId) {
+      const invalidCell = grid.some((row) =>
+        row.some((cell) => cell.product && !productBelongsToBrandId(cell.product, planogramBrandId))
+      );
+      if (invalidCell) {
+        toast.error(translate('planogramGridNonEternalProduct'));
+        return false;
+      }
+    }
+    if (missing.length > 0) {
+      // El nombre se muestra debajo del input; para otros faltantes mantenemos toast.
+      if (!(missing.length === 1 && missing[0] === 'Nombre del planograma')) {
+        toast.error(`Faltan campos obligatorios: ${missing.join(' · ')}`);
+      }
       return false;
     }
     return true;
@@ -132,6 +184,11 @@ export const PlanogramEditor: React.FC<PlanogramEditorProps> = ({
       return;
     }
 
+    if (planogramBrandId && !productBelongsToBrandId(product, planogramBrandId)) {
+      toast.error(translate('planogramOnlyEternalProducts'));
+      return;
+    }
+
     // Asignar producto a la celda
     const newGrid = grid.map((row, rowIndex) =>
       row.map((cell, colIndex) =>
@@ -142,8 +199,8 @@ export const PlanogramEditor: React.FC<PlanogramEditorProps> = ({
     );
 
     setGrid(newGrid);
-    toast.success(`${product.name} asignado a posición (${x + 1}, ${y + 1})`);
-  }, [grid]);
+    toast.success(`${getProductShortDisplayName(product)} asignado a posición (${x + 1}, ${y + 1})`);
+  }, [grid, planogramBrandId, translate]);
 
   // Remover producto de celda
   const handleRemoveProduct = (x: number, y: number) => {
@@ -176,6 +233,7 @@ export const PlanogramEditor: React.FC<PlanogramEditorProps> = ({
 
   // Guardar planograma (API)
   const handleSave = async () => {
+    setShowValidation(true);
     if (!validateForm()) return;
 
     try {
@@ -335,14 +393,24 @@ export const PlanogramEditor: React.FC<PlanogramEditorProps> = ({
         </div>
 
         {/* Fila única con inputs y estadísticas */}
-        <div className="flex items-center gap-3">
-          <Input
-            id="name"
-            value={formData.name}
-            onChange={(e) => setFormData(prev => ({ ...prev, name: e.target.value }))}
-            placeholder={translate('planogramNamePlaceholder')}
-            className="h-9 flex-1"
-          />
+        <div className="flex items-start gap-3">
+          <div className="flex-1 min-w-0">
+            <Input
+              id="name"
+              value={formData.name}
+              onChange={(e) => {
+                setFormData(prev => ({ ...prev, name: e.target.value }));
+                if (showValidation) setShowValidation(false);
+              }}
+              placeholder={translate('planogramNamePlaceholder')}
+              className={`h-9 w-full ${showValidation && !formData.name.trim() ? 'border-red-500 focus:border-red-500 focus:ring-red-500' : ''}`}
+            />
+            {showValidation && !formData.name.trim() && (
+              <p className="mt-1 text-xs font-medium text-red-600">
+                {translate('planogramNameRequired')}
+              </p>
+            )}
+          </div>
           <Input
             id="description"
             value={formData.description}
@@ -365,6 +433,12 @@ export const PlanogramEditor: React.FC<PlanogramEditorProps> = ({
           </div>
         </div>
       </div>
+
+      {planogramBrandId ? (
+        <p className="text-xs text-indigo-800 bg-indigo-50 border border-indigo-100 rounded-lg px-3 py-2">
+          {translate('planogramPaletteEternalOnlyHint')}
+        </p>
+      ) : null}
 
       {/* Contenido Principal - Grilla + Panel Lateral */}
       <div className="flex-1 flex gap-6 overflow-hidden">
@@ -429,12 +503,16 @@ export const PlanogramEditor: React.FC<PlanogramEditorProps> = ({
                         key={`${x}-${y}`}
                         className={`w-24 h-20 border-r-2 border-b-2 border-gray-600 flex flex-col items-center justify-center relative group transition-all ${
                           cell.product
-                            ? 'bg-blue-200 hover:bg-blue-300 border-blue-600'
+                            ? 'bg-gray-300 hover:bg-gray-400 border-gray-600'
                             : 'bg-white hover:bg-blue-50 border-gray-600 border-dashed'
                         }`}
                         onDragOver={handleDragOver}
                         onDrop={(e) => handleDrop(e, x, y)}
-                        title={cell.product ? `${cell.product.name} (${cell.product.code || cell.product.sku}) - Celda ${cellRef}` : translate('dragCellHere').replace('{ref}', cellRef)}
+                        title={
+                          cell.product
+                            ? `${getProductShortDisplayName(cell.product)} (${getProductCodeLine(cell.product)}) — ${cellRef}`
+                            : translate('dragCellHere').replace('{ref}', cellRef)
+                        }
                       >
                         {cell.product ? (
                           <div className="text-center w-full h-full flex flex-col justify-center p-1 relative">
@@ -450,10 +528,23 @@ export const PlanogramEditor: React.FC<PlanogramEditorProps> = ({
                               </div>
                             )}
                             <div className="font-bold text-blue-800 truncate text-[10px] leading-tight">
-                              {cell.product.code || cell.product.sku}
+                              {getProductCodeLine(cell.product)}
                             </div>
-                            <div className="text-[9px] text-blue-700 truncate leading-tight">
-                              {cell.product.name.split(' ').slice(0, 2).join(' ')}
+                            <div
+                              className="block w-full max-w-full px-0.5 text-blue-700/90 normal-case font-bold overflow-hidden"
+                              style={{
+                                fontSize: '7px',
+                                lineHeight: 1.1,
+                                whiteSpace: 'normal',
+                                wordBreak: 'break-word',
+                                overflowWrap: 'anywhere',
+                                display: '-webkit-box',
+                                WebkitLineClamp: 2,
+                                WebkitBoxOrient: 'vertical',
+                              }}
+                              title={getProductShortDisplayName(cell.product)}
+                            >
+                              {getProductShortDisplayName(cell.product)}
                             </div>
                             <button
                               onClick={() => handleRemoveProduct(x, y)}
@@ -477,8 +568,8 @@ export const PlanogramEditor: React.FC<PlanogramEditorProps> = ({
           </div>
         </div>
 
-        {/* Panel Lateral COMPACTO - Productos */}
-        <div className="w-56 flex-shrink-0">
+        {/* Panel Lateral - Productos */}
+        <div className="w-[24rem] min-w-[24rem] max-w-[24rem] flex-none">
           <Card className="h-full flex flex-col">
             <CardHeader className="pb-2 flex-shrink-0 p-2">
               <CardTitle className="text-xs flex items-center gap-1.5">
@@ -486,23 +577,40 @@ export const PlanogramEditor: React.FC<PlanogramEditorProps> = ({
                 {translate('productsLabel')} ({filteredProducts.length})
               </CardTitle>
               
-              <Select value={categoryFilter} onValueChange={setCategoryFilter}>
-                <SelectTrigger className="w-full mt-1.5 h-7 text-[10px]">
-                  <SelectValue placeholder={translate('filterPlaceholder')} />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">{translate('allShort')}</SelectItem>
-                  {getUniqueCategories().map((category) => (
-                    <SelectItem key={category} value={category}>{category}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <div className="relative w-full min-w-0">
+                <SearchIcon className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+                <Input
+                  value={productSearch}
+                  onChange={(e) => setProductSearch(e.target.value)}
+                  placeholder="Buscar por short name, codigo o SKU"
+                  className="mt-1.5 h-7 w-full pl-10 text-[10px] py-1"
+                />
+              </div>
+              <SearchableSelect
+                className="w-full min-w-0"
+                value={categoryFilter}
+                placeholder={translate('filterPlaceholder')}
+                options={[
+                  { value: 'all', label: translate('allShort') },
+                  ...getUniqueCategories()
+                    .filter((c): c is string => typeof c === 'string' && c.length > 0)
+                    .map((category) => ({ value: category, label: category })),
+                ]}
+                onValueChange={setCategoryFilter}
+                inputClassName="mt-1.5 h-7 text-[10px] py-1"
+                maxListHeight="min(18rem, 55vh)"
+                zIndex={80}
+                clearable
+                clearToValue="all"
+                leadingIcon={<Filter className="h-4 w-4" />}
+              />
             </CardHeader>
             
             <CardContent className="p-0 flex-1 overflow-hidden">
               <ScrollArea className="h-full">
                 <div className="p-2 space-y-1.5">
                   {filteredProducts.map((product) => {
+                    const alreadyPlaced = isProductInGrid(product.id);
                     return (
                       <div
                         key={product.id}
@@ -510,7 +618,7 @@ export const PlanogramEditor: React.FC<PlanogramEditorProps> = ({
                         onDragStart={(e) => handleDragStart(e, product)}
                         className={`p-1.5 border rounded cursor-pointer transition-all text-[10px] bg-white border-gray-200 hover:border-blue-300 hover:shadow-md hover:bg-blue-50 ${
                           selectedProduct?.id === product.id ? 'border-blue-500 bg-blue-50 shadow-md' : ''
-                        }`}
+                        } ${alreadyPlaced ? 'bg-gray-400 border-gray-600' : ''}`}
                         onClick={() => setSelectedProduct(product)}
                       >
                         <div className="flex gap-2 items-start">
@@ -522,18 +630,30 @@ export const PlanogramEditor: React.FC<PlanogramEditorProps> = ({
                             )}
                           </div>
                           <div className="flex-1 min-w-0 space-y-0.5">
-                            <p className="font-medium truncate text-gray-900 text-xs leading-tight">{product.name}</p>
-                            <p className="text-gray-500 leading-tight text-[10px]">{product.code || product.sku}</p>
+                            <p className="font-medium truncate text-gray-900 text-xs leading-tight">
+                              {getProductShortDisplayName(product)}
+                            </p>
+                            <p className="text-gray-500 leading-tight text-[10px] font-mono tabular-nums">
+                              {getProductCodeLine(product)}
+                            </p>
                             <div className="flex items-center justify-between gap-1">
                             <Badge variant="outline" className="text-[9px] py-0 px-1">
                               {product.category}
                             </Badge>
+                            {alreadyPlaced && (
+                              <span className="text-[9px] font-semibold text-gray-700">En grilla</span>
+                            )}
                             </div>
                           </div>
                         </div>
                       </div>
                     );
                   })}
+                  {filteredProducts.length === 0 && (
+                    <div className="rounded border border-dashed border-gray-300 bg-gray-50 px-2 py-3 text-center text-[11px] text-gray-500">
+                      No hay productos para el filtro o busqueda actual.
+                    </div>
+                  )}
                 </div>
               </ScrollArea>
             </CardContent>

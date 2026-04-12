@@ -65,21 +65,27 @@ export const AlertDialogTrigger = React.forwardRef<HTMLElement, AlertDialogTrigg
 AlertDialogTrigger.displayName = 'AlertDialogTrigger';
 
 export const AlertDialogContent = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(
-  ({ className = '', children, ...props }, ref) => {
+  ({ className = '', children, onClick, ...props }, ref) => {
     const context = useContext(AlertDialogContext);
     if (!context) throw new Error('AlertDialogContent must be used within AlertDialog');
 
     if (!context.open) return null;
 
     return (
-      <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div className="fixed inset-0 z-50 overflow-y-auto">
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm animate-in fade-in-0" />
-        <div
-          ref={ref}
-          className={`relative z-50 w-full max-w-md bg-white rounded-xl shadow-xl animate-in fade-in-0 zoom-in-95 slide-in-from-bottom-4 overflow-hidden ${className}`}
-          {...props}
-        >
+        <div className="flex min-h-full items-center justify-center p-4 sm:p-6">
+          <div
+            ref={ref}
+            className={`relative z-50 my-6 w-full max-w-md max-h-[85vh] overflow-y-auto overscroll-contain rounded-xl bg-white shadow-xl animate-in fade-in-0 zoom-in-95 slide-in-from-bottom-4 ${className}`}
+            onClick={(e) => {
+              onClick?.(e);
+              e.stopPropagation();
+            }}
+            {...props}
+          >
           {children}
+          </div>
         </div>
       </div>
     );

@@ -4,7 +4,7 @@ import { Input } from '@/shared/components/base/Input';
 import { Label } from '@/shared/components/base/Label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/shared/components/base/Card';
 import { Badge } from '@/shared/components/base/Badge';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/shared/components/base/Select';
+import { SearchableSelect } from '@/shared/components/base/Select';
 import { Textarea } from '@/shared/components/base/Textarea';
 import { Alert, AlertDescription } from '@/shared/components/base/Alert';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/shared/components/base/Dialog';
@@ -741,7 +741,7 @@ export function CreateOrderDialog({ onClose, onOrderCreated, editingOrder }: Cre
                           {cell.product!.name}
                         </p>
                         <p className="text-sm text-gray-500">
-                          {cell.product!.code || cell.product!.sku} • {cell.product!.category}
+                          {String(cell.product!.code || '').trim() || '—'} • {cell.product!.category}
                         </p>
                       </div>
                     </div>
@@ -838,44 +838,29 @@ export function CreateOrderDialog({ onClose, onOrderCreated, editingOrder }: Cre
         <div className="grid grid-cols-3 gap-4">
           <div className="space-y-2">
             <Label>{translate('storeLabel')} *</Label>
-            <Select value={selectedStoreId} onValueChange={setSelectedStoreId}>
-              <SelectTrigger>
-                <SelectValue placeholder={translate('selectStore')}>
-                  {stores.find((s) => s.id === selectedStoreId)?.name}
-                </SelectValue>
-              </SelectTrigger>
-              <SelectContent>
-                {stores.map((store) => (
-                  <SelectItem key={store.id} value={store.id}>
-                    <div className="flex items-center gap-2">
-                      <StoreIcon className="h-4 w-4" />
-                      {store.name}
-                    </div>
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <SearchableSelect
+              value={selectedStoreId}
+              placeholder={translate('selectStore')}
+              disabled={!stores.length}
+              options={stores.map((store) => ({ value: store.id, label: store.name }))}
+              onValueChange={setSelectedStoreId}
+              zIndex={100}
+            />
           </div>
 
           <div className="space-y-2">
             <Label>{translate('sellerLabel')} *</Label>
-            <Select value={selectedSellerId} onValueChange={setSelectedSellerId}>
-              <SelectTrigger>
-                <SelectValue placeholder={translate('selectSeller')}>
-                  {(() => { const s = sellers.find((x) => x.id === selectedSellerId); return s ? `${s.firstName} ${s.lastName}` : null; })()}
-                </SelectValue>
-              </SelectTrigger>
-              <SelectContent>
-                {sellers.map((seller) => (
-                  <SelectItem key={seller.id} value={seller.id}>
-                    <div className="flex items-center gap-2">
-                      <UserIcon className="h-4 w-4" />
-                      {seller.firstName} {seller.lastName}
-                    </div>
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <SearchableSelect
+              value={selectedSellerId}
+              placeholder={translate('selectSeller')}
+              disabled={!sellers.length}
+              options={sellers.map((seller) => ({
+                value: seller.id,
+                label: `${seller.firstName} ${seller.lastName}`,
+              }))}
+              onValueChange={setSelectedSellerId}
+              zIndex={100}
+            />
           </div>
 
           {activePlanogram && (
@@ -958,7 +943,7 @@ export function CreateOrderDialog({ onClose, onOrderCreated, editingOrder }: Cre
                           {/* Información del producto */}
                           <div className="flex-1 flex flex-col justify-center px-1">
                             <div className={`font-bold truncate text-[10px] leading-tight ${hasQuantity ? 'text-green-800' : 'text-blue-800'}`}>
-                              {cell.product!.code || cell.product!.sku}
+                              {String(cell.product!.code || '').trim() || '—'}
                             </div>
                             <div className={`text-[9px] truncate leading-tight ${hasQuantity ? 'text-green-700' : 'text-blue-600'}`}>
                               {cell.product!.name.split(' ').slice(0, 2).join(' ')}

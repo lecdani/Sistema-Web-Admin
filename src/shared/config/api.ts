@@ -34,7 +34,9 @@ export const API_CONFIG = {
       FORGOT_PASSWORD: '/auth/forgot-password',
       RESET_PASSWORD: '/auth/reset-password',
       VERIFY_EMAIL: '/auth/verify-email',
-      CHANGE_PASSWORD: '/auth/change-password'
+      CHANGE_PASSWORD: '/auth/change-password',
+      /** Admin: actualizar contraseña de otro usuario (IdentityUserId + nueva contraseña). */
+      UPDATE_USER_PASSWORD: '/auth/admin/update-user-password'
     },
     USERS: {
       GET_ALL: '/users/users',
@@ -51,6 +53,10 @@ export const API_CONFIG = {
       STATS: '/dashboard/stats',
       RECENT_ACTIVITY: '/dashboard/recent-activity'
     },
+    UTILITIES: {
+      /** Enumerado de estado (US) para crear/editar ciudad. */
+      STATES: '/utilities/states',
+    },
     CITIES: {
       LIST: '/cities/cities',
       GET_BY_ID: '/cities/cities/{id}',
@@ -58,14 +64,35 @@ export const API_CONFIG = {
       CREATE: '/cities/cities',
       UPDATE: '/cities/cities/{id}'
     },
+    AREAS: {
+      LIST: '/areas/areas',
+      GET_BY_ID: '/areas/areas/{id}',
+      CREATE: '/areas/areas',
+      UPDATE: '/areas/areas/{id}',
+      DELETE: '/areas/areas/{id}',
+    },
+    REGIONS: {
+      LIST: '/regions/regions',
+      GET_BY_ID: '/regions/regions/{id}',
+      CREATE: '/regions/regions',
+      UPDATE: '/regions/regions/{id}',
+      DELETE: '/regions/regions/{id}',
+    },
+    DISTRICTS: {
+      LIST: '/districts/districts',
+      GET_BY_ID: '/districts/districts/{id}',
+      CREATE: '/districts/districts',
+      UPDATE: '/districts/districts/{id}',
+      DELETE: '/districts/districts/{id}',
+    },
     STORES: {
       LIST: '/stores/stores',
       GET_BY_ID: '/stores/stores/{id}',
-      GET_BY_NAME: '/stores/stores/by-name/{name}',
       CREATE: '/stores/stores',
       UPDATE: '/stores/stores/{id}',
       DEACTIVATE: '/stores/stores/deactivate/{id}',
-      GET_BY_CITY: '/stores/stores/by-city/{cityId}'
+      GET_BY_CITY: '/stores/stores/by-city/{cityId}',
+      GET_BY_DISTRICT: '/stores/stores/by-district/{districtId}',
     },
     PRODUCTS: {
       LIST: '/products/products',
@@ -73,7 +100,8 @@ export const API_CONFIG = {
       GET_BY_BRAND: '/products/products/brand/{brandId}',
       CREATE: '/products/products',
       UPDATE: '/products/products/{id}',
-      DELETE: '/products/products/{id}'
+      DELETE: '/products/products/{id}',
+      DEACTIVATE: '/products/products/{id}/deactivate'
     },
     BRANDS: {
       LIST: '/brands/brands',
@@ -81,6 +109,14 @@ export const API_CONFIG = {
       CREATE: '/brands/brands',
       UPDATE: '/brands/brands/{id}',
       DEACTIVATE: '/brands/brands/desactivate/{id}'
+    },
+    CLASSES: {
+      LIST: '/classes/classes',
+      GET_BY_ID: '/classes/classes/{id}',
+      CREATE: '/classes/classes',
+      UPDATE: '/classes/classes/{id}',
+      DELETE: '/classes/classes/{id}',
+      DEACTIVATE: '/classes/classes/desactivate/{id}'
     },
     FAMILIES: {
       LIST: '/families/families',
@@ -90,11 +126,21 @@ export const API_CONFIG = {
       DELETE: '/families/families/{id}',
       DEACTIVATE: '/families/families/desactivate/{id}'
     },
+    PRESENTATIONS: {
+      LIST: '/presentations/presentations',
+      GET_BY_ID: '/presentations/presentations/{id}',
+      CREATE: '/presentations/presentations',
+      UPDATE: '/presentations/presentations/{id}',
+      DELETE: '/presentations/presentations/{id}',
+      TOGGLE_STATUS: '/presentations/presentations/{id}/toggle-status'
+    },
     HISTPRICES: {
       CREATE: '/histprices/histprices',
-      GET_BY_FAMILY: '/histprices/histprices/family/{familyId}',
-      GET_LATEST: '/histprices/histprices/latest/{familyId}',
-      GET_BY_DATE: '/histprices/histprices/by-date/{familyId}/{date}'
+      /** Historial por presentación; el cliente deriva el “último” ordenando por startDate (evita GET /latest/ que a veces no existe en el API). */
+      GET_BY_PRESENTATION: '/histprices/histprices/presentation/{presentationId}',
+      /** Opcional en backend; el admin no lo usa si prefieres solo GET_BY_PRESENTATION. */
+      GET_LATEST: '/histprices/histprices/latest/{presentationId}',
+      GET_BY_DATE: '/histprices/histprices/by-date/{presentationId}/{date}',
     },
     PLANOGRAMS: {
       LIST: '/planograms/planograms',
@@ -177,6 +223,17 @@ export class ApiClient {
     return headers;
   }
 
+  private emitCrudToast(message: string) {
+    if (typeof window === 'undefined') return;
+    const text = String(message ?? '').trim();
+    if (!text) return;
+    window.dispatchEvent(
+      new CustomEvent('show-toast', {
+        detail: { message: text, type: 'error' },
+      })
+    );
+  }
+
   private async request<T = any>(
     endpoint: string,
     options: RequestInit = {}
@@ -196,6 +253,8 @@ export class ApiClient {
         ...options.headers
       }
     };
+    const method = String(config.method || 'GET').toUpperCase();
+    const isCrudWrite = method === 'POST' || method === 'PUT' || method === 'PATCH' || method === 'DELETE';
 
     console.log(`[ApiClient] Realizando petición: ${config.method || 'GET'} ${url}${API_CONFIG.USE_PROXY ? ` (proxy a ${API_CONFIG.REAL_API_URL}${endpoint})` : ''}`);
 
@@ -213,8 +272,11 @@ export class ApiClient {
         try {
           data = text ? JSON.parse(text) : {};
         } catch (e) {
-          const isSilentEndpoint = endpoint === API_CONFIG.ENDPOINTS.AUTH.CHANGE_PASSWORD ||
-            endpoint === API_CONFIG.ENDPOINTS.USERS.GET_PROFILE || endpoint === API_CONFIG.ENDPOINTS.USERS.UPDATE_PROFILE;
+          const isSilentEndpoint =
+            endpoint === API_CONFIG.ENDPOINTS.AUTH.CHANGE_PASSWORD ||
+            endpoint === API_CONFIG.ENDPOINTS.AUTH.UPDATE_USER_PASSWORD ||
+            endpoint === API_CONFIG.ENDPOINTS.USERS.GET_PROFILE ||
+            endpoint === API_CONFIG.ENDPOINTS.USERS.UPDATE_PROFILE;
           const trimmed = (text || '').trim();
           // Si el backend devuelve un valor simple (Guid, número, texto plano), tratarlo como tal
           const guidRegex = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
@@ -245,9 +307,21 @@ export class ApiClient {
         const isProfileEndpoint =
           endpoint === API_CONFIG.ENDPOINTS.USERS.GET_PROFILE ||
           endpoint === API_CONFIG.ENDPOINTS.USERS.UPDATE_PROFILE;
-        const isChangePasswordEndpoint = endpoint === API_CONFIG.ENDPOINTS.AUTH.CHANGE_PASSWORD;
-        const isHistPriceLatestEndpoint =
-          endpoint.startsWith(API_CONFIG.ENDPOINTS.HISTPRICES.GET_LATEST.replace('{familyId}', ''));
+        const isChangePasswordEndpoint =
+          endpoint === API_CONFIG.ENDPOINTS.AUTH.CHANGE_PASSWORD ||
+          endpoint === API_CONFIG.ENDPOINTS.AUTH.UPDATE_USER_PASSWORD;
+        /** Sin precio / sin historial: el backend suele responder 404; el front trata como null o []. */
+        const histLatestPrefix = API_CONFIG.ENDPOINTS.HISTPRICES.GET_LATEST.replace('{presentationId}', '');
+        const histPresentationPrefix = API_CONFIG.ENDPOINTS.HISTPRICES.GET_BY_PRESENTATION.replace(
+          '{presentationId}',
+          ''
+        );
+        const histByDatePrefix = API_CONFIG.ENDPOINTS.HISTPRICES.GET_BY_DATE.split('{presentationId}')[0] ?? '';
+        const isHistPriceOptional404 =
+          response.status === 404 &&
+          (endpoint.startsWith(histLatestPrefix) ||
+            endpoint.startsWith(histPresentationPrefix) ||
+            (histByDatePrefix && endpoint.startsWith(histByDatePrefix)));
         const isOrdersByUserEndpoint =
           endpoint.startsWith('/orders/orders/user/');
         /** Sin factura / sin datos / ruta aún no desplegada: el front trata como lista vacía. */
@@ -261,18 +335,25 @@ export class ApiClient {
           response.status === 404 &&
           endpoint.includes('/distributions/') &&
           /desactiv|deactiv/i.test(endpoint);
-
+        const isUtilitiesStatesOptional404 =
+          response.status === 404 && endpoint === API_CONFIG.ENDPOINTS.UTILITIES.STATES;
         const isExpected404 =
           response.status === 404 &&
           (isProfileEndpoint ||
             endpoint.startsWith('/users/users/') ||
-            isHistPriceLatestEndpoint ||
+            isHistPriceOptional404 ||
             isOrdersByUserEndpoint ||
             isOrderDiscrepanciesEndpoint ||
-            isDistributionDesactivate404);
+            isDistributionDesactivate404 ||
+            isUtilitiesStatesOptional404);
 
         if (!isExpected404 && !isProfileEndpoint && !isChangePasswordEndpoint) {
           console.error(`[ApiClient] Error en respuesta: ${response.status}`, data);
+        }
+        if (isCrudWrite && !isExpected404 && !isChangePasswordEndpoint) {
+          this.emitCrudToast(
+            String(data?.message || data?.title || `No se pudo completar la operación (${response.status}).`)
+          );
         }
 
         throw error;
@@ -305,6 +386,12 @@ export class ApiClient {
       }
 
       console.error(`[ApiClient] Error de red en ${url}:`, error);
+      const isChangePasswordEndpoint =
+        endpoint === API_CONFIG.ENDPOINTS.AUTH.CHANGE_PASSWORD ||
+        endpoint === API_CONFIG.ENDPOINTS.AUTH.UPDATE_USER_PASSWORD;
+      if (isCrudWrite && !isChangePasswordEndpoint) {
+        this.emitCrudToast(errorMessage);
+      }
 
       // Crear un error estructurado
       const networkError: any = new Error(errorMessage);

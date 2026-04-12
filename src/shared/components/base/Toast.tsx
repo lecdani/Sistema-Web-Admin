@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useCallback, useEffect } from 'react';
+import React, { createContext, useContext, useState, useCallback, useEffect, useRef } from 'react';
 import { X, CheckCircle, AlertCircle, Info, AlertTriangle } from 'lucide-react';
 
 type ToastType = 'success' | 'error' | 'info' | 'warning';
@@ -34,10 +34,19 @@ interface ToastProviderProps {
 
 export const ToastProvider: React.FC<ToastProviderProps> = ({ children }) => {
   const [toasts, setToasts] = useState<Toast[]>([]);
+  const lastToastRef = useRef<{ key: string; at: number } | null>(null);
 
   const showToast = useCallback((message: string, type: ToastType = 'info', duration: number = 4000) => {
+    const normalized = String(message ?? '').trim();
+    if (!normalized) return;
+    const now = Date.now();
+    const key = `${type}:${normalized}`;
+    if (lastToastRef.current && lastToastRef.current.key === key && now - lastToastRef.current.at < 1200) {
+      return;
+    }
+    lastToastRef.current = { key, at: now };
     const id = Math.random().toString(36).substring(7);
-    const newToast: Toast = { id, message, type, duration };
+    const newToast: Toast = { id, message: normalized, type, duration };
     
     setToasts(prev => [...prev, newToast]);
 
@@ -66,6 +75,20 @@ export const ToastProvider: React.FC<ToastProviderProps> = ({ children }) => {
 
   const warning = useCallback((message: string, duration?: number) => {
     showToast(message, 'warning', duration);
+  }, [showToast]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const onShowToast = (event: Event) => {
+      const custom = event as CustomEvent<{ message?: string; type?: ToastType; duration?: number }>;
+      const message = String(custom.detail?.message ?? '').trim();
+      if (!message) return;
+      const type = custom.detail?.type ?? 'info';
+      const duration = custom.detail?.duration;
+      showToast(message, type, duration);
+    };
+    window.addEventListener('show-toast', onShowToast as EventListener);
+    return () => window.removeEventListener('show-toast', onShowToast as EventListener);
   }, [showToast]);
 
   const getToastStyles = (type: ToastType) => {
@@ -102,7 +125,7 @@ export const ToastProvider: React.FC<ToastProviderProps> = ({ children }) => {
       {children}
       
       {/* Toast Container */}
-      <div className="fixed top-4 right-4 z-50 flex flex-col gap-2 pointer-events-none">
+      <div className="fixed top-20 right-4 z-[2147483647] flex flex-col gap-2 pointer-events-none">
         {toasts.map((toast) => (
           <div
             key={toast.id}

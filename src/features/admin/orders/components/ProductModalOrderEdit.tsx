@@ -9,7 +9,10 @@ export interface ProductPositionEdit {
   orderDetailId?: string;
   productId: string;
   productName: string;
+  /** SKU comercial para API / pedido. */
   sku: string;
+  /** Código + SKU como en PlanogramViewer (solo celda). */
+  codeLine?: string;
   toOrder: number;
   price: number;
   imageUrl?: string;

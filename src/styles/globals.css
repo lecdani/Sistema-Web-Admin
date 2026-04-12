@@ -428,8 +428,13 @@ html {
   #admin-planogram-print-root,
   #admin-planogram-print-root *,
   #admin-order-initial-print-root,
-  #admin-order-initial-print-root * {
+  #admin-order-initial-print-root *,
+  #admin-catalog-order-list-print-root,
+  #admin-catalog-order-list-print-root * {
     visibility: visible;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+    color-adjust: exact !important;
   }
 
   #invoice-print {
@@ -446,7 +451,8 @@ html {
   }
 
   #admin-planogram-print-root,
-  #admin-order-initial-print-root {
+  #admin-order-initial-print-root,
+  #admin-catalog-order-list-print-root {
     position: absolute;
     left: 0;
     top: 0;

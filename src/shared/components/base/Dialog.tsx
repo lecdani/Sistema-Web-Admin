@@ -75,26 +75,31 @@ export interface DialogContentProps extends React.HTMLAttributes<HTMLDivElement>
 }
 
 export const DialogContent = React.forwardRef<HTMLDivElement, DialogContentProps>(
-  ({ className = '', children, showClose = true, closeAriaLabel, ...props }, ref) => {
+  ({ className = '', children, showClose = true, closeAriaLabel, onClick, ...props }, ref) => {
     const context = useContext(DialogContext);
     if (!context) throw new Error('DialogContent must be used within Dialog');
 
     if (!context.open) return null;
 
     return (
-      <div className="fixed inset-0 z-50 flex items-center justify-center p-0">
+      <div className="fixed inset-0 z-50 overflow-y-auto">
         {/* Backdrop */}
         <div
           className="fixed inset-0 bg-black/60 backdrop-blur-sm animate-in fade-in-0"
           onClick={() => context.onOpenChange(false)}
         />
 
-        {/* Content */}
-        <div
-          ref={ref}
-          className={`relative z-50 w-full max-w-xl bg-white shadow-xl animate-in fade-in-0 zoom-in-95 ${className}`}
-          {...props}
-        >
+        {/* Centrado con márgenes; scroll interno si el contenido supera la ventana */}
+        <div className="flex min-h-full items-center justify-center p-4 sm:p-6">
+          <div
+            ref={ref}
+            className={`relative z-50 my-6 w-full max-w-xl rounded-xl bg-white shadow-xl animate-in fade-in-0 zoom-in-95 max-h-[85vh] overflow-y-auto overscroll-contain ${className}`}
+            onClick={(e) => {
+              onClick?.(e);
+              e.stopPropagation();
+            }}
+            {...props}
+          >
           {showClose && (
             <button
               onClick={() => context.onOpenChange(false)}
@@ -105,6 +110,7 @@ export const DialogContent = React.forwardRef<HTMLDivElement, DialogContentProps
             </button>
           )}
           {children}
+          </div>
         </div>
       </div>
     );
