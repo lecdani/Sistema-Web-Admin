@@ -155,7 +155,7 @@ export function OrderCatalogListView({ order }: OrderCatalogListViewProps) {
       <div id="admin-catalog-order-list-print-root" className="space-y-6 print:space-y-4">
         <p className="text-sm text-gray-600 print:text-xs">{translate('catalogListHint')}</p>
 
-        <div className="rounded-lg border border-slate-200 overflow-hidden bg-white print:shadow-none print:break-inside-avoid">
+        <div className="rounded-lg border border-slate-200 overflow-hidden bg-white print:shadow-none">
           <h3 className="bg-slate-100 px-4 py-2.5 text-sm font-semibold text-slate-900 border-b border-slate-200 print:text-xs">
             {translate('catalogListByProduct')}
           </h3>
@@ -193,7 +193,7 @@ export function OrderCatalogListView({ order }: OrderCatalogListViewProps) {
           </div>
         </div>
 
-        <div className="rounded-lg border border-slate-200 overflow-hidden bg-white print:shadow-none print:break-inside-avoid">
+        <div className="rounded-lg border border-slate-200 overflow-hidden bg-white print:shadow-none">
           <h3 className="bg-slate-100 px-4 py-2.5 text-sm font-semibold text-slate-900 border-b border-slate-200 print:text-xs">
             {translate('catalogListByFamily')}
           </h3>

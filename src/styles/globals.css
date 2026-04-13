@@ -461,6 +461,25 @@ html {
     overflow: visible !important;
   }
 
+  /* Listado catálogo: permitir varias páginas (sin recortar filas) */
+  #admin-catalog-order-list-print-root {
+    height: auto !important;
+    max-height: none !important;
+  }
+
+  #admin-catalog-order-list-print-root table {
+    break-inside: auto;
+  }
+
+  #admin-catalog-order-list-print-root thead {
+    display: table-header-group;
+  }
+
+  #admin-catalog-order-list-print-root tbody tr {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
   /* Una sola página A4: encoger planograma (Chrome/Edge: zoom) */
   #admin-planogram-print-root .admin-planogram-print-compact,
   #admin-order-initial-print-root .admin-planogram-print-compact {

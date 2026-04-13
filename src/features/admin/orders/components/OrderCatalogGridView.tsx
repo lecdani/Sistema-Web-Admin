@@ -34,6 +34,23 @@ function getCatalogCellSurface(hasProduct: boolean, hasQty: boolean): React.CSSP
   return { backgroundColor: '#d1d5db', borderColor: '#525252' };
 }
 
+/**
+ * Misma regla que la PWA (`catalog-order.tsx` → sortedProducts): primero `code || sku`,
+ * si no basta para desempatar, `name`.
+ */
+function sortProductsVendorCatalogOrder<T extends { code?: string; sku?: string; name?: string }>(
+  products: T[]
+): T[] {
+  return [...products].sort((a, b) => {
+    const aSku = String(a.code ?? a.sku ?? '').toLowerCase();
+    const bSku = String(b.code ?? b.sku ?? '').toLowerCase();
+    if (aSku && bSku && aSku !== bSku) return aSku.localeCompare(bSku);
+    const aName = String(a.name ?? '').toLowerCase();
+    const bName = String(b.name ?? '').toLowerCase();
+    return aName.localeCompare(bName);
+  });
+}
+
 const CELL_W = 78;
 const CELL_H = 66;
 const CELL_GAP = 5;
@@ -53,9 +70,9 @@ export const OrderCatalogGridView: React.FC<OrderCatalogGridViewProps> = ({
 
   /**
    * Orden de lectura:
-   * - Catálogo: todos los productos activos en orden de registro (lista backend),
-   *   con cantidades del pedido/factura.
-   * - Planograma/pedido: respeta el orden de líneas del pedido.
+   * - Catálogo (`useAllActiveProducts`): mismos productos activos y mismo orden que la PWA del vendedor
+   *   (code/sku → nombre), con cantidades del pedido/factura.
+   * - Sin catálogo completo: respeta el orden de líneas del pedido.
    */
   const orderedItems = useMemo(() => {
     if (!useAllActiveProducts) return [...items];
@@ -67,21 +84,21 @@ export const OrderCatalogGridView: React.FC<OrderCatalogGridViewProps> = ({
       const qty = Number(it.quantity ?? it.toOrder ?? 0) || 0;
       qtyByProductId.set(pid, (qtyByProductId.get(pid) ?? 0) + qty);
     }
-    return allProductsOrdered
-      .filter((p: any) => p?.isActive !== false)
-      .map((p: any) => {
-        const pid = String(p.id ?? '').trim();
-        const qty = qtyByProductId.get(pid) ?? 0;
-        return {
-          id: pid,
-          productId: pid,
-          productName: getProductShortDisplayName(p as Product),
-          sku: String(p.sku ?? p.code ?? '').trim(),
-          quantity: qty,
-          toOrder: qty,
-          price: Number(p.currentPrice ?? 0) || 0,
-        };
-      });
+    const active = allProductsOrdered.filter((p: any) => p?.isActive !== false);
+    const sorted = sortProductsVendorCatalogOrder(active);
+    return sorted.map((p: any) => {
+      const pid = String(p.id ?? '').trim();
+      const qty = qtyByProductId.get(pid) ?? qtyByProductId.get(String(Number(pid))) ?? 0;
+      return {
+        id: pid,
+        productId: pid,
+        productName: getProductShortDisplayName(p as Product),
+        sku: String(p.sku ?? p.code ?? '').trim(),
+        quantity: qty,
+        toOrder: qty,
+        price: Number(p.currentPrice ?? 0) || 0,
+      };
+    });
   }, [useAllActiveProducts, items, allProductsOrdered]);
 
   const presentationSummaryRows = useMemo(
