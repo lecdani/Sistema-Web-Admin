@@ -53,6 +53,7 @@ import { assignmentsApi } from '@/shared/services/assignments-api';
 import { fetchAllOrderSummaries } from '@/shared/services/orders-api';
 import type { Assignment, City, SalesRoute, Store, User } from '@/shared/types';
 import { assignmentsForRoute, storeAssignedToOtherRoute } from '@/shared/utils/assignment-match';
+import { pinIdFirst } from '@/shared/utils/pin-id-first';
 
 /** Compara ids de API (GUID) sin depender de mayúsculas/minúsculas. */
 function storeIdEquals(a: string | undefined, b: string | undefined): boolean {
@@ -127,7 +128,7 @@ export function SalesRouteManagement({ onBack }: SalesRouteManagementProps) {
     setCurrentPage(1);
   }, [routes, cities, searchTerm, statusFilter, cityFilter]);
 
-  const loadInitial = async () => {
+  const loadInitial = async (opts?: { prioritizeRouteId?: string }) => {
     setLoading(true);
     try {
       const [rList, cList, uList, orderSummaries, assignList] = await Promise.all([
@@ -137,7 +138,7 @@ export function SalesRouteManagement({ onBack }: SalesRouteManagementProps) {
         fetchAllOrderSummaries(),
         assignmentsApi.fetchAll(),
       ]);
-      setRoutes(rList);
+      setRoutes(pinIdFirst(rList, opts?.prioritizeRouteId));
       setCities(cList);
       setAllUsers(uList);
       setAssignments(assignList);
@@ -243,10 +244,10 @@ export function SalesRouteManagement({ onBack }: SalesRouteManagementProps) {
     }
     setFormSaving(true);
     try {
-      await salesRoutesApi.create({ name, cityId: cityIdCreate });
+      const created = await salesRoutesApi.create({ name, cityId: cityIdCreate });
       toast.success(translate('salesRouteCreated'));
       setShowFormDialog(false);
-      await loadInitial();
+      await loadInitial({ prioritizeRouteId: created?.id });
     } catch (e: any) {
       console.error(e);
       const rawMsg = String(e?.data?.message ?? e?.message ?? '').toLowerCase();
@@ -264,7 +265,7 @@ export function SalesRouteManagement({ onBack }: SalesRouteManagementProps) {
     try {
       await salesRoutesApi.toggleStatus(r.id);
       toast.success(translate('salesRouteSaved'));
-      await loadInitial();
+      await loadInitial({ prioritizeRouteId: r.id });
     } catch (e: any) {
       console.error(e);
       toast.error(translate('errorToggleSalesRoute'));
@@ -323,6 +324,8 @@ export function SalesRouteManagement({ onBack }: SalesRouteManagementProps) {
       await assignmentsApi.create({ storeId, salesRouteId: storesRoute.id });
       toast.success(translate('routeSaved'));
       await loadStoresContext();
+      const routeId = storesRoute.id;
+      void loadInitial({ prioritizeRouteId: routeId });
       setSelectedStoreToAdd('');
     } catch (e: any) {
       console.error(e);
@@ -344,7 +347,9 @@ export function SalesRouteManagement({ onBack }: SalesRouteManagementProps) {
       });
       if (!ok) throw new Error('remove failed');
       toast.success(translate('routeSaved'));
+      const routeId = storesRoute.id;
       await loadStoresContext();
+      void loadInitial({ prioritizeRouteId: routeId });
     } catch (e) {
       console.error(e);
       toast.error(translate('errorRemoveAssignment'));

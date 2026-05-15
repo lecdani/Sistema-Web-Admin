@@ -1,4 +1,4 @@
-import { Invoice, InvoiceItem, Order, POD, Product, Store, User } from '@/shared/types';
+import { Invoice, InvoiceItem, Order, OrderItem, POD, Product, Store, User } from '@/shared/types';
 import { getFromLocalStorage, setToLocalStorage } from '@/shared/services/database';
 
 /**
@@ -34,7 +34,7 @@ export const createInvoiceFromOrder = (
   }
   
   // Crear ítems de factura desde ítems del pedido
-  const items: InvoiceItem[] = order.items.map(item => ({
+  const items: InvoiceItem[] = order.items.map((item: OrderItem) => ({
     id: `inv-item-${Date.now()}-${Math.random().toString(36).substring(7)}`,
     billId: '', // Se asignará después
     productId: item.productId,

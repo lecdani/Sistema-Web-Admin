@@ -274,7 +274,7 @@ export async function generateInvoicePDF(invoice: Invoice, order: Order, company
               <td colspan="2">TOTAL PCS</td>
               <td>${order.items.reduce((sum, item) => sum + (item.quantity || 0), 0)} unidades</td>
               <td class="text-right">TOTAL</td>
-              <td class="text-right total-amount">€${(invoice.totalAmount || 0).toFixed(2)}</td>
+              <td class="text-right total-amount">€${(invoice.total ?? 0).toFixed(2)}</td>
             </tr>
           </tbody>
         </table>
@@ -287,7 +287,7 @@ export async function generateInvoicePDF(invoice: Invoice, order: Order, company
 
         <!-- Footer -->
         <div class="footer">
-          <p>IVA: €${(invoice.taxAmount || 0).toFixed(2)} | Subtotal: €${(order.subtotal || 0).toFixed(2)}</p>
+          <p>IVA: €${(invoice.taxes ?? 0).toFixed(2)} | Subtotal: €${(order.subtotal || 0).toFixed(2)}</p>
           <p>Fecha de creación del pedido: ${new Date(order.createdAt).toLocaleString('es-ES')}</p>
           <p>Vendedor: ${order.sellerName || 'N/A'} | Planograma: ${order.planogramName || 'N/A'}</p>
         </div>

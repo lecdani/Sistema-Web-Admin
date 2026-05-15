@@ -125,49 +125,48 @@ function toProduct(raw: any, currentPrice?: number): Product {
   };
 }
 
-/**
- * POST/PUT producto: shape actual del backend.
- * { name, code, isActive, imageFileName, shortName, presentationId }
- */
-export interface ProductWritePayload {
+/** POST /products y PUT /products/{id}: mismos campos que expone el API (camelCase). */
+export interface ProductUpsertPayload {
   name: string;
   code: string;
-  presentationId: string;
-  shortName?: string;
-  /** Compat legacy: algunos flujos aún usan brand/family. */
-  brandId?: string;
-  familyId?: string;
   isActive: boolean;
-  /** Vacío si no hay imagen. */
   imageFileName: string;
+  shortName: string;
+  presentationId: string;
+  sku: string;
 }
 
-function expandProductBody(b: ProductWritePayload): Record<string, unknown> {
-  return {
-    name: b.name,
-    Name: b.name,
-    code: b.code,
-    Code: b.code,
-    shortName: b.shortName ?? b.name,
-    ShortName: b.shortName ?? b.name,
-    presentationId: b.presentationId,
-    PresentationId: b.presentationId,
-    brandId: b.brandId,
-    BrandId: b.brandId,
-    familyId: b.familyId,
-    FamilyId: b.familyId,
-    isActive: b.isActive,
-    IsActive: b.isActive,
-    imageFileName: b.imageFileName,
-    ImageFileName: b.imageFileName,
-  };
+/** Alias por compatibilidad con código que importaba `ProductUpdatePayload`. */
+export type ProductUpdatePayload = ProductUpsertPayload;
+
+/** Extrae un array de la respuesta típica .NET / wrappers (`data`, `value`, `products`, etc.). */
+function unwrapProductListPayload(res: unknown): any[] {
+  if (Array.isArray(res)) return res as any[];
+  if (!res || typeof res !== 'object') return [];
+  const o = res as Record<string, unknown>;
+  const candidates = [
+    o.data,
+    o.Data,
+    o.items,
+    o.Items,
+    o.value,
+    o.Value,
+    o.products,
+    o.Products,
+    o.results,
+    o.Results,
+  ];
+  for (const c of candidates) {
+    if (Array.isArray(c)) return c as any[];
+  }
+  return [];
 }
 
 /** Lista todos los productos. Si el backend devuelve error (ej. 500), devuelve [] para no romper la app. */
 export async function fetchProducts(): Promise<Product[]> {
   try {
     const res = await apiClient.get<any>(E.LIST);
-    const list = Array.isArray(res) ? res : res?.data ?? res?.items ?? [];
+    const list = unwrapProductListPayload(res);
     return (list as any[]).map((raw: any) => toProduct(raw));
   } catch (err: any) {
     console.warn('[products-api] Error al listar productos:', err?.data?.message ?? err?.message);
@@ -190,49 +189,59 @@ export async function fetchProductById(id: string): Promise<Product | null> {
 export async function fetchProductsByBrand(brandId: string): Promise<Product[]> {
   const endpoint = E.GET_BY_BRAND.replace('{brandId}', encodeURIComponent(brandId));
   const res = await apiClient.get<any>(endpoint);
-  const list = Array.isArray(res) ? res : res?.data ?? res?.items ?? [];
+  const list = unwrapProductListPayload(res);
   return (list as any[]).map((raw: any) => toProduct(raw));
 }
 
-/** Crea un producto (POST con presentationId + datos del producto). */
-export async function createProduct(data: ProductWritePayload): Promise<Product> {
-  const body = expandProductBody({
-    name: (data.name ?? '').trim(),
+/** Crea un producto (POST solo con el contrato del API). */
+export async function createProduct(data: ProductUpsertPayload): Promise<Product> {
+  const body = {
+    name: String(data.name ?? '').trim(),
     code: String(data.code ?? '').trim(),
-    presentationId: String(data.presentationId ?? '').trim(),
-    shortName: String(data.shortName ?? '').trim() || String(data.name ?? '').trim(),
-    brandId: String(data.brandId ?? '').trim(),
-    familyId: String(data.familyId ?? '').trim(),
     isActive: data.isActive ?? true,
     imageFileName: String(data.imageFileName ?? '').trim(),
-  });
+    shortName: String(data.shortName ?? '').trim() || String(data.name ?? '').trim(),
+    presentationId: String(data.presentationId ?? '').trim(),
+    sku: String(data.sku ?? '').trim(),
+  };
   const res = await apiClient.post<any>(E.CREATE, body);
-  if (res && (res.id || res.name)) return toProduct(res);
+  if (res && (res.id || res.Id || res.name || res.Name)) return toProduct(res);
   const list = await fetchProducts();
-  const created = list.find((p) => p.name === body.name);
+  const codeLc = body.code.toLowerCase();
+  const pres = body.presentationId;
+  const created =
+    list.find(
+      (p) =>
+        String(p.code ?? '')
+          .trim()
+          .toLowerCase() === codeLc &&
+        String(p.presentationId ?? '')
+          .trim() === pres
+    ) ?? list.find((p) => p.name === body.name && String(p.code ?? '').trim().toLowerCase() === codeLc);
   if (created) return created;
-  return toProduct({ id: String(res?.id ?? res?.Id ?? ''), ...body });
+  return toProduct({ id: String(res?.id ?? res?.Id ?? ''), ...res, ...body });
 }
 
-/** Actualiza un producto (PUT con el mismo cuerpo que create; el id va en la URL). */
-export async function updateProduct(id: string, data: ProductWritePayload): Promise<Product> {
+/** Actualiza un producto: PUT solo con los campos que expone el API. */
+export async function updateProduct(id: string, data: ProductUpdatePayload): Promise<Product> {
   const endpoint = E.UPDATE.replace('{id}', encodeURIComponent(id));
-  const body = expandProductBody({
-    name: (data.name ?? '').trim(),
+  const idStr = String(id).trim();
+  const body = {
+    id: idStr,
+    name: String(data.name ?? '').trim(),
     code: String(data.code ?? '').trim(),
-    presentationId: String(data.presentationId ?? '').trim(),
-    shortName: String(data.shortName ?? '').trim() || String(data.name ?? '').trim(),
-    brandId: String(data.brandId ?? '').trim(),
-    familyId: String(data.familyId ?? '').trim(),
     isActive: data.isActive ?? true,
     imageFileName: String(data.imageFileName ?? '').trim(),
-  });
+    shortName: String(data.shortName ?? '').trim() || String(data.name ?? '').trim(),
+    presentationId: String(data.presentationId ?? '').trim(),
+    sku: String(data.sku ?? '').trim(),
+  };
   const res = await apiClient.put<any>(endpoint, body);
   if (typeof res === 'string' || res === null || res === undefined) {
-    const fetched = await fetchProductById(id);
+    const fetched = await fetchProductById(idStr);
     if (fetched) return fetched;
   }
-  return toProduct(res ?? { id, ...body });
+  return toProduct(res ?? body);
 }
 
 /** Elimina un producto */

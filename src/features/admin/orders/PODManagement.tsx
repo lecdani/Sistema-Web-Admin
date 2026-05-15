@@ -38,6 +38,7 @@ import { uploadImage, getImageUrl } from '@/shared/services/images-api';
 import { createManualPOD } from '@/features/admin/orders/services/pod.service';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { toast } from 'sonner';
+import { pinIdFirst } from '@/shared/utils/pin-id-first';
 
 /** URL para mostrar la imagen del POD (imageUrl o images/url/{imageFileName}). */
 function getPodImageUrl(pod: POD): string {
@@ -91,7 +92,7 @@ export function PODManagement({ onBack }: PODManagementProps) {
     checkIntegrity();
   }, [pods, orders, invoices, translate]);
 
-  const loadData = () => {
+  const loadData = (opts?: { prioritizePodId?: string }) => {
     try {
       const podsData = getFromLocalStorage('app-pods') || [];
       const storesData = getFromLocalStorage('app-stores') || [];
@@ -117,7 +118,7 @@ export function PODManagement({ onBack }: PODManagementProps) {
         };
       });
 
-      setPods(enrichedPods);
+      setPods(pinIdFirst(enrichedPods, opts?.prioritizePodId));
       setStores(storesData);
       setUsers(usersData);
       setOrders(ordersData);
@@ -277,13 +278,13 @@ export function PODManagement({ onBack }: PODManagementProps) {
 
   const handleValidatePod = async (podId: string) => {
     try {
-      const updatedPods = pods.map(pod => 
-        pod.id === podId 
+      const updatedPods = pods.map(pod =>
+        pod.id === podId
           ? { ...pod, isValidated: true, validatedAt: new Date(), validatedBy: 'current-user' }
           : pod
       );
-      
-      setPods(updatedPods);
+
+      setPods(pinIdFirst(updatedPods, podId));
       setToLocalStorage('app-pods', updatedPods);
       
       toast.success(translate('podValidatedSuccess'));
@@ -403,7 +404,7 @@ export function PODManagement({ onBack }: PODManagementProps) {
       } catch {
         imageUrl = getBackendAssetUrl('images/url/' + fileName);
       }
-      createManualPOD({
+      const created = createManualPOD({
         salespersonId,
         storeId,
         po: po.trim(),
@@ -415,7 +416,7 @@ export function PODManagement({ onBack }: PODManagementProps) {
       toast.success(translate('podCreatedSuccess') || 'POD creado correctamente');
       resetUploadPodForm();
       setShowUploadPod(false);
-      loadData();
+      loadData({ prioritizePodId: created.id });
     } catch (err) {
       console.error(err);
       toast.error(translate('errorCreatePod') || 'Error al crear el POD');

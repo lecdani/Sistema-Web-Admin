@@ -24,6 +24,7 @@ import { toast } from '@/shared/components/base/Toast';
 import { areasApi } from '@/shared/services/areas-api';
 import { regionsApi } from '@/shared/services/regions-api';
 import { districtsApi } from '@/shared/services/districts-api';
+import { pinIdFirst } from '@/shared/utils/pin-id-first';
 
 const GEO_NAME_MAX = 25;
 const GEO_ITEMS_PER_PAGE = 12;
@@ -81,13 +82,21 @@ function GeoPaginationBar({
   );
 }
 
+/** Al refrescar desde paneles geo: pinear la fila recién creada o editada. */
+export type GeoCatalogRefreshOpts = {
+  prioritizeCityId?: string;
+  prioritizeAreaId?: string;
+  prioritizeRegionId?: string;
+  prioritizeDistrictId?: string;
+};
+
 interface GeoPanelsProps {
   areas: Area[];
   regions: Region[];
   districts: District[];
   stores: Store[];
   translate: TranslateFn;
-  onRefresh: () => void;
+  onRefresh: (opts?: GeoCatalogRefreshOpts) => void | Promise<void>;
 }
 
 export function GeoAreasPanel({ areas, regions, translate, onRefresh }: Pick<GeoPanelsProps, 'areas' | 'regions' | 'translate' | 'onRefresh'>) {
@@ -98,13 +107,15 @@ export function GeoAreasPanel({ areas, regions, translate, onRefresh }: Pick<Geo
   const [name, setName] = useState('');
   const [nameErr, setNameErr] = useState('');
   const [saving, setSaving] = useState(false);
+  /** Tras crear/editar: la tabla ordena por nombre; sin esto el pin del padre no se ve. */
+  const [pinFirstAreaId, setPinFirstAreaId] = useState<string | undefined>();
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     const list = [...areas].sort((a, b) => a.name.localeCompare(b.name));
-    if (!q) return list;
-    return list.filter((a) => a.name.toLowerCase().includes(q));
-  }, [areas, search]);
+    const narrowed = !q ? list : list.filter((a) => a.name.toLowerCase().includes(q));
+    return pinIdFirst(narrowed, pinFirstAreaId);
+  }, [areas, search, pinFirstAreaId]);
 
   useEffect(() => {
     setPage(1);
@@ -154,15 +165,20 @@ export function GeoAreasPanel({ areas, regions, translate, onRefresh }: Pick<Geo
     setSaving(true);
     try {
       const t = name.trim();
+      let prioritizeAreaId: string | undefined;
       if (editing) {
-        await areasApi.update(editing.id, t);
+        const updated = await areasApi.update(editing.id, t);
+        prioritizeAreaId = updated.id;
         toast.success(translate('geoAreaUpdated'));
       } else {
-        await areasApi.create(t);
+        const created = await areasApi.create(t);
+        prioritizeAreaId = created.id;
         toast.success(translate('geoAreaCreated'));
       }
+      setPinFirstAreaId(prioritizeAreaId);
+      setPage(1);
       setDialogOpen(false);
-      await onRefresh();
+      await onRefresh({ prioritizeAreaId });
     } catch (e: any) {
       toast.error(e?.data?.message ?? e?.message ?? translate('geoSaveError'));
     } finally {
@@ -310,6 +326,7 @@ export function GeoRegionsPanel({
   const [name, setName] = useState('');
   const [formErr, setFormErr] = useState<{ area?: string; name?: string }>({});
   const [saving, setSaving] = useState(false);
+  const [pinFirstRegionId, setPinFirstRegionId] = useState<string | undefined>();
 
   const areaById = useMemo(() => {
     const m = new Map<string, Area>();
@@ -320,13 +337,15 @@ export function GeoRegionsPanel({
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     const list = [...regions].sort((a, b) => a.name.localeCompare(b.name));
-    if (!q) return list;
-    return list.filter((r) => {
-      if (r.name.toLowerCase().includes(q)) return true;
-      const ar = areaById.get(normId(r.areaId));
-      return ar?.name.toLowerCase().includes(q);
-    });
-  }, [regions, search, areaById]);
+    const narrowed = !q
+      ? list
+      : list.filter((r) => {
+          if (r.name.toLowerCase().includes(q)) return true;
+          const ar = areaById.get(normId(r.areaId));
+          return ar?.name.toLowerCase().includes(q);
+        });
+    return pinIdFirst(narrowed, pinFirstRegionId);
+  }, [regions, search, areaById, pinFirstRegionId]);
 
   useEffect(() => {
     setPage(1);
@@ -340,7 +359,7 @@ export function GeoRegionsPanel({
 
   const openCreate = () => {
     setEditing(null);
-    setAreaId(areas[0]?.id ?? '');
+    setAreaId('');
     setName('');
     setFormErr({});
     setDialogOpen(true);
@@ -378,15 +397,20 @@ export function GeoRegionsPanel({
     try {
       const t = name.trim();
       const aid = areaId.trim();
+      let prioritizeRegionId: string | undefined;
       if (editing) {
-        await regionsApi.update(editing.id, { areaId: aid, name: t });
+        const updated = await regionsApi.update(editing.id, { areaId: aid, name: t });
+        prioritizeRegionId = updated.id;
         toast.success(translate('geoRegionUpdated'));
       } else {
-        await regionsApi.create({ areaId: aid, name: t });
+        const created = await regionsApi.create({ areaId: aid, name: t });
+        prioritizeRegionId = created.id;
         toast.success(translate('geoRegionCreated'));
       }
+      setPinFirstRegionId(prioritizeRegionId);
+      setPage(1);
       setDialogOpen(false);
-      await onRefresh();
+      await onRefresh({ prioritizeRegionId });
     } catch (e: any) {
       toast.error(e?.data?.message ?? e?.message ?? translate('geoSaveError'));
     } finally {
@@ -559,6 +583,7 @@ export function GeoDistrictsPanel({
   const [name, setName] = useState('');
   const [formErr, setFormErr] = useState<{ region?: string; name?: string }>({});
   const [saving, setSaving] = useState(false);
+  const [pinFirstDistrictId, setPinFirstDistrictId] = useState<string | undefined>();
 
   const areaById = useMemo(() => {
     const m = new Map<string, Area>();
@@ -575,15 +600,17 @@ export function GeoDistrictsPanel({
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     const list = [...districts].sort((a, b) => a.name.localeCompare(b.name));
-    if (!q) return list;
-    return list.filter((d) => {
-      if (d.name.toLowerCase().includes(q)) return true;
-      const reg = regionById.get(normId(d.regionId));
-      if (reg?.name.toLowerCase().includes(q)) return true;
-      const ar = reg ? areaById.get(normId(reg.areaId)) : undefined;
-      return ar?.name.toLowerCase().includes(q);
-    });
-  }, [districts, search, regionById, areaById]);
+    const narrowed = !q
+      ? list
+      : list.filter((d) => {
+          if (d.name.toLowerCase().includes(q)) return true;
+          const reg = regionById.get(normId(d.regionId));
+          if (reg?.name.toLowerCase().includes(q)) return true;
+          const ar = reg ? areaById.get(normId(reg.areaId)) : undefined;
+          return ar?.name.toLowerCase().includes(q);
+        });
+    return pinIdFirst(narrowed, pinFirstDistrictId);
+  }, [districts, search, regionById, areaById, pinFirstDistrictId]);
 
   useEffect(() => {
     setPage(1);
@@ -597,7 +624,7 @@ export function GeoDistrictsPanel({
 
   const openCreate = () => {
     setEditing(null);
-    setRegionId(regions[0]?.id ?? '');
+    setRegionId('');
     setName('');
     setFormErr({});
     setDialogOpen(true);
@@ -635,15 +662,20 @@ export function GeoDistrictsPanel({
     try {
       const t = name.trim();
       const rid = regionId.trim();
+      let prioritizeDistrictId: string | undefined;
       if (editing) {
-        await districtsApi.update(editing.id, { regionId: rid, name: t });
+        const updated = await districtsApi.update(editing.id, { regionId: rid, name: t });
+        prioritizeDistrictId = updated.id;
         toast.success(translate('geoDistrictUpdated'));
       } else {
-        await districtsApi.create({ regionId: rid, name: t });
+        const created = await districtsApi.create({ regionId: rid, name: t });
+        prioritizeDistrictId = created.id;
         toast.success(translate('geoDistrictCreated'));
       }
+      setPinFirstDistrictId(prioritizeDistrictId);
+      setPage(1);
       setDialogOpen(false);
-      await onRefresh();
+      await onRefresh({ prioritizeDistrictId });
     } catch (e: any) {
       toast.error(e?.data?.message ?? e?.message ?? translate('geoSaveError'));
     } finally {

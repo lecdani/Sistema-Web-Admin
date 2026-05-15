@@ -57,7 +57,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/shared/components/bas
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/shared/components/base/Tabs';
 import { Product, Brand, Category, ProductClass } from '@/shared/types';
 import { useLanguage } from '@/shared/hooks/useLanguage';
-import { productsApi, type ProductWritePayload } from '@/shared/services/products-api';
+import { productsApi } from '@/shared/services/products-api';
 import { brandsApi } from '@/shared/services/brands-api';
 import { categoriesApi } from '@/shared/services/categories-api';
 import { classesApi } from '@/shared/services/classes-api';
@@ -69,6 +69,7 @@ import { isProductUsedInAnyOrder } from '@/shared/services/orders-api';
 import { uploadImage } from '@/shared/services/images-api';
 import { getBackendAssetUrl } from '@/shared/config/api';
 import { toast } from '@/shared/components/base/Toast';
+import { pinIdFirst } from '@/shared/utils/pin-id-first';
 
 interface ProductManagementProps {
   onBack?: () => void;
@@ -77,6 +78,8 @@ interface ProductManagementProps {
 interface ProductFormData {
   /** Código del producto (obligatorio). */
   code: string;
+  /** SKU comercial del producto (lo escribe el usuario; API Product). */
+  sku: string;
   name: string;
   category: string;
   brandId: string;
@@ -184,6 +187,15 @@ function normId(v: string | undefined | null): string {
   return String(v ?? '').trim().toLowerCase();
 }
 
+async function mapInChunks<T, R>(items: T[], chunkSize: number, worker: (item: T) => Promise<R>): Promise<R[]> {
+  const out: R[] = [];
+  for (let i = 0; i < items.length; i += chunkSize) {
+    const chunk = items.slice(i, i + chunkSize);
+    out.push(...(await Promise.all(chunk.map(worker))));
+  }
+  return out;
+}
+
 function findBrandById(list: Brand[], id: string): Brand | undefined {
   const n = normId(id);
   if (!n) return undefined;
@@ -256,19 +268,6 @@ function getProductImageSrc(product?: Product | null): string | null {
   return buildProductImageSrc(undefined, product.imageFileName, product.image);
 }
 
-function buildProductWritePayload(p: Product, presentationsList: Presentation[]): ProductWritePayload {
-  return {
-    name: String(p.name ?? '').trim(),
-    code: getProductCodeOnly(p),
-    presentationId: resolvePresentationIdForProduct(p, presentationsList),
-    shortName: String(p.name ?? '').trim(),
-    brandId: String(p.brandId ?? '').trim(),
-    familyId: String(p.familyId ?? p.categoryId ?? '').trim(),
-    isActive: p.isActive,
-    imageFileName: String(p.imageFileName ?? '').trim(),
-  };
-}
-
 export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) => {
   const router = useRouter();
   const { translate, locale } = useLanguage();
@@ -329,6 +328,7 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
 
   const [formData, setFormData] = useState<ProductFormData>({
     code: '',
+    sku: '',
     name: '',
     category: '',
     brandId: '',
@@ -359,7 +359,9 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
     price: 0
   });
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [formErrors, setFormErrors] = useState<Partial<Record<'code' | 'name' | 'brandId' | 'categoryId', string>>>({});
+  const [formErrors, setFormErrors] = useState<
+    Partial<Record<'code' | 'sku' | 'name' | 'brandId' | 'categoryId', string>>
+  >({});
 
   useEffect(() => {
     loadProducts();
@@ -453,6 +455,12 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
     quiet?: boolean;
     /** Forzar precio mostrado tras crear histórico (getLatest a veces llega tarde). */
     forcePresentationPrice?: { presentationId: string; price: number };
+    /** Tras crear/editar: mostrar la fila al inicio de cada tabla relevante. */
+    prioritizeProductId?: string;
+    prioritizeBrandId?: string;
+    prioritizeCategoryId?: string;
+    prioritizeClassId?: string;
+    prioritizePresentationId?: string;
   }) => {
     const quiet = opts?.quiet === true;
     if (!quiet) {
@@ -470,25 +478,25 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
       ]);
 
     if (brandsResult.status === 'fulfilled') {
-      setBrands(brandsResult.value);
+      setBrands(pinIdFirst(brandsResult.value, opts?.prioritizeBrandId));
     } else {
       console.warn('Error cargando marcas:', brandsResult.reason);
       setBrands([]);
     }
     if (categoriesResult.status === 'fulfilled') {
-      setCategories(categoriesResult.value);
+      setCategories(pinIdFirst(categoriesResult.value, opts?.prioritizeCategoryId));
     } else {
       console.warn('Error cargando categorías:', categoriesResult.reason);
       setCategories([]);
     }
     if (classesResult.status === 'fulfilled') {
-      setClasses(classesResult.value);
+      setClasses(pinIdFirst(classesResult.value, opts?.prioritizeClassId));
     } else {
       console.warn('Error cargando clases:', classesResult.reason);
       setClasses([]);
     }
     if (presentationsResult.status === 'fulfilled') {
-      setPresentations(presentationsResult.value);
+      setPresentations(pinIdFirst(presentationsResult.value, opts?.prioritizePresentationId));
     } else {
       console.warn('Error cargando presentaciones:', presentationsResult.reason);
       setPresentations([]);
@@ -523,16 +531,17 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
         if (pid) presentationIdsToFetch.add(pid);
       });
       const priceMap: Record<string, number> = {};
-      await Promise.all(
-        [...presentationIdsToFetch].map(async (id) => {
-          try {
-            const latest = await histpricesApi.getLatest(id);
-            priceMap[id] = latest?.price ?? 0;
-          } catch {
-            priceMap[id] = 0;
-          }
-        })
-      );
+      const ids = [...presentationIdsToFetch];
+      const HIST_CHUNK = 14;
+      const priceEntries = await mapInChunks(ids, HIST_CHUNK, async (id) => {
+        try {
+          const latest = await histpricesApi.getLatest(id);
+          return [id, latest?.price ?? 0] as const;
+        } catch {
+          return [id, 0] as const;
+        }
+      });
+      for (const [id, pr] of priceEntries) priceMap[id] = pr;
       const forced = opts?.forcePresentationPrice;
       const forcedKey = forced ? presentationPriceKey(forced.presentationId) : '';
       if (forcedKey && Number.isFinite(Number(forced!.price)) && Number(forced!.price) > 0) {
@@ -543,10 +552,10 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
         const presId = resolvePresentationIdForProduct(p, presList);
         return { ...p, currentPrice: presId ? priceMap[presId] ?? 0 : 0 };
       });
-      setProducts(withPrices);
+      setProducts(pinIdFirst(withPrices, opts?.prioritizeProductId));
     } catch {
       setPresentationLatestPrices({});
-      setProducts(list.map((p) => ({ ...p, currentPrice: 0 })));
+      setProducts(pinIdFirst(list.map((p) => ({ ...p, currentPrice: 0 })), opts?.prioritizeProductId));
     } finally {
       if (!quiet) setIsLoading(false);
     }
@@ -594,6 +603,7 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
     clearPendingImageFileName();
     setFormData({
       code: '',
+      sku: '',
       name: '',
       category: '',
       brandId: '',
@@ -610,19 +620,22 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
   };
 
   const validateForm = (): boolean => {
-    const err: Partial<Record<'code' | 'name' | 'brandId' | 'categoryId', string>> = {};
+    const err: Partial<Record<'code' | 'sku' | 'name' | 'brandId' | 'categoryId', string>> = {};
     if (!formData.code.trim()) err.code = translate('productCodeRequired');
+    if (!formData.sku.trim()) err.sku = translate('skuRequired');
     if (!formData.name.trim()) err.name = translate('nameRequired');
     if (!formData.brandId) err.brandId = translate('brandRequired');
     if (!formData.categoryId) err.categoryId = translate('presentationRequired');
-    const codeNorm = formData.code.trim().toLowerCase();
-    if (codeNorm) {
-      const dup = products.find(
+    const skuNorm = formData.sku.trim().toLowerCase();
+    if (skuNorm) {
+      const dupSku = products.some(
         (p) =>
-          String(p.code ?? '').trim().toLowerCase() === codeNorm &&
-          (!editingProduct || p.id !== editingProduct.id)
+          String(p.sku ?? '')
+            .trim()
+            .toLowerCase() === skuNorm &&
+          (!editingProduct || normId(p.id) !== normId(editingProduct.id))
       );
-      if (dup) err.code = translate('duplicateProductCode');
+      if (dupSku) err.sku = translate('duplicateSku');
     }
     setFormErrors(err);
     return Object.keys(err).length === 0;
@@ -632,16 +645,18 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
     if (!validateForm()) {
       let firstError = '';
       const codeTrim = formData.code.trim();
-      const codeNorm = codeTrim.toLowerCase();
       if (!codeTrim) firstError = translate('productCodeRequired');
+      else if (!formData.sku.trim()) firstError = translate('skuRequired');
       else if (
         products.some(
           (p) =>
-            String(p.code ?? '').trim().toLowerCase() === codeNorm &&
-            (!editingProduct || p.id !== editingProduct.id)
+            String(p.sku ?? '')
+              .trim()
+              .toLowerCase() === formData.sku.trim().toLowerCase() &&
+            (!editingProduct || normId(p.id) !== normId(editingProduct.id))
         )
       ) {
-        firstError = translate('duplicateProductCode');
+        firstError = translate('duplicateSku');
       } else if (!formData.name.trim()) firstError = translate('nameRequired');
       else if (!formData.brandId) firstError = translate('brandRequired');
       else if (!formData.categoryId) firstError = translate('presentationRequired');
@@ -657,7 +672,6 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
         toast.error(translate('presentationRequired'));
         return;
       }
-      const brandId = String(formData.brandId || '').trim();
       const imageForCreate =
         normalizeImageFileName(getPendingImageFileName()?.trim()) ||
         normalizeImageFileName(formData.imageFileName?.trim()) ||
@@ -668,47 +682,60 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
         normalizeImageFileName(String(editingProduct?.imageFileName ?? '').trim()) ||
         extractImageFileNameFromPath(editingProduct?.image);
 
-      const apiBody = {
-        name: formData.name.trim(),
-        code: formData.code.trim(),
-        shortName: formData.name.trim(),
-        presentationId,
-        brandId,
-        familyId,
-        isActive: editingProduct ? editingProduct.isActive : true,
-        imageFileName: editingProduct ? imageForUpdate : imageForCreate,
-      };
+      const skuFromForm = formData.sku.trim();
 
+      let prioritizeProductId: string | undefined;
       if (editingProduct) {
+        const shortName = String(formData.name ?? '').trim();
+        const updatePayload = {
+          name: formData.name.trim(),
+          code: formData.code.trim(),
+          shortName,
+          presentationId,
+          isActive: editingProduct.isActive,
+          imageFileName: imageForUpdate,
+          sku: skuFromForm,
+        };
         const currentPresentationId = String(
           editingProduct.presentationId ?? editingProduct.familyId ?? editingProduct.categoryId ?? ''
         ).trim();
-        const currentBrandId = String(editingProduct.brandId ?? '').trim();
         const currentName = String(editingProduct.name ?? '').trim();
         const currentCode = String(editingProduct.code ?? '').trim();
         const currentImage = String(editingProduct.imageFileName ?? '').trim();
+        const currentSku = String(editingProduct.sku ?? '').trim();
         const hasChanges =
-          currentName !== apiBody.name ||
-          currentCode !== apiBody.code ||
-          currentBrandId !== apiBody.brandId ||
-          currentPresentationId !== apiBody.presentationId ||
-          currentImage !== apiBody.imageFileName;
+          currentName !== updatePayload.name ||
+          currentCode !== updatePayload.code ||
+          currentPresentationId !== updatePayload.presentationId ||
+          currentImage !== updatePayload.imageFileName ||
+          currentSku !== updatePayload.sku;
         if (!hasChanges) {
           toast.error(translate('noChangesToSave'));
           return;
         }
-        await productsApi.update(editingProduct.id, apiBody);
+        await productsApi.update(editingProduct.id, updatePayload);
         toast.success(translate('productSaved'));
+        prioritizeProductId = editingProduct.id;
       } else {
-        const created = await productsApi.create(apiBody);
+        const createPayload = {
+          name: formData.name.trim(),
+          code: formData.code.trim(),
+          shortName: formData.name.trim(),
+          presentationId,
+          isActive: true,
+          imageFileName: imageForCreate,
+          sku: skuFromForm,
+        };
+        const created = await productsApi.create(createPayload);
         clearPendingImageFileName();
         toast.success(translate('productCreated'));
         setSearchTerm(created.name);
         setCurrentPage(1);
+        prioritizeProductId = created.id;
       }
       resetForm();
       setShowAddDialog(false);
-      await loadProducts();
+      await loadProducts({ prioritizeProductId });
     } catch (error: any) {
       const msg = error?.data?.message ?? error?.message ?? translate('errorSaveProduct');
       toast.error(msg);
@@ -795,6 +822,7 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
     const categoryId = presentationId;
     setFormData({
       code: product.code ?? '',
+      sku: String(product.sku ?? '').trim(),
       name: product.name,
       category: product.category ?? '',
       brandId: product.brandId ?? '',
@@ -835,7 +863,7 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
         await productsApi.deactivate(product.id);
         toast.success(translate('productActivatedSuccess'));
       }
-      await loadProducts();
+      await loadProducts({ prioritizeProductId: product.id });
     } catch (error: any) {
       const rawMsg = error?.data?.message ?? error?.message;
       const msg = typeof rawMsg === 'string' && rawMsg.trim() ? rawMsg : translate('errorToggleProduct');
@@ -1092,11 +1120,11 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
     try {
       if (editingBrand) {
         await brandsApi.update(editingBrand.id, { name });
-        await loadProducts({ quiet: true });
+        await loadProducts({ quiet: true, prioritizeBrandId: editingBrand.id });
         toast.success(translate('brandUpdated'));
       } else {
         const created = await brandsApi.create({ name });
-        await loadProducts({ quiet: true });
+        await loadProducts({ quiet: true, prioritizeBrandId: created.id });
         toast.success(translate('brandCreated'));
         setBrandSearchTerm(created.name);
       }
@@ -1163,12 +1191,12 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
         }
         const updated = await categoriesApi.update(editingCategory.id, payload);
         setCategories((prev) => prev.map((c) => (c.id === editingCategory.id ? updated : c)));
-        await loadProducts({ quiet: true });
+        await loadProducts({ quiet: true, prioritizeCategoryId: editingCategory.id });
         toast.success(translate('familyUpdated'));
       } else {
         const created = await categoriesApi.create(payload);
         setCategories((prev) => [...prev, created]);
-        await loadProducts({ quiet: true });
+        await loadProducts({ quiet: true, prioritizeCategoryId: created.id });
         toast.success(translate('familyCreated'));
         setCategorySearchTerm(created.name);
       }
@@ -1195,11 +1223,11 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
     try {
       if (editingClass) {
         await classesApi.update(editingClass.id, { name });
-        await loadProducts({ quiet: true });
+        await loadProducts({ quiet: true, prioritizeClassId: editingClass.id });
         toast.success(translate('classUpdated'));
       } else {
         const created = await classesApi.create({ name });
-        await loadProducts({ quiet: true });
+        await loadProducts({ quiet: true, prioritizeClassId: created.id });
         toast.success(translate('classCreated'));
         setClassSearchTerm(created.name);
       }
@@ -1245,7 +1273,7 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
         await classesApi.toggleActive(cls.id);
       }
       toast.success(wasActive ? translate('classDeactivated') : translate('classActivated'));
-      await loadProducts({ quiet: true });
+      await loadProducts({ quiet: true, prioritizeClassId: cls.id });
     } catch (e: any) {
       const rawMsg = e?.data?.message ?? e?.message;
       toast.error(typeof rawMsg === 'string' && rawMsg.trim() ? rawMsg : translate('errorToggleStatusGeneric'));
@@ -1327,7 +1355,7 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
     try {
       if (editingPresentation) {
         await presentationsApi.update(editingPresentation.id, payload);
-        await loadProducts({ quiet: true });
+        await loadProducts({ quiet: true, prioritizePresentationId: editingPresentation.id });
         toast.success(translate('presentationUpdated'));
       } else {
         const created = await presentationsApi.create(payload);
@@ -1349,6 +1377,7 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
         }
         await loadProducts({
           quiet: true,
+          prioritizePresentationId: String(created.id),
           forcePresentationPrice: {
             presentationId: String(created.id),
             price: initialPriceNum,
@@ -1417,7 +1446,7 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
       toast.success(
         wasActive ? translate('presentationDeactivated') : translate('presentationActivated')
       );
-      await loadProducts({ quiet: true });
+      await loadProducts({ quiet: true, prioritizePresentationId: p.id });
     } catch (e: any) {
       const rawMsg = e?.data?.message ?? e?.message;
       toast.error(typeof rawMsg === 'string' && rawMsg.trim() ? rawMsg : translate('errorToggleStatusGeneric'));
@@ -1458,7 +1487,7 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
         await brandsApi.toggleActive(brand.id);
       }
       toast.success(wasActive ? translate('brandDeactivated') : translate('brandActivated'));
-      await loadProducts({ quiet: true });
+      await loadProducts({ quiet: true, prioritizeBrandId: brand.id });
     } catch (e: any) {
       toast.error(e?.message ?? translate('errorToggleStatusGeneric'));
     }
@@ -1503,7 +1532,7 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
         await categoriesApi.toggleActive(category.id);
       }
       toast.success(wasActive ? translate('familyDeactivated') : translate('familyActivated'));
-      await loadProducts({ quiet: true });
+      await loadProducts({ quiet: true, prioritizeCategoryId: category.id });
     } catch (e: any) {
       const rawMsg = e?.data?.message ?? e?.message;
       toast.error(typeof rawMsg === 'string' && rawMsg.trim() ? rawMsg : translate('errorToggleStatusGeneric'));
@@ -1575,6 +1604,21 @@ export const ProductManagement: React.FC<ProductManagementProps> = ({ onBack }) 
                   placeholder={translate('productCodePlaceholder')}
                 />
                 {formErrors.code && <p className="text-sm text-red-600">{formErrors.code}</p>}
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="productSku">{translate('sku')} *</Label>
+                <Input
+                  id="productSku"
+                  value={formData.sku}
+                  onChange={(e) => {
+                    setFormData({ ...formData, sku: e.target.value });
+                    if (formErrors.sku) setFormErrors((prev) => ({ ...prev, sku: undefined }));
+                  }}
+                  className={formErrors.sku ? 'border-red-500' : ''}
+                  placeholder={translate('productSkuPlaceholder')}
+                  autoComplete="off"
+                />
+                {formErrors.sku && <p className="text-sm text-red-600">{formErrors.sku}</p>}
               </div>
               <div className="space-y-2">
                 <Label htmlFor="name">{translate('name')} *</Label>

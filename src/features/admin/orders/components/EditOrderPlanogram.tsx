@@ -10,17 +10,35 @@ import { ordersApi } from '@/shared/services/orders-api';
 import { storesApi } from '@/shared/services/stores-api';
 import { histpricesApi } from '@/shared/services/histprices-api';
 import { getFromLocalStorage } from '@/shared/services/database';
-import { getBackendAssetUrl } from '@/shared/config/api';
 import { toast } from 'sonner';
+import { resolveProductImageAssetUrl, resolveRawProductImageAssetUrl } from '@/shared/utils/product-image-url';
 import { useLanguage } from '@/shared/hooks/useLanguage';
 import { ProductModalOrderEdit, ProductPositionEdit } from './ProductModalOrderEdit';
 import { getProductCodeLine, getProductShortDisplayName } from '@/shared/utils/planogram-grid-display';
 
-function getProductImageUrl(product: Product | null | undefined): string {
-  if (!product) return '';
-  if (product.image) return getBackendAssetUrl(product.image);
-  if (product.imageFileName) return getBackendAssetUrl('images/url/' + product.imageFileName);
-  return '';
+function findProductBySkuOrName(
+  products: Product[],
+  sku: string | undefined,
+  name: string | undefined
+): Product | undefined {
+  const skuNorm = String(sku ?? '').trim().toLowerCase();
+  const nameNorm = String(name ?? '').trim().toLowerCase();
+  if (skuNorm) {
+    const bySku = products.find((p) => {
+      const pSku = String(p.sku ?? '').trim().toLowerCase();
+      const pCode = String(p.code ?? '').trim().toLowerCase();
+      return pSku === skuNorm || pCode === skuNorm;
+    });
+    if (bySku) return bySku;
+  }
+  if (nameNorm) {
+    return products.find((p) => {
+      const short = String(p.shortName ?? '').trim().toLowerCase();
+      const full = String(p.name ?? '').trim().toLowerCase();
+      return short === nameNorm || full === nameNorm;
+    });
+  }
+  return undefined;
 }
 
 interface EditOrderPlanogramProps {
@@ -107,12 +125,44 @@ export function EditOrderPlanogram({ order, onClose, onSaved }: EditOrderPlanogr
         }
         if (!mounted) return;
 
+        const normalizeId = (v: unknown) =>
+          String(v ?? '')
+            .trim()
+            .replace(/-/g, '')
+            .toLowerCase();
         const productMap = new Map<string, Product>();
         (productsData as Product[]).forEach((p: Product) => {
-          productMap.set(String(p.id), p);
-          if (typeof p.id === 'string' && /^\d+$/.test(p.id)) productMap.set(String(Number(p.id)), p);
+          const id = String(p.id ?? '').trim();
+          if (!id) return;
+          productMap.set(id, p);
+          productMap.set(normalizeId(id), p);
+          if (/^\d+$/.test(id)) productMap.set(String(Number(id)), p);
         });
-        const getProduct = (id: string) => productMap.get(id) || productMap.get(String(Number(id)));
+        const getProduct = (id: string) =>
+          productMap.get(String(id ?? '').trim()) ||
+          productMap.get(normalizeId(id)) ||
+          productMap.get(String(Number(id)));
+        // Asegura render completo del planograma aunque haya productos fuera del listado general.
+        const missingDistributionProductIds = Array.from(
+          new Set(
+            distList
+              .map((d) => String(d.productId ?? '').trim())
+              .filter((id) => id && !getProduct(id))
+          )
+        );
+        if (missingDistributionProductIds.length > 0) {
+          const fetchedMissing = await Promise.all(
+            missingDistributionProductIds.map((id) => productsApi.getById(id).catch(() => null))
+          );
+          fetchedMissing.forEach((p) => {
+            if (!p) return;
+            const id = String(p.id ?? '').trim();
+            if (!id) return;
+            productMap.set(id, p);
+            productMap.set(normalizeId(id), p);
+            if (/^\d+$/.test(id)) productMap.set(String(Number(id)), p);
+          });
+        }
 
         const rawDetails = await ordersApi.getOrderDetailsByOrderIdRaw(orderId);
 
@@ -120,7 +170,17 @@ export function EditOrderPlanogram({ order, onClose, onSaved }: EditOrderPlanogr
         // Usamos cola por productId y consumimos una por cada celda.
         const qtyQueueByProductId = new Map<
           string,
-          Array<{ orderDetailId?: string; productName: string; sku: string; quantity: number; price: number; row?: number; col?: number }>
+          Array<{
+            orderDetailId?: string;
+            productName: string;
+            sku: string;
+            quantity: number;
+            price: number;
+            row?: number;
+            col?: number;
+            image?: string;
+            imageFileName?: string;
+          }>
         >();
         for (const item of apiOrder.items || []) {
           const id = String(item.productId ?? '');
@@ -155,6 +215,9 @@ export function EditOrderPlanogram({ order, onClose, onSaved }: EditOrderPlanogr
             price,
             row: detailByPid?.row ?? detailByPid?.Row ?? detailByPid?.xPosition ?? detailByPid?.XPosition,
             col: detailByPid?.col ?? detailByPid?.Col ?? detailByPid?.yPosition ?? detailByPid?.YPosition,
+            image: String((item as any)?.image ?? (item as any)?.Image ?? '').trim() || undefined,
+            imageFileName:
+              String((item as any)?.imageFileName ?? (item as any)?.ImageFileName ?? '').trim() || undefined,
           });
           qtyQueueByProductId.set(id, arr);
         }
@@ -168,7 +231,7 @@ export function EditOrderPlanogram({ order, onClose, onSaved }: EditOrderPlanogr
             const key = pid && qtyQueueByProductId.has(pid) ? pid : pid ? String(Number(pid)) : '';
             const queue = key ? qtyQueueByProductId.get(key) : undefined;
             let next:
-              | { orderDetailId?: string; productName: string; sku: string; quantity: number; price: number; row?: number; col?: number }
+              | { orderDetailId?: string; productName: string; sku: string; quantity: number; price: number; row?: number; col?: number; image?: string; imageFileName?: string }
               | null = null;
             if (queue && queue.length > 0) {
               const posIdx = queue.findIndex(
@@ -180,6 +243,11 @@ export function EditOrderPlanogram({ order, onClose, onSaved }: EditOrderPlanogr
                 next = queue.shift()!;
               }
             }
+            const fallbackProduct = findProductBySkuOrName(
+              productsData as Product[],
+              next?.sku,
+              next?.productName
+            );
             grid.push({
               row,
               col,
@@ -198,7 +266,10 @@ export function EditOrderPlanogram({ order, onClose, onSaved }: EditOrderPlanogr
                 : String(next?.sku ?? '').trim() || '—',
               toOrder: next?.quantity ?? 0,
               price: next?.price ?? product?.currentPrice ?? 0,
-              imageUrl: product ? getProductImageUrl(product) : undefined,
+              imageUrl:
+                resolveProductImageAssetUrl(product?.image, product?.imageFileName) ||
+                resolveProductImageAssetUrl(fallbackProduct?.image, fallbackProduct?.imageFileName) ||
+                resolveRawProductImageAssetUrl(next as Record<string, unknown>),
             });
           }
         }

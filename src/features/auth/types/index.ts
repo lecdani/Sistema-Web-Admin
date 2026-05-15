@@ -1,11 +1,7 @@
-import { User, ApiResponse } from '@/shared/types';
+import { User, ApiResponse, type AuthSession } from '@/shared/types';
 import type { LoginCredentials as ApiLoginCredentials } from '@/shared/types/api';
 
-export interface AuthSession {
-  token: string;
-  userId: string;
-  expiresAt: Date;
-}
+export type { AuthSession };
 
 export interface LoginCredentials extends ApiLoginCredentials {
   rememberMe?: boolean;
@@ -22,6 +18,9 @@ export interface RegisterData {
 export interface PasswordResetData {
   email: string;
 }
+
+/** Errores de validación por campo (formularios auth). */
+export type ValidationErrors = Partial<Record<'email' | 'password' | 'confirmPassword' | 'firstName' | 'lastName', string>>;
 
 export interface PasswordResetConfirmData {
   token: string;

@@ -31,6 +31,7 @@ import { uploadImage } from '@/shared/services/images-api';
 import { toast } from '@/shared/components/base/Toast';
 import { histpricesApi } from '@/shared/services/histprices-api';
 import { productsApi } from '@/shared/services/products-api';
+import { fetchAdminProductsCached } from '@/shared/services/admin-products-cache';
 import { categoriesApi } from '@/shared/services/categories-api';
 import { storesApi } from '@/shared/services/stores-api';
 import { citiesApi } from '@/shared/services/cities-api';
@@ -43,11 +44,12 @@ import { OrderCatalogListView } from './components/OrderCatalogListView';
 import type { Order, Product } from '@/shared/types';
 import { familyVolumeLabel, sameFamilyId } from '@/shared/utils/family-display';
 import { getPresentationSummaryKey, getProductFromMap } from '@/shared/utils/planogram-presentation-summary';
+import { printAdminInvoiceNormalFromDom } from './utils/print-admin-invoice';
 
 interface OrderDetailViewProps {
   orderId: string;
   onClose?: () => void;
-  onOrderUpdated?: () => void;
+  onOrderUpdated?: (orderId?: string) => void;
 }
 
 function looksLikeId(name: string): boolean {
@@ -117,6 +119,10 @@ export function OrderDetailView({ orderId, onClose, onOrderUpdated }: OrderDetai
       .sort()
       .join(',');
   }, [order?.items]);
+
+  useEffect(() => {
+    void fetchAdminProductsCached().catch(() => {});
+  }, [orderId]);
 
   useEffect(() => {
     if (!orderProductIdsKey) {
@@ -704,7 +710,7 @@ export function OrderDetailView({ orderId, onClose, onOrderUpdated }: OrderDetai
       }
       clearEmergencyPodSelection();
       setDetailReload((n) => n + 1);
-      onOrderUpdated?.();
+      onOrderUpdated?.(orderId);
     } catch (err: unknown) {
       const msg =
         err && typeof err === 'object' && 'message' in err
@@ -1185,7 +1191,7 @@ export function OrderDetailView({ orderId, onClose, onOrderUpdated }: OrderDetai
               };
             });
             return (
-              <Card className="border-slate-200 shadow-sm overflow-hidden print:shadow-none print:border-0">
+              <Card className="admin-invoice-print-card border-slate-200 shadow-sm overflow-hidden print:overflow-visible print:shadow-none print:border-0">
                 <CardHeader className="px-4 pt-4 pb-2 print:hidden">
                   <div className="flex items-center justify-between">
                     <CardTitle className="text-sm">{translate('invoiceLabel')}</CardTitle>
@@ -1215,7 +1221,7 @@ export function OrderDetailView({ orderId, onClose, onOrderUpdated }: OrderDetai
                         size="sm"
                         onClick={() => {
                           setInvoicePrintLayout('normal');
-                          window.print();
+                          requestAnimationFrame(() => printAdminInvoiceNormalFromDom());
                         }}
                   className="gap-2"
                 >
@@ -1297,7 +1303,7 @@ export function OrderDetailView({ orderId, onClose, onOrderUpdated }: OrderDetai
                     salespersonId: (order as any).salespersonId ?? '',
                     storeId: (order as any).storeId ?? '',
                     createdAt: order.date ? new Date(order.date) : new Date(),
-                    po: undefined,
+                    po: (order as any).po ?? '',
                     status: showInvoicedTabs ? 'completed' : 'pending',
                     storeName: order.storeName,
                     planogramId: (order as any).planogramId,

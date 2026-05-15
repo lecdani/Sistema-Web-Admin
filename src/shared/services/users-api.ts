@@ -19,7 +19,7 @@ function pickGuidish(v: unknown): string | undefined {
 }
 
 /** Extrae el id de ruta de ventas desde distintas formas típicas de la API .NET / JSON. */
-function extractSalesRouteId(raw: any): string | undefined {
+export function extractSalesRouteId(raw: any): string | undefined {
     if (!raw || typeof raw !== 'object') return undefined;
     const flat = [
         raw.routeId,
@@ -57,7 +57,7 @@ function extractSalesRouteId(raw: any): string | undefined {
     return undefined;
 }
 
-function extractSalesRouteName(raw: any): string | undefined {
+export function extractSalesRouteName(raw: any): string | undefined {
     if (!raw || typeof raw !== 'object') return undefined;
     const direct = raw.salesRouteName ?? raw.SalesRouteName ?? raw.routeName ?? raw.RouteName;
     const s = typeof direct === 'string' ? direct.trim() : '';

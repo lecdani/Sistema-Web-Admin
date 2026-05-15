@@ -180,6 +180,7 @@ export const getOrderStats = () => {
     totalOrders: orders.length,
     pendingOrders: orders.filter((o: Order) => o.status === 'pending').length,
     completedOrders: orders.filter((o: Order) => o.status === 'completed').length,
+    deliveredOrders: orders.filter((o: Order) => o.status === 'delivered').length,
     totalRevenue: orders.reduce((sum: number, o: Order) => sum + o.total, 0),
     averageOrderValue: orders.length > 0 
       ? orders.reduce((sum: number, o: Order) => sum + o.total, 0) / orders.length 

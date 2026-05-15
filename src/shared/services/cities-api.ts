@@ -139,6 +139,50 @@ export function resolveStateForCityPayload(
   return upper;
 }
 
+/**
+ * Valor del `SearchableSelect` al editar: debe coincidir con el `value` stringificado del catálogo
+ * (`GET /utilities/states`), p. ej. cuando la ciudad trae `state` como enum numérico y la opción usa código.
+ */
+export function resolveCityStateFormValue(city: City, options: CityStateOption[]): string {
+  if (!options.length) return '';
+  const raw = city.state;
+  const sid = raw == null ? '' : String(raw).trim();
+  const num =
+    typeof raw === 'number'
+      ? raw
+      : sid !== '' && Number.isFinite(Number(sid)) && String(Number(sid)) === sid
+        ? Number(sid)
+        : NaN;
+
+  const toSelectVal = (o: CityStateOption) => String(o.value).toUpperCase();
+
+  for (const o of options) {
+    if (String(o.value).toUpperCase() === sid.toUpperCase()) return toSelectVal(o);
+    if (o.code && String(o.code).toUpperCase() === sid.toUpperCase()) return toSelectVal(o);
+  }
+  const prefix = city.statePrefix?.trim();
+  if (prefix) {
+    const p = prefix.toUpperCase();
+    for (const o of options) {
+      if (String(o.code ?? '').toUpperCase() === p) return toSelectVal(o);
+      if (String(o.value).toUpperCase() === p) return toSelectVal(o);
+    }
+  }
+  if (Number.isFinite(num)) {
+    for (const o of options) {
+      if (o.apiEnumValue === num) return toSelectVal(o);
+      if (typeof o.value === 'number' && o.value === num) return toSelectVal(o);
+    }
+  }
+  if (city.stateFullName) {
+    const fn = city.stateFullName.trim().toLowerCase();
+    for (const o of options) {
+      if (o.label.trim().toLowerCase() === fn) return toSelectVal(o);
+    }
+  }
+  return sid ? sid.toUpperCase() : '';
+}
+
 function normalizeStateList(res: any): any[] {
   if (Array.isArray(res)) return res;
   if (res?.data && Array.isArray(res.data)) return res.data;

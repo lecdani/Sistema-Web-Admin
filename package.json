@@ -63,7 +63,7 @@
             "vite": "6.3.5"
       },
       "scripts": {
-            "dev": "next dev --webpack",
+            "dev": "next dev",
             "build": "next build",
             "start": "next start",
             "lint": "next lint",

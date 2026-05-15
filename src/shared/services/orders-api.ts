@@ -1,6 +1,7 @@
 import { apiClient, API_BASE_URL } from '@/shared/config/api';
 import { histpricesApi } from '@/shared/services/histprices-api';
 import { productsApi } from '@/shared/services/products-api';
+import { extractSalesRouteId, extractSalesRouteName } from '@/shared/services/users-api';
 import type { Product } from '@/shared/types';
 
 /**
@@ -29,6 +30,8 @@ export interface AdminOrderSummary {
   planogramId?: string;
   /** FK ruta de ventas en el pedido (si el backend la expone). */
   salesRouteId?: string;
+  /** Nombre de ruta si viene en el payload del pedido. */
+  salesRouteName?: string;
 }
 
 export interface OrderDiscrepancyItem {
@@ -532,12 +535,25 @@ function mapRawOrderToAdmin(raw: any): AdminOrderSummary | null {
 
   const storeNameVal =
     raw?.storeName ?? raw?.StoreName ?? raw?.store?.name ?? raw?.Store?.Name ?? '';
-  const salespersonNameVal =
-    typeof (raw?.salespersonName ?? raw?.SalespersonName ?? raw?.sellerName ?? raw?.SellerName ?? raw?.user?.name) === 'string'
-      ? (raw?.salespersonName ?? raw?.SalespersonName ?? raw?.sellerName ?? raw?.SellerName ?? raw?.user?.name as string).trim()
-      : (raw?.user?.firstName != null || raw?.user?.lastName != null)
-        ? `${raw?.user?.firstName ?? ''} ${raw?.user?.lastName ?? ''}`.trim()
-        : '';
+
+  const salespersonNameVal = (() => {
+    const direct = raw?.salespersonName ?? raw?.SalespersonName ?? raw?.sellerName ?? raw?.SellerName;
+    if (typeof direct === 'string' && direct.trim()) return direct.trim();
+    const nests = [raw?.user, raw?.User, raw?.salesperson, raw?.Salesperson, raw?.Seller, raw?.seller];
+    for (const n of nests) {
+      if (!n || typeof n !== 'object') continue;
+      const fn = String(n.firstName ?? n.FirstName ?? n.name ?? n.Name ?? '').trim();
+      const ln = String(n.lastName ?? n.LastName ?? '').trim();
+      const full = `${fn} ${ln}`.trim();
+      if (full) return full;
+      const em = n.email ?? n.Email;
+      if (typeof em === 'string' && em.trim()) return em.trim();
+    }
+    if (raw?.user?.firstName != null || raw?.user?.lastName != null) {
+      return `${raw?.user?.firstName ?? ''} ${raw?.user?.lastName ?? ''}`.trim();
+    }
+    return '';
+  })();
 
   return {
     id: String(id),
@@ -576,6 +592,12 @@ function mapRawOrderToAdmin(raw: any): AdminOrderSummary | null {
         ? String(raw?.planogramId ?? raw?.planogram_id ?? '').trim()
         : undefined,
     salesRouteId: (() => {
+      const fromOrder = extractSalesRouteId(raw);
+      if (fromOrder) return fromOrder;
+      const fromPerson =
+        extractSalesRouteId(raw?.user ?? raw?.User) ??
+        extractSalesRouteId(raw?.salesperson ?? raw?.Salesperson);
+      if (fromPerson) return fromPerson;
       const v =
         raw?.salesRouteId ??
         raw?.SalesRouteId ??
@@ -583,6 +605,23 @@ function mapRawOrderToAdmin(raw: any): AdminOrderSummary | null {
         raw?.Sales_Route_Id;
       const s = v != null && String(v).trim() !== '' ? String(v).trim() : '';
       return s || undefined;
+    })(),
+    salesRouteName: (() => {
+      const fromOrder = extractSalesRouteName(raw);
+      if (fromOrder) return fromOrder;
+      const fromPerson =
+        extractSalesRouteName(raw?.user ?? raw?.User) ??
+        extractSalesRouteName(raw?.salesperson ?? raw?.Salesperson);
+      if (fromPerson) return fromPerson;
+      const nm =
+        raw?.salesRouteName ??
+        raw?.SalesRouteName ??
+        raw?.salesRoute?.name ??
+        raw?.SalesRoute?.Name ??
+        raw?.routeName ??
+        raw?.RouteName;
+      const t = typeof nm === 'string' ? nm.trim() : '';
+      return t || undefined;
     })(),
   };
 }
@@ -1099,12 +1138,14 @@ export interface OrderForUI {
   comments?: string;
   invoiceId?: number | string;
   salespersonId?: string;
+  salespersonName?: string;
   /** Código PO (Purchase Order), único. */
   po?: string;
   /** ID del planograma asociado al pedido (tabla orders.planogram_id). */
   planogramId?: string;
   /** FK ruta de ventas en el pedido (si el backend la expone). */
   salesRouteId?: string;
+  salesRouteName?: string;
 }
 
 function detailQuantity(d: any): number {
@@ -1462,6 +1503,26 @@ function mapRawOrderToUI(raw: any, details: any[] = []): OrderForUI {
     raw?.SalespersonId ??
     raw?.userId ??
     raw?.UserId;
+
+  const salespersonNameVal = (() => {
+    const direct = raw?.salespersonName ?? raw?.SalespersonName ?? raw?.sellerName ?? raw?.SellerName;
+    if (typeof direct === 'string' && direct.trim()) return direct.trim();
+    const nests = [raw?.user, raw?.User, raw?.salesperson, raw?.Salesperson, raw?.Seller, raw?.seller];
+    for (const n of nests) {
+      if (!n || typeof n !== 'object') continue;
+      const fn = String(n.firstName ?? n.FirstName ?? n.name ?? n.Name ?? '').trim();
+      const ln = String(n.lastName ?? n.LastName ?? '').trim();
+      const full = `${fn} ${ln}`.trim();
+      if (full) return full;
+      const em = n.email ?? n.Email;
+      if (typeof em === 'string' && em.trim()) return em.trim();
+    }
+    if (raw?.user?.firstName != null || raw?.user?.lastName != null) {
+      return `${raw?.user?.firstName ?? ''} ${raw?.user?.lastName ?? ''}`.trim();
+    }
+    return '';
+  })();
+
   return {
     id,
     backendOrderId: raw?.orderId ?? raw?.OrderId ?? raw?.id ?? raw?.Id,
@@ -1506,7 +1567,14 @@ function mapRawOrderToUI(raw: any, details: any[] = []): OrderForUI {
       raw?.invoice?.id ??
       raw?.Invoice?.Id,
     salespersonId: salespersonIdRaw != null ? String(salespersonIdRaw) : undefined,
+    salespersonName: salespersonNameVal || undefined,
     salesRouteId: (() => {
+      const fromOrder = extractSalesRouteId(raw);
+      if (fromOrder) return fromOrder;
+      const fromPerson =
+        extractSalesRouteId(raw?.user ?? raw?.User) ??
+        extractSalesRouteId(raw?.salesperson ?? raw?.Salesperson);
+      if (fromPerson) return fromPerson;
       const v =
         raw?.salesRouteId ??
         raw?.SalesRouteId ??
@@ -1515,114 +1583,160 @@ function mapRawOrderToUI(raw: any, details: any[] = []): OrderForUI {
       const s = v != null && String(v).trim() !== '' ? String(v).trim() : '';
       return s || undefined;
     })(),
+    salesRouteName: (() => {
+      const fromOrder = extractSalesRouteName(raw);
+      if (fromOrder) return fromOrder;
+      const fromPerson =
+        extractSalesRouteName(raw?.user ?? raw?.User) ??
+        extractSalesRouteName(raw?.salesperson ?? raw?.Salesperson);
+      if (fromPerson) return fromPerson;
+      const nm =
+        raw?.salesRouteName ??
+        raw?.SalesRouteName ??
+        raw?.salesRoute?.name ??
+        raw?.SalesRoute?.Name ??
+        raw?.routeName ??
+        raw?.RouteName;
+      const t = typeof nm === 'string' ? nm.trim() : '';
+      return t || undefined;
+    })(),
   };
+}
+
+/** Sin factura asociada y no cancelado ni ya facturado/completado. */
+export function isOrderPendingInvoicing(o: Pick<OrderForUI, 'status' | 'invoiceId'>): boolean {
+  const inv = o.invoiceId;
+  if (inv != null && String(inv).trim() !== '') return false;
+  const s = (o.status || '').toLowerCase();
+  if (s === 'invoiced' || s === 'completed' || s === 'delivered' || s === '2') return false;
+  if (s === 'cancelled' || s === 'canceled' || s === 'cancelado' || s === 'void' || s === '3') return false;
+  return true;
+}
+
+/**
+ * GET pedidos + facturas y mapeo a OrderForUI (admin).
+ * Si `lineTotalsWhenMissing` es false, no llama GET por pedido para rellenar totales (mucho más rápido; sirve para KPI «pendientes por facturar»).
+ */
+async function fetchAndMapAdminOrderSummaries(options: {
+  lineTotalsWhenMissing: boolean;
+}): Promise<OrderForUI[]> {
+  const [ordersRaw, invoicesRaw] = await Promise.all([
+    safeGet<any>('/orders/orders'),
+    safeGet<any>('/invoice/invoices'),
+  ]);
+
+  const ordersArr: any[] = Array.isArray(ordersRaw)
+    ? ordersRaw
+    : ordersRaw?.data ?? ordersRaw?.Data ?? ordersRaw?.items ?? ordersRaw?.value ?? ordersRaw?.Value ?? ordersRaw?.orders ?? ordersRaw?.Orders ?? [];
+  const invoicesList: any[] = Array.isArray(invoicesRaw)
+    ? invoicesRaw
+    : invoicesRaw?.value ?? invoicesRaw?.Value ?? invoicesRaw?.data ?? invoicesRaw?.Data ?? invoicesRaw?.invoices ?? invoicesRaw?.items ?? invoicesRaw?.Items ?? [];
+
+  if (!ordersArr.length) return [];
+
+  const byOrderId = new Map<string, any>();
+  const byInvoiceId = new Map<string, any>();
+  invoicesList.forEach((inv: any) => {
+    const root = inv?.data ?? inv?.value ?? inv?.invoice ?? inv;
+    const oid = String(
+      root?.orderId ?? root?.OrderId ?? inv?.orderId ?? inv?.OrderId ?? root?.order?.id ?? root?.Order?.Id ?? ''
+    );
+    if (oid) {
+      byOrderId.set(oid, inv);
+      if (!Number.isNaN(Number(oid))) byOrderId.set(String(Number(oid)), inv);
+    }
+    const invId = String(root?.id ?? root?.Id ?? inv?.id ?? inv?.Id ?? inv?.invoiceId ?? inv?.InvoiceId ?? '');
+    if (invId) byInvoiceId.set(invId, inv);
+  });
+
+  const sumFromDetails = (rawInv: any): number => {
+    const inv = rawInv?.data ?? rawInv?.value ?? rawInv?.invoice ?? rawInv;
+    const details = inv?.invoiceDetails ?? inv?.InvoiceDetails ?? inv?.details ?? inv?.Details ?? inv?.items ?? inv?.Items ?? [];
+    const arr = Array.isArray(details) ? details : [];
+    return arr.reduce(
+      (s: number, d: any) =>
+        s + Number(d?.subtotal ?? d?.Subtotal ?? d?.SubTotal ?? d?.total ?? d?.Total ?? 0),
+      0
+    );
+  };
+
+  const getTotalFromInv = (rawInv: any): number => {
+    if (!rawInv) return 0;
+    const inv = rawInv?.data ?? rawInv?.value ?? rawInv?.invoice ?? rawInv;
+    let t = Number(
+      inv?.totalUsd ?? inv?.TotalUsd ?? inv?.amountUsd ?? inv?.AmountUsd ??
+      inv?.total ?? inv?.Total ?? inv?.amount ?? inv?.Amount ??
+      inv?.totalAmount ?? inv?.TotalAmount ?? inv?.grandTotal ?? inv?.GrandTotal ?? 0
+    );
+    if (t <= 0) t = sumFromDetails(rawInv);
+    return t;
+  };
+
+  const mapped: (OrderForUI | null)[] = await Promise.all(
+    ordersArr.map(async (raw): Promise<OrderForUI | null> => {
+      const summary = mapRawOrderToAdmin(raw);
+      if (!summary) return null;
+
+      const oid = String(summary.id);
+      const rawInv =
+        byOrderId.get(oid) ??
+        byOrderId.get(String(Number(oid))) ??
+        (summary.invoiceId != null ? byInvoiceId.get(String(summary.invoiceId)) : null);
+      const totalFromInv = rawInv ? getTotalFromInv(rawInv) : 0;
+      let total = Number(summary.total) > 0 ? summary.total : totalFromInv;
+      let subtotal = Number(summary.subtotal) > 0 ? summary.subtotal : total;
+
+      if (options.lineTotalsWhenMissing && total <= 0 && !rawInv) {
+        const fromLines = await computeMonetaryTotalsFromOrderRaw(raw);
+        if (fromLines) {
+          subtotal = fromLines.subtotal;
+          total = fromLines.total;
+        }
+      }
+
+      return {
+        id: summary.id,
+        backendOrderId: summary.backendOrderId ?? summary.id,
+        storeId: summary.storeId,
+        storeName: summary.storeName,
+        storeAddress: summary.storeAddress,
+        date: summary.date,
+        deliveryDate: summary.deliveryDate,
+        status: summary.status,
+        items: [] as OrderForUI['items'],
+        totalUnits: 0,
+        subtotal: subtotal || total,
+        tax: summary.tax,
+        total,
+        salespersonId: summary.salespersonId,
+        salespersonName: summary.salespersonName,
+        invoiceId: summary.invoiceId,
+        po: summary.po,
+        planogramId: summary.planogramId,
+        salesRouteId: summary.salesRouteId,
+        salesRouteName: summary.salesRouteName,
+      } satisfies OrderForUI;
+    })
+  );
+  return mapped.filter((o): o is OrderForUI => o !== null);
 }
 
 // API de pedidos usada también por el Admin (basada en la implementación de la PWA)
 export const ordersApi = {
   /**
-   * Lista todos los pedidos (rápido: solo 2 peticiones).
-   * GET /orders/orders + GET /invoice/invoices. Total desde factura. Sin getOrderById por pedido.
+   * Lista todos los pedidos (2 GET iniciales; si falta total y no hay factura, 1 GET extra por pedido afectado).
    * El detalle completo se carga al abrir un pedido (getOrderById).
    */
   async getAllOrders(): Promise<OrderForUI[]> {
-    const [ordersRaw, invoicesRaw] = await Promise.all([
-      safeGet<any>('/orders/orders'),
-      safeGet<any>('/invoice/invoices'),
-    ]);
-
-    const ordersArr: any[] = Array.isArray(ordersRaw)
-      ? ordersRaw
-      : ordersRaw?.data ?? ordersRaw?.Data ?? ordersRaw?.items ?? ordersRaw?.value ?? ordersRaw?.Value ?? ordersRaw?.orders ?? ordersRaw?.Orders ?? [];
-    const invoicesList: any[] = Array.isArray(invoicesRaw)
-      ? invoicesRaw
-      : invoicesRaw?.value ?? invoicesRaw?.Value ?? invoicesRaw?.data ?? invoicesRaw?.Data ?? invoicesRaw?.invoices ?? invoicesRaw?.items ?? invoicesRaw?.Items ?? [];
-
-    if (!ordersArr.length) return [];
-
-    const byOrderId = new Map<string, any>();
-    const byInvoiceId = new Map<string, any>();
-    invoicesList.forEach((inv: any) => {
-      const root = inv?.data ?? inv?.value ?? inv?.invoice ?? inv;
-      const oid = String(
-        root?.orderId ?? root?.OrderId ?? inv?.orderId ?? inv?.OrderId ?? root?.order?.id ?? root?.Order?.Id ?? ''
-      );
-      if (oid) {
-        byOrderId.set(oid, inv);
-        if (!Number.isNaN(Number(oid))) byOrderId.set(String(Number(oid)), inv);
-      }
-      const invId = String(root?.id ?? root?.Id ?? inv?.id ?? inv?.Id ?? inv?.invoiceId ?? inv?.InvoiceId ?? '');
-      if (invId) byInvoiceId.set(invId, inv);
-    });
-
-    const sumFromDetails = (rawInv: any): number => {
-      const inv = rawInv?.data ?? rawInv?.value ?? rawInv?.invoice ?? rawInv;
-      const details = inv?.invoiceDetails ?? inv?.InvoiceDetails ?? inv?.details ?? inv?.Details ?? inv?.items ?? inv?.Items ?? [];
-      const arr = Array.isArray(details) ? details : [];
-      return arr.reduce(
-        (s: number, d: any) =>
-          s + Number(d?.subtotal ?? d?.Subtotal ?? d?.SubTotal ?? d?.total ?? d?.Total ?? 0),
-        0
-      );
-    };
-
-    const getTotalFromInv = (rawInv: any): number => {
-      if (!rawInv) return 0;
-      const inv = rawInv?.data ?? rawInv?.value ?? rawInv?.invoice ?? rawInv;
-      let t = Number(
-        inv?.totalUsd ?? inv?.TotalUsd ?? inv?.amountUsd ?? inv?.AmountUsd ??
-        inv?.total ?? inv?.Total ?? inv?.amount ?? inv?.Amount ??
-        inv?.totalAmount ?? inv?.TotalAmount ?? inv?.grandTotal ?? inv?.GrandTotal ?? 0
-      );
-      if (t <= 0) t = sumFromDetails(rawInv);
-      return t;
-    };
-
-    const mapped = await Promise.all(
-      ordersArr.map(async (raw) => {
-        const summary = mapRawOrderToAdmin(raw);
-        if (!summary) return null;
-
-        const oid = String(summary.id);
-        const rawInv =
-          byOrderId.get(oid) ??
-          byOrderId.get(String(Number(oid))) ??
-          (summary.invoiceId != null ? byInvoiceId.get(String(summary.invoiceId)) : null);
-        const totalFromInv = rawInv ? getTotalFromInv(rawInv) : 0;
-        let total = Number(summary.total) > 0 ? summary.total : totalFromInv;
-        let subtotal = Number(summary.subtotal) > 0 ? summary.subtotal : total;
-
-        if (total <= 0 && !rawInv) {
-          const fromLines = await computeMonetaryTotalsFromOrderRaw(raw);
-          if (fromLines) {
-            subtotal = fromLines.subtotal;
-            total = fromLines.total;
-          }
-        }
-
-        return {
-          id: summary.id,
-          backendOrderId: summary.backendOrderId ?? summary.id,
-          storeId: summary.storeId,
-          storeName: summary.storeName,
-          storeAddress: summary.storeAddress,
-          date: summary.date,
-          deliveryDate: summary.deliveryDate,
-          status: summary.status,
-          items: [] as OrderForUI['items'],
-          totalUnits: 0,
-          subtotal: subtotal || total,
-          tax: summary.tax,
-          total,
-          salespersonId: summary.salespersonId,
-          invoiceId: summary.invoiceId,
-          po: summary.po,
-          planogramId: summary.planogramId,
-        } satisfies OrderForUI;
-      })
-    );
-    return mapped.filter((o): o is OrderForUI => o != null);
+    return fetchAndMapAdminOrderSummaries({ lineTotalsWhenMissing: true });
   },
+
+  /** Pedidos pendientes de facturar: mismos 2 GET que getAllOrders, sin GET por pedido (solo totales de cabecera/factura). */
+  async getOrdersPendingInvoicing(): Promise<OrderForUI[]> {
+    const all = await fetchAndMapAdminOrderSummaries({ lineTotalsWhenMissing: false });
+    return all.filter(isOrderPendingInvoicing);
+  },
+
   /**
    * Crea un pedido con Unit of Work (header + detalles en un solo POST /orders/orders).
    */

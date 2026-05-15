@@ -168,7 +168,7 @@ export function InvoicePreview({ invoice, order, companyName = "TU EMPRESA" }: I
                   {order.items.reduce((sum, item) => sum + (item.quantity || 0), 0)} {translate('quantityUnits').toLowerCase()}
                 </td>
                 <td className="border-r-2 border-black px-3 py-3 text-right text-sm font-bold">TOTAL</td>
-                <td className="px-3 py-3 text-right text-lg font-bold">${(invoice.totalAmount || 0).toFixed(2)}</td>
+                <td className="px-3 py-3 text-right text-lg font-bold">${(invoice.total ?? 0).toFixed(2)}</td>
               </tr>
             ) : (
               <tr className="bg-gray-100 border-t-2 border-black">
@@ -193,7 +193,7 @@ export function InvoicePreview({ invoice, order, companyName = "TU EMPRESA" }: I
 
       {/* Footer Information */}
       <div className="text-xs text-gray-600 text-center mt-6">
-        <p>IVA: ${(invoice.taxAmount || 0).toFixed(2)} | Subtotal: ${(order.subtotal || 0).toFixed(2)}</p>
+        <p>IVA: ${(invoice.taxes ?? 0).toFixed(2)} | Subtotal: ${(order.subtotal || 0).toFixed(2)}</p>
         <p className="mt-2">{translate('orderCreatedAtLabel')}: {new Date(order.createdAt).toLocaleString(locale)}</p>
       </div>
       </div>

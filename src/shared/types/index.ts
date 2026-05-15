@@ -44,6 +44,13 @@ export interface AppSettings {
   notifications: boolean;
 }
 
+/** Sesión persistida (p. ej. Dexie / migraciones legacy). */
+export interface AuthSession {
+  token: string;
+  userId: string;
+  expiresAt: Date;
+}
+
 export interface ValidationErrors {
   [key: string]: string;
 }
@@ -51,6 +58,8 @@ export interface ValidationErrors {
 export interface City {
   id: string;
   name: string;
+  /** Código postal u otro código legacy en datos de demo. */
+  postalCode?: string;
   /** Prefijo del estado (ej. CA). */
   statePrefix?: string;
   /** Nombre completo del estado (ej. California). */
@@ -311,6 +320,8 @@ export interface Invoice {
   podId?: string;
   createdAt: Date;
   total: number;
+  /** Observaciones en factura (si el backend las expone). */
+  notes?: string;
   invoiceNumber: string;
   orderNumber?: string;
   storeId: string;
@@ -365,24 +376,16 @@ export interface POD {
   validatedBy?: string;
 }
 
+/** KPI del panel principal: volumen por API de conteos + snapshot de catálogo (listas en paralelo). */
 export interface DashboardStats {
-  totalUsers: number;
-  activeUsers: number;
-  totalSessions: number;
-  totalStores: number;
-  activeStores: number;
-  totalProducts: number;
-  activeProducts: number;
-  totalPlanograms: number;
-  activePlanogram: number;
-  totalCities: number;
-  systemHealth: 'healthy' | 'warning' | 'critical';
-  /** Pedidos con status completed/invoiced/delivered */
-  totalCompletedOrders: number;
-  /** Pedidos pendientes (no completados) */
-  totalPendingOrders: number;
-  /** Total de pedidos (transacciones) */
-  totalTransactions: number;
+  ordersToday: number;
+  invoicesToday: number;
+  ordersYesterday: number;
+  invoicesYesterday: number;
+  ordersThisMonth: number;
+  invoicesThisMonth: number;
+  salesRoutesTotal: number;
+  salesRoutesActive: number;
 }
 
 export interface OrderFilters {

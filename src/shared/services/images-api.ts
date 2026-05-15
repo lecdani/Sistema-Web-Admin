@@ -13,13 +13,17 @@ export interface UploadImageResponse {
 export async function uploadImage(file: File): Promise<UploadImageResponse> {
   const formData = new FormData();
   formData.append('file', file);
-  const res = await apiClient.postFormData<UploadImageResponse>(API_CONFIG.ENDPOINTS.IMAGES.UPLOAD, formData);
+  const res = (await apiClient.postFormData<UploadImageResponse>(
+    API_CONFIG.ENDPOINTS.IMAGES.UPLOAD,
+    formData
+  )) as UploadImageResponse | string;
   let raw: any = res && typeof res === 'object' ? res : {};
   if (typeof res === 'string') {
+    const s = res.trim();
     try {
-      raw = res.trim().startsWith('{') ? JSON.parse(res) : {};
+      raw = s.startsWith('{') ? JSON.parse(s) : {};
     } catch {
-      raw = { fileName: res.trim() };
+      raw = { fileName: s };
     }
   }
   const fileName = [

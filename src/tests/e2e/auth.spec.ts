@@ -79,10 +79,9 @@ test.describe('Dashboard', () => {
   });
 
   test('should display dashboard statistics', async ({ page }) => {
-    await expect(page.getByText(/total.*usuarios|total.*users/i)).toBeVisible();
-    await expect(page.getByText(/usuarios.*activos|active.*users/i)).toBeVisible();
-    await expect(page.getByText(/sesiones.*totales|total.*sessions/i)).toBeVisible();
-    await expect(page.getByText(/estado.*sistema|system.*health/i)).toBeVisible();
+    await expect(page.getByText(/actividad comercial|commercial activity/i)).toBeVisible();
+    await expect(page.getByText(/pedidos hoy|orders today/i)).toBeVisible();
+    await expect(page.getByText(/facturas hoy|invoices today/i)).toBeVisible();
   });
 
   test('should display user profile in header', async ({ page }) => {
@@ -96,14 +95,12 @@ test.describe('Dashboard', () => {
     await expect(page.getByRole('heading', { name: /bienvenido|welcome/i })).toBeVisible();
   });
 
-  test('should display recent activity', async ({ page }) => {
-    await expect(page.getByText(/actividad reciente|recent activity/i)).toBeVisible();
-    await expect(page.getByText(/usuarios registrados|registered users/i)).toBeVisible();
+  test('should display management modules section', async ({ page }) => {
+    await expect(page.getByText(/módulos de gestión|management modules/i)).toBeVisible();
+    await expect(page.getByText(/gestión de tiendas|store management/i)).toBeVisible();
   });
 
-  test('should display quick actions', async ({ page }) => {
-    await expect(page.getByText(/acciones rápidas|quick actions/i)).toBeVisible();
-    await expect(page.getByText(/gestionar usuarios|manage users/i)).toBeVisible();
-    await expect(page.getByText(/ver actividad|view activity/i)).toBeVisible();
+  test('should show calendar action on dashboard', async ({ page }) => {
+    await expect(page.getByRole('button', { name: /ver calendario|view calendar/i })).toBeVisible();
   });
 });

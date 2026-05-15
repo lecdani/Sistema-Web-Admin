@@ -21,7 +21,7 @@ import {
   ChevronRight,
   AlertTriangle
 } from 'lucide-react';
-import { getBackendAssetUrl } from '@/shared/config/api';
+import { resolveRawProductImageAssetUrl } from '@/shared/utils/product-image-url';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/shared/components/base/Card';
 import { Button } from '@/shared/components/base/Button';
 import { Badge } from '@/shared/components/base/Badge';
@@ -100,9 +100,7 @@ const COLORS = ['#4f46e5', '#7c3aed', '#06b6d4', '#10b981', '#f59e0b', '#ef4444'
 
 function getProductImageUrl(product: Product | null | undefined): string {
   if (!product) return '';
-  if (product.image) return getBackendAssetUrl(product.image);
-  if (product.imageFileName) return getBackendAssetUrl('images/url/' + product.imageFileName);
-  return '';
+  return resolveRawProductImageAssetUrl(product as unknown as Record<string, unknown>);
 }
 
 /** Nombre legible de tienda: catálogo cargado en reportes o texto del pedido. */
@@ -340,8 +338,15 @@ export function ReportsManagement({ onBack }: ReportsManagementProps) {
               (orderSellerNameOk ? orderSellerName!.trim() : null) ??
               '—';
             const productName = item.productName ?? product?.name ?? item.productId;
+            const rawItem = item as typeof item & { Sku?: string; Code?: string; code?: string };
             const productSku = String(
-              item.sku ?? item.Sku ?? item.code ?? item.Code ?? product?.sku ?? (product as any)?.code ?? ''
+              rawItem.sku ??
+                rawItem.Sku ??
+                rawItem.code ??
+                rawItem.Code ??
+                product?.sku ??
+                (product as any)?.code ??
+                ''
             ).trim();
 
             const poDisplay = orderIdToPo.get(inv.orderId) ?? inv.orderId;
@@ -417,7 +422,7 @@ export function ReportsManagement({ onBack }: ReportsManagementProps) {
                 invoiceId: invoice.id,
                 productId: product.id,
                 productName: product.name,
-                productSku: product.sku,
+                productSku: product.sku ?? product.code ?? '',
                 storeId: store?.id ?? invoice.storeId,
                 storeName,
                 cityId: city?.id ?? store?.cityId ?? '',

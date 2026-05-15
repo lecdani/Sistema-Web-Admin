@@ -54,6 +54,7 @@ import { salesRoutesApi } from '@/shared/services/sales-routes-api';
 import { assignmentsApi } from '@/shared/services/assignments-api';
 import { storesApi } from '@/shared/services/stores-api';
 import { toast } from '@/shared/components/base/Toast';
+import { pinIdFirst } from '@/shared/utils/pin-id-first';
 import type { City, SalesRoute } from '@/shared/types';
 
 const ASSIGN_ROUTE_LIST_MAX = 100;
@@ -295,11 +296,11 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onBack }) => {
     applyFilters();
   }, [users, searchTerm, roleFilter, statusFilter]);
 
-  const loadUsers = async (opts?: { silent?: boolean }) => {
+  const loadUsers = async (opts?: { silent?: boolean; prioritizeUserId?: string }) => {
     try {
       if (!opts?.silent) setIsLoading(true);
       const data = await usersApi.fetchAll();
-      setUsers(data);
+      setUsers(pinIdFirst(data, opts?.prioritizeUserId));
     } catch (error) {
       console.error('Error cargando usuarios:', error);
       toast.error(translate('errorLoadUsers'));
@@ -409,9 +410,12 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onBack }) => {
         role: formData.role as 'admin' | 'user',
       };
 
+      let prioritizeUserId: string | undefined;
+
       if (editingUser) {
         await usersApi.update(editingUser.id, userData);
         toast.success(translate('userSaved'));
+        prioritizeUserId = editingUser.id;
 
         const newPw = formData.password.trim();
         if (newPw) {
@@ -432,13 +436,14 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onBack }) => {
         }
       } else {
         if (formData.password.trim()) userData.password = formData.password.trim();
-        await usersApi.create(userData);
+        const created = await usersApi.create(userData);
         toast.success(translate('userCreated'));
+        prioritizeUserId = created.id;
         setSearchTerm(formData.firstName.trim() || formData.email.trim());
         setCurrentPage(1);
       }
 
-      loadUsers();
+      loadUsers({ prioritizeUserId });
       loadSalesRoutesCatalog();
 
       // Limpiar formulario y cerrar diálogo
@@ -478,7 +483,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onBack }) => {
       // Activar y desactivar usan el mismo endpoint (toggle en el backend)
       await usersApi.deactivate(user.id);
 
-      await loadUsers();
+      await loadUsers({ prioritizeUserId: user.id });
       toast.success(!user.isActive ? translate('userActivatedSuccess') : translate('userDeactivatedSuccess'));
     } catch (error) {
       console.error('Error cambiando estado del usuario:', error);
@@ -533,15 +538,21 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onBack }) => {
       try {
         const data = await usersApi.fetchAll();
         setUsers(
-          data.map((u) =>
-            sameUserId(u.id, uid)
-              ? applyAssignedRouteToUser({ ...u, ...mergedFromAssign }, routeId)
-              : u
+          pinIdFirst(
+            data.map((u) =>
+              sameUserId(u.id, uid)
+                ? applyAssignedRouteToUser({ ...u, ...mergedFromAssign }, routeId)
+                : u
+            ),
+            uid
           )
         );
       } catch {
         setUsers((prev) =>
-          prev.map((u) => (sameUserId(u.id, uid) ? mergedFromAssign : u))
+          pinIdFirst(
+            prev.map((u) => (sameUserId(u.id, uid) ? mergedFromAssign : u)),
+            uid
+          )
         );
       }
 

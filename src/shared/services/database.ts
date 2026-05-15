@@ -128,10 +128,11 @@ const migrateOrderStatuses = () => {
   let needsUpdate = false;
   
   const updatedOrders = orders.map((order: Order) => {
-    let status = order.status;
-    
-    // Convertir estados antiguos a nuevos
-    if (status === 'delivered' || status === 'processing') {
+    const rawStatus = order.status as string;
+    let status: Order['status'] = order.status;
+
+    // Convertir estados antiguos a nuevos (datos legacy en localStorage)
+    if (rawStatus === 'delivered' || rawStatus === 'processing') {
       status = 'completed';
       needsUpdate = true;
     }
@@ -142,9 +143,10 @@ const migrateOrderStatuses = () => {
     
     // Convertir deliveredAt a completedAt
     const updatedOrder = { ...order, status };
-    if (order.deliveredAt && !order.completedAt) {
-      updatedOrder.completedAt = order.deliveredAt;
-      delete updatedOrder.deliveredAt;
+    const legacyDeliveredAt = (order as Order & { deliveredAt?: Date }).deliveredAt;
+    if (legacyDeliveredAt && !order.completedAt) {
+      updatedOrder.completedAt = legacyDeliveredAt;
+      delete (updatedOrder as Order & { deliveredAt?: Date }).deliveredAt;
       needsUpdate = true;
     }
     
@@ -163,18 +165,19 @@ const migratePODStatuses = () => {
   let needsUpdate = false;
   
   const updatedPods = pods.map((pod: POD) => {
-    let status = pod.status;
-    
-    // Convertir estados antiguos a nuevos
-    if (status === 'delivered') {
+    const raw = pod.status as string;
+    let status: POD['status'] = pod.status;
+
+    // Convertir estados antiguos a nuevos (localStorage legacy)
+    if (raw === 'delivered') {
       status = 'completed';
       needsUpdate = true;
     }
-    if (status === 'cancelled') {
+    if (raw === 'cancelled') {
       status = 'pending';
       needsUpdate = true;
     }
-    
+
     return { ...pod, status };
   });
   
@@ -192,7 +195,7 @@ const createDefaultCities = (): City[] => {
       name: 'Madrid',
       state: 'Comunidad de Madrid',
       country: 'España',
-      code: '28001',
+      postalCode: '28001',
       createdAt: new Date(),
       updatedAt: new Date()
     },
@@ -201,7 +204,7 @@ const createDefaultCities = (): City[] => {
       name: 'Barcelona',
       state: 'Cataluña',
       country: 'España',
-      code: '08001',
+      postalCode: '08001',
       createdAt: new Date(),
       updatedAt: new Date()
     },
@@ -210,7 +213,7 @@ const createDefaultCities = (): City[] => {
       name: 'Valencia',
       state: 'Comunidad Valenciana',
       country: 'España',
-      code: '46001',
+      postalCode: '46001',
       createdAt: new Date(),
       updatedAt: new Date()
     },
@@ -219,7 +222,7 @@ const createDefaultCities = (): City[] => {
       name: 'Sevilla',
       state: 'Andalucía',
       country: 'España',
-      code: '41001',
+      postalCode: '41001',
       createdAt: new Date(),
       updatedAt: new Date()
     },
@@ -228,7 +231,7 @@ const createDefaultCities = (): City[] => {
       name: 'Bilbao',
       state: 'País Vasco',
       country: 'España',
-      code: '48001',
+      postalCode: '48001',
       createdAt: new Date(),
       updatedAt: new Date()
     }
@@ -254,39 +257,30 @@ const createDefaultStores = (): Store[] => {
   const defaultStores: Store[] = [
     {
       id: '1',
-      serialNumber: 'ST001',
+      storeNumber: 'ST001',
       name: 'Tienda Centro Madrid',
       address: 'Gran Vía 123',
       cityId: 'city_madrid_001',
-      phone: '+34 91 234 5678',
-      email: 'madrid@empresa.com',
-      manager: 'María García',
       isActive: true,
       createdAt: new Date(),
       updatedAt: new Date()
     },
     {
-      id: '2', 
-      serialNumber: 'ST002',
+      id: '2',
+      storeNumber: 'ST002',
       name: 'Tienda Eixample',
       address: 'Passeig de Gràcia 456',
       cityId: 'city_barcelona_001',
-      phone: '+34 93 123 4567',
-      email: 'barcelona@empresa.com', 
-      manager: 'Carlos López',
       isActive: true,
       createdAt: new Date(),
       updatedAt: new Date()
     },
     {
       id: '3',
-      serialNumber: 'ST003', 
+      storeNumber: 'ST003',
       name: 'Tienda Ciudad de las Artes',
       address: 'Av. de las Artes 789',
       cityId: 'city_valencia_001',
-      phone: '+34 96 345 6789',
-      email: 'valencia@empresa.com',
-      manager: 'Ana Martínez',
       isActive: false,
       createdAt: new Date(),
       updatedAt: new Date()
@@ -551,7 +545,7 @@ const createDefaultOrders = () => {
   const stores = getFromLocalStorage('app-stores') || [];
   const products = getFromLocalStorage('app-products') || [];
   
-  const sellers = users.filter(u => u.role === 'user');
+  const sellers = users.filter((u: User) => u.role === 'user');
   if (sellers.length === 0 || stores.length === 0 || products.length === 0) {
     return [];
   }
@@ -686,7 +680,7 @@ const createDefaultInvoices = () => {
       paidDate: new Date(2024, 0, 25),
       createdAt: new Date(2024, 0, 17),
       updatedAt: new Date(2024, 0, 25),
-      createdBy: users.find(u => u.role === 'admin')?.id || 'admin_001',
+      createdBy: users.find((u: User) => u.role === 'admin')?.id || 'admin_001',
       items: [
         {
           id: 'inv_item_001',
@@ -721,7 +715,7 @@ const createDefaultInvoices = () => {
       dueDate: new Date(2024, 1, 22),
       createdAt: new Date(2024, 0, 23),
       updatedAt: new Date(2024, 0, 23),
-      createdBy: users.find(u => u.role === 'admin')?.id || 'admin_001',
+      createdBy: users.find((u: User) => u.role === 'admin')?.id || 'admin_001',
       items: [
         {
           id: 'inv_item_003',
@@ -768,7 +762,7 @@ const createDefaultPODs = () => {
       notes: 'Entrega realizada sin observaciones. Cliente satisfecho.',
       isValidated: true,
       validatedAt: new Date(2024, 0, 18, 9, 15),
-      validatedBy: users.find(u => u.role === 'admin')?.id || 'admin_001'
+      validatedBy: users.find((u: User) => u.role === 'admin')?.id || 'admin_001'
     },
     {
       id: 'pod_002',

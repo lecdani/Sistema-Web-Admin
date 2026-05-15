@@ -210,7 +210,9 @@ export const validateRegisterForm = (data: {
   
   // Validar contraseña
   const passwordValidation = validatePassword(data.password);
-  errors.push(...passwordValidation.errors);
+  if (!passwordValidation.isValid) {
+    errors.push(...passwordValidation.feedback);
+  }
   
   // Validar confirmación de contraseña
   if (data.password !== data.confirmPassword) {

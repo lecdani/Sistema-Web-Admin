@@ -4,12 +4,13 @@ import { Button } from '@/shared/components/base/Button';
 import { useLanguage } from '@/shared/hooks/useLanguage';
 import type { Product } from '@/shared/types';
 import type { OrderForUI } from '@/shared/services/orders-api';
-import { productsApi } from '@/shared/services/products-api';
+import { fetchAdminProductsCached } from '@/shared/services/admin-products-cache';
 import { getProductShortDisplayName } from '@/shared/utils/planogram-grid-display';
 import {
   collectPresentationRowsFromOrderLines,
   sumAmountForPresentation,
   sumQtyForPresentation,
+  getProductFromMap,
 } from '@/shared/utils/planogram-presentation-summary';
 import { PresentationSummaryCell } from '@/shared/components/PresentationSummaryCell';
 
@@ -33,12 +34,19 @@ export function OrderCatalogListView({ order }: OrderCatalogListViewProps) {
     let mounted = true;
     (async () => {
       try {
-        const products = await productsApi.fetchAll();
+        const products = await fetchAdminProductsCached();
         if (!mounted) return;
+        const normalizeId = (v: unknown) =>
+          String(v ?? '')
+            .trim()
+            .replace(/-/g, '')
+            .toLowerCase();
         const map = new Map<string, Product>();
         products.forEach((p: any) => {
-          const idStr = String(p.id);
+          const idStr = String(p.id ?? '').trim();
+          if (!idStr) return;
           map.set(idStr, p);
+          map.set(normalizeId(idStr), p);
           const n = Number(idStr);
           if (!Number.isNaN(n)) map.set(String(n), p);
         });
@@ -100,10 +108,7 @@ export function OrderCatalogListView({ order }: OrderCatalogListViewProps) {
   const productRows = useMemo(() => {
     return [...mergedLines]
       .map((line) => {
-        const p =
-          productMap.get(line.productId) ||
-          productMap.get(String(Number(line.productId))) ||
-          undefined;
+        const p = getProductFromMap(productMap, line.productId);
         const category = String(p?.category ?? '').trim();
         const sortFamily = category || String((p as any)?.familyId ?? (p as any)?.categoryId ?? '');
         const name = p ? getProductShortDisplayName(p) : line.productName || '—';

@@ -53,6 +53,7 @@ import { areasApi } from '@/shared/services/areas-api';
 import { regionsApi } from '@/shared/services/regions-api';
 import { districtsApi } from '@/shared/services/districts-api';
 import { toast } from '@/shared/components/base/Toast';
+import { pinIdFirst } from '@/shared/utils/pin-id-first';
 
 interface StoreManagementProps {
   onBack?: () => void;
@@ -119,11 +120,11 @@ export const StoreManagement: React.FC<StoreManagementProps> = ({ onBack }) => {
     setCurrentPage(1);
   }, [searchTerm, statusFilter, cityFilter, planogramFilter]);
 
-  const loadStores = async () => {
+  const loadStores = async (opts?: { prioritizeStoreId?: string }) => {
     try {
       setIsLoading(true);
       const data = await storesApi.fetchAll();
-      setStores(data);
+      setStores(pinIdFirst(data, opts?.prioritizeStoreId));
     } catch (error) {
       console.error('Error cargando tiendas:', error);
       toast.error(translate('errorLoadStores'));
@@ -264,17 +265,20 @@ export const StoreManagement: React.FC<StoreManagementProps> = ({ onBack }) => {
         hasPlanogram: !!formData.hasPlanogram,
       };
 
+      let prioritizeStoreId: string | undefined;
       if (editingStore) {
         await storesApi.update(editingStore.id, storeData);
         toast.success(translate('storeSaved'));
+        prioritizeStoreId = editingStore.id;
       } else {
         const created = await storesApi.create(storeData);
         toast.success(translate('storeCreated'));
+        prioritizeStoreId = created.id;
         setSearchTerm(created.name);
         setCurrentPage(1);
       }
 
-      loadStores();
+      loadStores({ prioritizeStoreId });
       resetForm();
       setShowAddDialog(false);
     } catch (error) {
@@ -313,7 +317,7 @@ export const StoreManagement: React.FC<StoreManagementProps> = ({ onBack }) => {
       // El endpoint de desactivar funciona como toggle (activar/desactivar)
       await storesApi.deactivate(store.id);
 
-      await loadStores();
+      await loadStores({ prioritizeStoreId: store.id });
       toast.success(!store.isActive ? translate('storeActivatedSuccess') : translate('storeDeactivatedSuccess'));
     } catch (error) {
       console.error('Error cambiando estado de la tienda:', error);
@@ -864,7 +868,9 @@ export const StoreManagement: React.FC<StoreManagementProps> = ({ onBack }) => {
                                           {translate('confirmActivateDeactivate')
                                             .replace(
                                               '{action}',
-                                              store.isActive ? translate('deactivate') : translate('activate')
+                                              store.isActive
+                                                ? translate('deactivate').toLowerCase()
+                                                : translate('activate').toLowerCase()
                                             )
                                             .replace('{name}', store.name)}
                                         </span>

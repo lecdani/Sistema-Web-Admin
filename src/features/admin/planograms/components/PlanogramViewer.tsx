@@ -28,6 +28,42 @@ const GRID_SIZE = 10;
 
 export const PlanogramViewer: React.FC<PlanogramViewerProps> = ({ planogram }) => {
   const { translate } = useLanguage();
+  const isAbsoluteHttpUrl = (value?: string): boolean => {
+    const text = String(value ?? '').trim();
+    return /^https?:\/\//i.test(text);
+  };
+  const extractImageFileNameFromPath = (path?: string): string => {
+    const raw = String(path ?? '').trim();
+    if (!raw) return '';
+    const noQuery = raw.split('?')[0] ?? raw;
+    const normalized = noQuery.replace(/\\/g, '/');
+    const parts = normalized.split('/').filter(Boolean);
+    if (parts.length === 0) return '';
+    return String(parts[parts.length - 1] ?? '').trim();
+  };
+  const normalizeImageFileName = (value?: string): string => {
+    const text = String(value ?? '').trim();
+    if (!text) return '';
+    if (isAbsoluteHttpUrl(text)) return extractImageFileNameFromPath(text);
+    return text;
+  };
+  const toAssetUrl = (value?: string): string => {
+    const raw = String(value ?? '').trim();
+    if (!raw) return '';
+    if (isAbsoluteHttpUrl(raw)) return raw;
+    if (raw.startsWith('/api/')) return raw;
+    if (raw.startsWith('api/')) return `/${raw}`;
+    return getBackendAssetUrl(raw);
+  };
+  const getProductImageSrc = (product: Product): string => {
+    const fileNameRaw = String(product.imageFileName ?? '').trim();
+    if (isAbsoluteHttpUrl(fileNameRaw)) return fileNameRaw;
+    const fileName = normalizeImageFileName(fileNameRaw);
+    if (fileName) return toAssetUrl(`images/url/${encodeURIComponent(fileName)}`);
+    const imagePath = String(product.image ?? '').trim();
+    if (imagePath) return toAssetUrl(imagePath);
+    return '';
+  };
 
   const getProductShortDisplayName = (product: Product): string => {
     const short = String(product.shortName ?? '').trim();
@@ -72,7 +108,8 @@ export const PlanogramViewer: React.FC<PlanogramViewerProps> = ({ planogram }) =
     const occupancyPercentage = ((occupiedCells / totalCells) * 100).toFixed(1);
     
     const categoryCounts = planogram.products?.reduce((acc, product) => {
-      acc[product.category] = (acc[product.category] || 0) + 1;
+      const key = product.category ?? '—';
+      acc[key] = (acc[key] || 0) + 1;
       return acc;
     }, {} as Record<string, number>) || {};
 
@@ -207,9 +244,9 @@ export const PlanogramViewer: React.FC<PlanogramViewerProps> = ({ planogram }) =
                       >
                         {product ? (
                           <div className="text-center w-full h-full flex flex-col justify-center p-1 relative">
-                            {product.image ? (
+                            {getProductImageSrc(product) ? (
                               <img
-                                src={getBackendAssetUrl(product.image)}
+                                src={getProductImageSrc(product)}
                                 alt=""
                                 className="w-8 h-8 mx-auto rounded object-cover flex-shrink-0 mb-0.5"
                               />
@@ -276,8 +313,8 @@ export const PlanogramViewer: React.FC<PlanogramViewerProps> = ({ planogram }) =
                         <div key={product.id} className="p-1.5 border rounded text-[10px] bg-white border-gray-200 hover:border-blue-300 hover:bg-blue-50 transition-colors">
                           <div className="flex gap-2 items-start">
                             <div className="flex-shrink-0 w-9 h-9 rounded overflow-hidden bg-gray-100 flex items-center justify-center">
-                              {product.image ? (
-                                <img src={getBackendAssetUrl(product.image)} alt="" className="w-full h-full object-cover" />
+                              {getProductImageSrc(product) ? (
+                                <img src={getProductImageSrc(product)} alt="" className="w-full h-full object-cover" />
                               ) : (
                                 <Package className="h-4 w-4 text-gray-400" />
                               )}

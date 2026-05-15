@@ -49,7 +49,7 @@ export const TooltipTrigger = React.forwardRef<HTMLElement, TooltipTriggerProps>
     const context = useContext(TooltipContext);
     if (!context) throw new Error('TooltipTrigger must be used within Tooltip');
 
-    const timeoutRef = useRef<NodeJS.Timeout>();
+    const timeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
     const handleMouseEnter = () => {
       timeoutRef.current = setTimeout(() => {
@@ -73,7 +73,7 @@ export const TooltipTrigger = React.forwardRef<HTMLElement, TooltipTriggerProps>
     }, []);
 
     if (asChild && React.isValidElement(children)) {
-      return React.cloneElement(children as React.ReactElement, {
+      return React.cloneElement(children as React.ReactElement<Record<string, unknown>>, {
         onMouseEnter: handleMouseEnter,
         onMouseLeave: handleMouseLeave,
         ref,

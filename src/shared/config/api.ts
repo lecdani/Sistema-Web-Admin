@@ -51,7 +51,14 @@ export const API_CONFIG = {
     },
     DASHBOARD: {
       STATS: '/dashboard/stats',
-      RECENT_ACTIVITY: '/dashboard/recent-activity'
+      RECENT_ACTIVITY: '/dashboard/recent-activity',
+    },
+    /** Conteos por rango (query: startDate, endDate — DateTime en query). */
+    ORDERS: {
+      COUNT_BY_DATE_RANGE: '/orders/orders/count-by-date-range',
+    },
+    INVOICES: {
+      COUNT_BY_DATE_RANGE: '/invoice/invoices/count-by-date-range',
     },
     UTILITIES: {
       /** Enumerado de estado (US) para crear/editar ciudad. */

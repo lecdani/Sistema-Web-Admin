@@ -264,16 +264,31 @@ export function Invoice({
         @media print {
           #invoice-print {
             box-shadow: none !important;
-            max-width: none !important;
+            max-width: 100% !important;
+            width: 100% !important;
             overflow: visible !important;
             page-break-inside: auto;
+            height: auto !important;
+            min-height: 0 !important;
+            background: #fff !important;
           }
           #invoice-print .invoice-inner {
-            max-width: none !important;
-            padding: 1rem 1.5rem 2rem !important;
+            max-width: min(48rem, 100%) !important;
+            width: 100% !important;
+            margin-left: auto !important;
+            margin-right: auto !important;
+            padding: 8mm 6mm 10mm !important;
+            box-sizing: border-box !important;
           }
           #invoice-print .invoice-table-wrap {
             overflow: visible !important;
+          }
+          #invoice-print table {
+            break-inside: auto;
+            page-break-inside: auto;
+          }
+          #invoice-print thead {
+            display: table-header-group;
           }
         }
       `}</style>

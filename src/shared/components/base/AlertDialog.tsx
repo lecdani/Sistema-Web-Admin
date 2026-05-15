@@ -44,7 +44,7 @@ export const AlertDialogTrigger = React.forwardRef<HTMLElement, AlertDialogTrigg
     };
 
     if (asChild && React.isValidElement(children)) {
-      return React.cloneElement(children as React.ReactElement, {
+      return React.cloneElement(children as React.ReactElement<Record<string, unknown>>, {
         onClick: handleClick,
         ref,
       });

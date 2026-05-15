@@ -14,21 +14,29 @@ export type PlanogramPresentationSummaryRow = {
 /** Normaliza campos de presentación/familia desde el producto del Admin (anidado o plano). */
 function presentationViewFromProduct(p: Product | undefined) {
   if (!p) return undefined;
-  const pres = p.presentation ?? {};
-  const fam = pres.family ?? {};
-  const presentationId = String(p.presentationId ?? (pres as { id?: string }).id ?? '').trim() || undefined;
-  const familyCode = String(fam.familyCode ?? fam.code ?? p.genericCode ?? '').trim() || undefined;
-  const familyName = String(fam.name ?? p.category ?? '').trim() || '';
-  const volRaw = pres.volume;
+  const presRaw = p.presentation ?? (p as { Presentation?: object }).Presentation;
+  const pres = (presRaw && typeof presRaw === 'object' ? presRaw : {}) as Record<string, unknown>;
+  const famRaw = pres.family ?? pres.Family;
+  const fam = (famRaw && typeof famRaw === 'object' ? famRaw : {}) as Record<string, unknown>;
+  const presentationId =
+    String(p.presentationId ?? pres.id ?? pres.Id ?? '').trim() || undefined;
+  const familyCode = String(
+    fam.familyCode ?? fam.FamilyCode ?? fam.code ?? fam.Code ?? p.genericCode ?? ''
+  ).trim() || undefined;
+  const familyName = String(fam.name ?? fam.Name ?? p.category ?? '').trim() || '';
+  const volRaw = pres.volume ?? pres.Volume;
   const volN =
     volRaw != null && Number.isFinite(Number(volRaw)) ? Number(volRaw) : NaN;
   const presentationVolume = Number.isFinite(volN) ? volN : undefined;
-  const presentationUnit = String(pres.unit ?? '').trim() || undefined;
+  const presentationUnit = String(pres.unit ?? pres.Unit ?? '').trim() || undefined;
   const presentationName =
-    String((pres as { name?: string }).name ?? '').trim() || undefined;
-  const familyId = String(p.familyId ?? p.categoryId ?? fam.id ?? '').trim() || undefined;
+    String(pres.name ?? pres.Name ?? '').trim() || undefined;
+  const familyId = String(
+    p.familyId ?? p.categoryId ?? fam.id ?? fam.Id ?? ''
+  ).trim() || undefined;
+  const presAny = pres as Record<string, unknown>;
   const presentationGenericCode =
-    String(pres.genericCode ?? pres.GenericCode ?? p.genericCode ?? '').trim() || undefined;
+    String(presAny.genericCode ?? presAny.GenericCode ?? p.genericCode ?? '').trim() || undefined;
   return {
     presentationId,
     familyCode,
@@ -55,10 +63,23 @@ export function getPresentationSummaryKey(p: Product | undefined): string | unde
   return undefined;
 }
 
+function normalizeProductMapKey(v: unknown): string {
+  return String(v ?? '')
+    .trim()
+    .replace(/-/g, '')
+    .toLowerCase();
+}
+
 export function getProductFromMap(map: Map<string, Product>, productId: string | undefined): Product | undefined {
   const pid = String(productId ?? '').trim();
   if (!pid) return undefined;
-  return map.get(pid) ?? map.get(String(Number(pid)));
+  const norm = normalizeProductMapKey(pid);
+  const n = Number(pid);
+  return (
+    map.get(pid) ??
+    map.get(norm) ??
+    (!Number.isNaN(n) ? map.get(String(n)) : undefined)
+  );
 }
 
 export function collectPresentationRowsFromGrid<
@@ -72,13 +93,20 @@ export function collectPresentationRowsFromGrid<
     if (!key) continue;
     const pv = presentationViewFromProduct(p)!;
     if (!byPres.has(key)) {
+      const familyName =
+        String(pv.familyName || pv.category || '').trim() ||
+        String((p as { name?: string }).name ?? '').trim();
+      const presentationName =
+        String(pv.presentationName ?? '').trim() ||
+        String((p as { shortName?: string }).shortName ?? '').trim() ||
+        undefined;
       byPres.set(key, {
         presentationId: key,
         familyCode: String(pv.familyCode ?? '').trim(),
-        familyName: String(pv.familyName || pv.category || '').trim(),
-        presentationName: undefined,
-        volume: undefined,
-        unit: undefined,
+        familyName,
+        presentationName,
+        volume: pv.presentationVolume,
+        unit: pv.presentationUnit,
       });
     }
   }

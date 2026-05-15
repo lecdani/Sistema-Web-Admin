@@ -47,6 +47,7 @@ import { productsApi } from '@/shared/services/products-api';
 import { brandsApi } from '@/shared/services/brands-api';
 import { fetchAllOrderSummaries } from '@/shared/services/orders-api';
 import { findEternalBrandId } from '@/shared/utils/eternal-brand';
+import { pinIdFirst } from '@/shared/utils/pin-id-first';
 import { PlanogramEditor } from './components/PlanogramEditor';
 import { PlanogramViewer } from './components/PlanogramViewer';
 
@@ -81,7 +82,7 @@ export const PlanogramManagement: React.FC<PlanogramManagementProps> = ({ onBack
 
 
 
-  const loadData = async () => {
+  const loadData = async (opts?: { prioritizePlanogramId?: string }) => {
     try {
       const [planogramData, productData, orderSummaries, brandList] = await Promise.all([
         planogramsApi.fetchAll(),
@@ -89,7 +90,7 @@ export const PlanogramManagement: React.FC<PlanogramManagementProps> = ({ onBack
         fetchAllOrderSummaries(),
         brandsApi.fetchAll().catch(() => []),
       ]);
-      setPlanograms(planogramData);
+      setPlanograms(pinIdFirst(planogramData, opts?.prioritizePlanogramId));
       setProducts(productData);
       setOrdersWithPlanogram(orderSummaries);
       setPlanogramBrandId(findEternalBrandId(brandList));
@@ -127,7 +128,7 @@ export const PlanogramManagement: React.FC<PlanogramManagementProps> = ({ onBack
         await planogramsApi.setActive(activePlanogram.id, false);
       }
       await planogramsApi.setActive(planogram.id, true);
-      await loadData();
+      await loadData({ prioritizePlanogramId: planogram.id });
       toast.success(translate('planogramActivatedSuccess'));
     } catch (error) {
       console.error('Error activando planograma:', error);
@@ -138,7 +139,7 @@ export const PlanogramManagement: React.FC<PlanogramManagementProps> = ({ onBack
   const handleDeactivatePlanogram = async (planogram: Planogram) => {
     try {
       await planogramsApi.setActive(planogram.id, false);
-      await loadData();
+      await loadData({ prioritizePlanogramId: planogram.id });
       toast.success(translate('planogramDeactivatedSuccess'));
     } catch (error) {
       console.error('Error desactivando planograma:', error);
@@ -164,15 +165,14 @@ export const PlanogramManagement: React.FC<PlanogramManagementProps> = ({ onBack
     setShowViewDialog(true);
   };
 
-  const handlePlanogramCreated = (createdName?: string) => {
-    loadData();
+  const handlePlanogramCreated = (info?: { planogramId?: string; name?: string }) => {
+    void loadData({ prioritizePlanogramId: info?.planogramId });
     setShowCreateDialog(false);
-    if (createdName) setSearchTerm(createdName);
+    if (info?.name) setSearchTerm(info.name);
   };
 
-  const handlePlanogramUpdated = () => {
-    // Recargar datos después de editar un planograma
-    loadData();
+  const handlePlanogramUpdated = (info?: { planogramId?: string }) => {
+    void loadData({ prioritizePlanogramId: info?.planogramId });
     setShowEditDialog(false);
     setEditingPlanogram(null);
   };

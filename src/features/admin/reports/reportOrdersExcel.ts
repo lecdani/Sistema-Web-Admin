@@ -19,6 +19,8 @@ export function getOrderLifecycleFromStatus(status: string | undefined): 'initia
 
 export interface ShortageDetailRow {
   invoiceNumber: string;
+  /** PO del pedido (si existe). */
+  po?: string;
   orderId: string;
   /** ID de tienda del pedido (para resolver nombre en UI si falta en el resumen). */
   storeId?: string;
@@ -125,6 +127,7 @@ export async function computeShortageAnalytics(
 
         detailRows.push({
           invoiceNumber: String((inv as any)?.invoiceNumber ?? (inv as any)?.InvoiceNumber ?? o.invoiceId ?? ''),
+          po: o.po,
           orderId: o.id,
           storeId: rawStoreId || undefined,
           storeName,
@@ -365,7 +368,7 @@ export async function appendReportOrdersAndShortageSheets(
   });
   r2 += 1;
   for (const d of analytics.detailSample) {
-    ws2.getCell(r2, 1).value = d.po;
+    ws2.getCell(r2, 1).value = d.po ?? '';
     ws2.getCell(r2, 2).value = d.orderId;
     ws2.getCell(r2, 3).value = d.storeName;
     ws2.getCell(r2, 4).value = d.sku;

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { Button } from '@/shared/components/base/Button';
 import { Input } from '@/shared/components/base/Input';
 import { Label } from '@/shared/components/base/Label';
@@ -47,6 +47,7 @@ import { usersApi } from '@/shared/services/users-api';
 import { storesApi } from '@/shared/services/stores-api';
 import ExcelJS from 'exceljs';
 import { toast } from 'sonner';
+import { pinIdFirst } from '@/shared/utils/pin-id-first';
 import { OrderDetailView } from './OrderDetailView';
 import { OrderPlanogramView } from './components/OrderPlanogramView';
 
@@ -56,6 +57,7 @@ interface OrderManagementProps {
 
 export function OrderManagement({ onBack }: OrderManagementProps) {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { translate, locale } = useLanguage();
   const [orders, setOrders] = useState<Order[]>([]);
   const [filteredOrders, setFilteredOrders] = useState<Order[]>([]);
@@ -71,6 +73,8 @@ export function OrderManagement({ onBack }: OrderManagementProps) {
   const [planogramDialogMode, setPlanogramDialogMode] = useState<'view' | 'edit'>('view');
   const [orderToDelete, setOrderToDelete] = useState<Order | null>(null);
   const [deletingOrderId, setDeletingOrderId] = useState<string | null>(null);
+  /** Tras guardar en detalle, ese pedido queda primero en la tabla (además del orden por fecha). */
+  const [listPinOrderId, setListPinOrderId] = useState<string | null>(null);
 
   const [filters, setFilters] = useState<OrderFilters>({
     dateFrom: '',
@@ -84,9 +88,30 @@ export function OrderManagement({ onBack }: OrderManagementProps) {
     loadData();
   }, []);
 
+  /** Enlace desde el dashboard: /orders?open={id} abre el mismo modal que al pulsar la fila. */
+  useEffect(() => {
+    const raw = searchParams.get('open')?.trim();
+    if (!raw || orders.length === 0) return;
+    const match = orders.find(
+      (x) =>
+        String(x.id ?? '').trim() === raw ||
+        String((x as any).backendOrderId ?? '').trim() === raw ||
+        String((x as any).orderNumber ?? '').trim() === raw
+    );
+    if (!match) return;
+    setSelectedOrder(match);
+    setShowOrderDetail(true);
+    setListPinOrderId(String(match.id));
+    router.replace('/orders', { scroll: false });
+  }, [searchParams, orders, router]);
+
+  useEffect(() => {
+    setListPinOrderId(null);
+  }, [searchTerm, filters]);
+
   useEffect(() => {
     applyFilters();
-  }, [orders, searchTerm, filters]);
+  }, [orders, searchTerm, filters, listPinOrderId]);
 
   /** Alineado con backend: 1=creado, 2=facturado, 3=cancelado (sin estado "confirmado" separado). */
   const getOrderLifecycleStatus = (orderLike: {
@@ -108,7 +133,7 @@ export function OrderManagement({ onBack }: OrderManagementProps) {
     return 'initial';
   };
 
-  const loadData = async () => {
+  const loadData = async (opts?: { prioritizeOrderId?: string }) => {
     try {
       let storesData = getFromLocalStorage('app-stores') || [];
       const usersData: User[] = getFromLocalStorage('app-users') || [];
@@ -230,6 +255,7 @@ export function OrderManagement({ onBack }: OrderManagementProps) {
       });
 
       setOrders(enrichedOrders);
+      setListPinOrderId(opts?.prioritizeOrderId?.trim() ? opts.prioritizeOrderId : null);
       // Sincronizar con el almacenamiento local para mantener compatibilidad con otras pantallas
       setToLocalStorage('app-orders', enrichedOrders);
       setStores(storesData);
@@ -284,7 +310,7 @@ export function OrderManagement({ onBack }: OrderManagementProps) {
     // Ordenar por fecha: más recientes primero
     filtered.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 
-    setFilteredOrders(filtered);
+    setFilteredOrders(pinIdFirst(filtered, listPinOrderId));
   };
 
   const getStatusBadge = (status: string) => {
@@ -834,17 +860,22 @@ export function OrderManagement({ onBack }: OrderManagementProps) {
       </Card>
 
       {/* Order Detail Dialog */}
-      <Dialog open={showOrderDetail} onOpenChange={setShowOrderDetail}>
+      <Dialog
+        open={showOrderDetail}
+        onOpenChange={(open) => {
+          setShowOrderDetail(open);
+          if (!open) {
+            const pinId = selectedOrder?.id;
+            setSelectedOrder(null);
+            void loadData(pinId ? { prioritizeOrderId: pinId } : undefined);
+          }
+        }}
+      >
         <DialogContent className="order-detail-dialog-inner !w-[65vw] !max-w-[1200px] max-h-[90vh] overflow-y-auto p-0">
           {selectedOrder && (
             <OrderDetailView
               orderId={selectedOrder.id}
-              onClose={() => {
-                setShowOrderDetail(false);
-                setSelectedOrder(null);
-                loadData();
-              }}
-              onOrderUpdated={loadData}
+              onOrderUpdated={(id) => void loadData(id ? { prioritizeOrderId: id } : undefined)}
             />
           )}
         </DialogContent>
@@ -871,7 +902,15 @@ export function OrderManagement({ onBack }: OrderManagementProps) {
       </Dialog>
 
       {/* Planogram Dialog (ver solo lectura o editar) */}
-      <Dialog open={showPlanogramDialog} onOpenChange={setShowPlanogramDialog}>
+      <Dialog
+        open={showPlanogramDialog}
+        onOpenChange={(open) => {
+          setShowPlanogramDialog(open);
+          if (!open && selectedOrder?.id) {
+            void loadData({ prioritizeOrderId: selectedOrder.id });
+          }
+        }}
+      >
         <DialogContent className="!w-[65vw] !max-w-[1200px] max-h-[90vh] overflow-y-auto p-0">
           {selectedOrder && planogramDialogMode === 'view' && (
             <OrderPlanogramView

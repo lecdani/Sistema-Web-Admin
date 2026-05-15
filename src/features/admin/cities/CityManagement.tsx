@@ -20,12 +20,13 @@ import {
 import { Area, City, CityStateOption, District, Region, Store } from '@/shared/types';
 import { toast } from '@/shared/components/base/Toast';
 import { useLanguage } from '@/shared/hooks/useLanguage';
-import { citiesApi, resolveStateForCityPayload } from '@/shared/services/cities-api';
+import { citiesApi, resolveStateForCityPayload, resolveCityStateFormValue } from '@/shared/services/cities-api';
 import { storesApi } from '@/shared/services/stores-api';
 import { areasApi } from '@/shared/services/areas-api';
 import { regionsApi } from '@/shared/services/regions-api';
 import { districtsApi } from '@/shared/services/districts-api';
-import { GeoAreasPanel, GeoDistrictsPanel, GeoRegionsPanel } from './components/GeoCatalogTabs';
+import { GeoAreasPanel, GeoDistrictsPanel, GeoRegionsPanel, type GeoCatalogRefreshOpts } from './components/GeoCatalogTabs';
+import { pinIdFirst } from '@/shared/utils/pin-id-first';
 
 interface CityFormData {
   name: string;
@@ -82,7 +83,22 @@ export function CityManagement({ onBack }: CityManagementProps) {
     filterCities();
   }, [cities, searchTerm, stateOptions]);
 
-  const loadCities = async () => {
+  // Si el catálogo de estados llega después de abrir "editar", alinear el Select con la ciudad.
+  useEffect(() => {
+    if (!showCityDialog || !editingCity || !stateOptions.length) return;
+    const resolved = resolveCityStateFormValue(editingCity, stateOptions);
+    if (!resolved) return;
+    setCityFormData((prev) => {
+      const norm = String(prev.state ?? '').trim();
+      if (norm !== '') {
+        const ok = stateOptions.some((o) => String(o.value).toUpperCase() === norm.toUpperCase());
+        if (ok) return prev;
+      }
+      return { ...prev, state: resolved };
+    });
+  }, [showCityDialog, editingCity?.id, editingCity?.state, stateOptions]);
+
+  const loadCities = async (opts?: GeoCatalogRefreshOpts) => {
     setIsLoading(true);
     try {
       const [list, stores, states, areasList, regionsList, districtsList] = await Promise.all([
@@ -94,15 +110,15 @@ export function CityManagement({ onBack }: CityManagementProps) {
         districtsApi.fetchAll().catch(() => [] as District[]),
       ]);
 
-      setCities(list);
+      setCities(pinIdFirst(list, opts?.prioritizeCityId));
       setStateOptions(states);
       if (!states.length) {
         toast.warning(translate('warningCityStatesEmpty'));
       }
       setStoresList(stores as Store[]);
-      setAreas(areasList);
-      setRegions(regionsList);
-      setDistricts(districtsList);
+      setAreas(pinIdFirst(areasList, opts?.prioritizeAreaId));
+      setRegions(pinIdFirst(regionsList, opts?.prioritizeRegionId));
+      setDistricts(pinIdFirst(districtsList, opts?.prioritizeDistrictId));
 
       const counts: Record<string, number> = {};
       (stores as Store[]).forEach((store) => {
@@ -167,7 +183,7 @@ export function CityManagement({ onBack }: CityManagementProps) {
     setEditingCity(city);
     setCityFormData({
       name: city.name,
-      state: city.state != null ? String(city.state).trim().toUpperCase() : '',
+      state: resolveCityStateFormValue(city, stateOptions),
     });
     setCityFormErrors({});
     setShowCityDialog(true);
@@ -207,7 +223,8 @@ export function CityManagement({ onBack }: CityManagementProps) {
       const selectedState = stateOptions.find(
         (o) =>
           String(o.value).toUpperCase() === rawSt.toUpperCase() ||
-          String(o.code ?? '').toUpperCase() === rawSt.toUpperCase()
+          String(o.code ?? '').toUpperCase() === rawSt.toUpperCase() ||
+          (o.apiEnumValue != null && String(o.apiEnumValue) === rawSt)
       );
       const statePayload = resolveStateForCityPayload(rawSt, selectedState);
       const payload = {
@@ -215,11 +232,14 @@ export function CityManagement({ onBack }: CityManagementProps) {
         state: statePayload,
       };
 
+      let prioritizeCityId: string | undefined;
       if (editingCity) {
         await citiesApi.update(editingCity.id, payload);
+        prioritizeCityId = editingCity.id;
         toast.success(translate('citySaved'));
       } else {
         const created = await citiesApi.create(payload);
+        prioritizeCityId = created.id;
         toast.success(translate('cityCreated'));
         setSearchTerm(created.name);
         setCurrentPage(1);
@@ -227,7 +247,7 @@ export function CityManagement({ onBack }: CityManagementProps) {
 
       setShowCityDialog(false);
       setCityFormErrors({});
-      await loadCities();
+      await loadCities({ prioritizeCityId });
     } catch (error: any) {
       const msg = error?.data?.message ?? error?.message ?? translate('errorSaveCity');
       toast.error(msg);

@@ -55,6 +55,8 @@ interface GridCell {
   quantity: number;
 }
 
+type GridCellWithProduct = GridCell & { product: Product; productId: string };
+
 const GRID_SIZE = 10;
 
 export function CreateOrderDialog({ onClose, onOrderCreated, editingOrder }: CreateOrderDialogProps) {
@@ -140,7 +142,9 @@ export function CreateOrderDialog({ onClose, onOrderCreated, editingOrder }: Cre
               currentPrice: 0,
               sku: '',
               category: '',
-              isActive: false
+              isActive: false,
+              createdAt: new Date(),
+              updatedAt: new Date(),
             },
             quantity: 0,
             position: { x: dist.xPosition, y: dist.yPosition }
@@ -226,13 +230,16 @@ export function CreateOrderDialog({ onClose, onOrderCreated, editingOrder }: Cre
     );
   };
 
-  const getSelectedItems = () => {
-    return grid.flat().filter((cell) => cell.quantity > 0);
+  const getSelectedItems = (): GridCellWithProduct[] => {
+    return grid.flat().filter(
+      (cell): cell is GridCellWithProduct =>
+        cell.quantity > 0 && cell.product != null && cell.productId != null
+    );
   };
 
   const calculateSubtotal = () => {
     return getSelectedItems().reduce(
-      (sum, cell) => sum + cell.product!.currentPrice * cell.quantity,
+      (sum, cell) => sum + cell.product.currentPrice * cell.quantity,
       0
     );
   };
@@ -302,7 +309,7 @@ export function CreateOrderDialog({ onClose, onOrderCreated, editingOrder }: Cre
       vendorNumber: '2F318',
       items: selectedItems.map((cell) => ({
         productId: cell.productId!,
-        sku: cell.product.code || cell.product.sku,
+        sku: cell.product.code || cell.product.sku || '',
         productName: cell.product.name,
         quantity: cell.quantity,
         price: cell.product.currentPrice,
@@ -413,7 +420,7 @@ export function CreateOrderDialog({ onClose, onOrderCreated, editingOrder }: Cre
       vendorNumber: '2F318',
       items: selectedItems.map((cell) => ({
         productId: cell.productId!,
-        sku: cell.product.code || cell.product.sku,
+        sku: cell.product.code || cell.product.sku || '',
         productName: cell.product.name,
         quantity: cell.quantity,
         price: cell.product.currentPrice,

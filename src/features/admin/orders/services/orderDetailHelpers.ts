@@ -66,21 +66,24 @@ export function handleUploadPODImage(
           // Actualizar POD existente
           pods[existingPODIndex] = {
             ...pods[existingPODIndex],
-            photoUrl: base64Image,
-            deliveryDate: new Date().toISOString(),
-          };
+            imageUrl: base64Image,
+            uploadedAt: new Date(),
+          } as POD;
         } else {
           // Crear nuevo POD
           const newPOD: POD = {
             id: `pod-${Date.now()}`,
+            salespersonId: '',
+            storeId: '',
+            po: '',
+            status: 'pending',
             orderId: orderId,
             invoiceId: invoiceId,
-            deliveryDate: new Date().toISOString(),
-            photoUrl: base64Image,
+            imageUrl: base64Image,
+            uploadedAt: new Date(),
+            uploadedBy: '',
             isValidated: false,
-            receiverName: '',
-            notes: '',
-            createdAt: new Date().toISOString()
+            createdAt: new Date(),
           };
           pods.push(newPOD);
           
@@ -116,22 +119,23 @@ export function handleUploadPODImage(
  * Descarga la imagen del POD
  */
 export function handleDownloadPODImage(pod: POD) {
-  if (!pod || !pod.photoUrl) {
+  const url = pod?.imageUrl;
+  if (!pod || !url) {
     toast.error('No hay imagen de POD disponible para descargar');
     return;
   }
   
   try {
     // Si es base64, convertir a blob y descargar
-    if (pod.photoUrl.startsWith('data:image')) {
+    if (url.startsWith('data:image')) {
       const link = document.createElement('a');
-      link.href = pod.photoUrl;
+      link.href = url;
       link.download = `POD_${pod.id}_${new Date().getTime()}.png`;
       link.click();
       toast.success('Imagen del POD descargada');
     } else {
       // Si es URL externa, abrir en nueva ventana
-      window.open(pod.photoUrl, '_blank');
+      window.open(url, '_blank');
       toast.success('Abriendo imagen del POD...');
     }
   } catch (error) {

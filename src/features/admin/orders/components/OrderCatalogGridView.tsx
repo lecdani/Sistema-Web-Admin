@@ -2,9 +2,9 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Package } from 'lucide-react';
 import { useLanguage } from '@/shared/hooks/useLanguage';
 import type { Order, Product } from '@/shared/types';
-import { productsApi } from '@/shared/services/products-api';
-import { getBackendAssetUrl } from '@/shared/config/api';
+import { fetchAdminProductsCached } from '@/shared/services/admin-products-cache';
 import { getProductCodeLine, getProductShortDisplayName } from '@/shared/utils/planogram-grid-display';
+import { resolveProductImageAssetUrl, resolveRawProductImageAssetUrl } from '@/shared/utils/product-image-url';
 import {
   collectPresentationRowsFromOrderLines,
   sumQtyForPresentation,
@@ -16,17 +16,10 @@ interface OrderCatalogGridViewProps {
   useAllActiveProducts?: boolean;
 }
 
-function getProductImageUrl(product: Product | null | undefined): string {
-  if (!product) return '';
-  if ((product as any).image) return getBackendAssetUrl((product as any).image);
-  if ((product as any).imageFileName) return getBackendAssetUrl('images/url/' + (product as any).imageFileName);
-  return '';
-}
-
-/** Celda catálogo: mismo criterio visual que la grilla de planograma en pedidos. */
+/** Celda vacía del catálogo (sin producto en esa posición de la matriz). */
 function getCatalogCellSurface(hasProduct: boolean, hasQty: boolean): React.CSSProperties {
   if (!hasProduct) {
-    return { backgroundColor: '#ffffff', borderColor: '#d1d5db' };
+    return { backgroundColor: '#e5e7eb', borderColor: '#9ca3af' };
   }
   if (hasQty) {
     return { backgroundColor: '#e0e7ff', borderColor: '#6366f1' };
@@ -65,8 +58,23 @@ export const OrderCatalogGridView: React.FC<OrderCatalogGridViewProps> = ({
   const [page, setPage] = useState(0);
   const [productMap, setProductMap] = useState<Map<string, Product>>(new Map());
   const [allProductsOrdered, setAllProductsOrdered] = useState<Product[]>([]);
+  /** Evita matriz en blanco mientras carga o si la API devuelve lista vacía con forma no estándar. */
+  const [catalogProductsStatus, setCatalogProductsStatus] = useState<'loading' | 'ready'>(() =>
+    useAllActiveProducts ? 'loading' : 'ready',
+  );
 
   const items = Array.isArray(order.items) ? order.items : [];
+
+  const bumpQtyKeys = (map: Map<string, number>, rawPid: string, qty: number) => {
+    const pid = String(rawPid ?? '').trim();
+    if (!pid) return;
+    const keys = new Set<string>([pid, pid.replace(/-/g, '').toLowerCase()]);
+    const n = Number(pid);
+    if (!Number.isNaN(n)) keys.add(String(n));
+    for (const k of keys) {
+      map.set(k, (map.get(k) ?? 0) + qty);
+    }
+  };
 
   /**
    * Orden de lectura:
@@ -82,13 +90,24 @@ export const OrderCatalogGridView: React.FC<OrderCatalogGridViewProps> = ({
       const pid = String(it.productId ?? it.ProductId ?? '').trim();
       if (!pid) continue;
       const qty = Number(it.quantity ?? it.toOrder ?? 0) || 0;
-      qtyByProductId.set(pid, (qtyByProductId.get(pid) ?? 0) + qty);
+      bumpQtyKeys(qtyByProductId, pid, qty);
     }
-    const active = allProductsOrdered.filter((p: any) => p?.isActive !== false);
+    const stillLoading = catalogProductsStatus !== 'ready' && allProductsOrdered.length === 0;
+    if (stillLoading) {
+      return [...items];
+    }
+    const active = allProductsOrdered.filter((p: any) => p?.isActive !== false && p?.IsActive !== false);
     const sorted = sortProductsVendorCatalogOrder(active);
+    if (sorted.length === 0) {
+      return [...items];
+    }
     return sorted.map((p: any) => {
       const pid = String(p.id ?? '').trim();
-      const qty = qtyByProductId.get(pid) ?? qtyByProductId.get(String(Number(pid))) ?? 0;
+      const qty =
+        qtyByProductId.get(pid) ??
+        qtyByProductId.get(pid.replace(/-/g, '').toLowerCase()) ??
+        qtyByProductId.get(String(Number(pid))) ??
+        0;
       return {
         id: pid,
         productId: pid,
@@ -97,9 +116,11 @@ export const OrderCatalogGridView: React.FC<OrderCatalogGridViewProps> = ({
         quantity: qty,
         toOrder: qty,
         price: Number(p.currentPrice ?? 0) || 0,
+        image: (p as any).image ?? (p as any).Image,
+        imageFileName: (p as any).imageFileName ?? (p as any).ImageFileName,
       };
     });
-  }, [useAllActiveProducts, items, allProductsOrdered]);
+  }, [useAllActiveProducts, items, allProductsOrdered, catalogProductsStatus]);
 
   const presentationSummaryRows = useMemo(
     () => collectPresentationRowsFromOrderLines(orderedItems as any[], productMap),
@@ -118,15 +139,31 @@ export const OrderCatalogGridView: React.FC<OrderCatalogGridViewProps> = ({
   );
 
   useEffect(() => {
+    setPage(0);
+  }, [order?.id]);
+
+  useEffect(() => {
     let mounted = true;
+    if (!useAllActiveProducts) {
+      setCatalogProductsStatus('ready');
+    } else {
+      setCatalogProductsStatus('loading');
+    }
     (async () => {
       try {
-        const products = await productsApi.fetchAll();
+        const products = await fetchAdminProductsCached();
         if (!mounted) return;
+        const normalizeId = (v: unknown) =>
+          String(v ?? '')
+            .trim()
+            .replace(/-/g, '')
+            .toLowerCase();
         const map = new Map<string, Product>();
         products.forEach((p: any) => {
-          const idStr = String(p.id);
+          const idStr = String(p.id ?? '').trim();
+          if (!idStr) return;
           map.set(idStr, p);
+          map.set(normalizeId(idStr), p);
           const numId = Number(idStr);
           if (!Number.isNaN(numId)) {
             map.set(String(numId), p);
@@ -136,12 +173,14 @@ export const OrderCatalogGridView: React.FC<OrderCatalogGridViewProps> = ({
         setAllProductsOrdered(products as Product[]);
       } catch {
         // sin datos extra si falla
+      } finally {
+        if (mounted) setCatalogProductsStatus('ready');
       }
     })();
     return () => {
       mounted = false;
     };
-  }, []);
+  }, [useAllActiveProducts]);
 
   const totalPages = Math.max(1, Math.ceil(orderedItems.length / SLOTS));
   const currentPage = Math.min(page, totalPages - 1);
@@ -185,9 +224,9 @@ export const OrderCatalogGridView: React.FC<OrderCatalogGridViewProps> = ({
         )}
       </div>
 
-      <div className="bg-white rounded-lg p-2 shadow-sm border border-slate-200 overflow-x-auto flex justify-start md:justify-center print:shadow-none print:border print:break-inside-avoid print:p-1">
+      <div className="bg-white rounded-lg p-2 shadow-sm border border-slate-200 overflow-x-auto flex justify-start md:justify-center print:justify-center print:shadow-none print:border print:break-inside-avoid print:p-1">
         <div
-          className="mx-auto print:mx-0 flex-none"
+          className="mx-auto flex-none"
           style={{
             width: gridWidthPx,
             minWidth: gridWidthPx,
@@ -210,6 +249,8 @@ export const OrderCatalogGridView: React.FC<OrderCatalogGridViewProps> = ({
                     padding: 2,
                     boxSizing: 'border-box',
                     ...getCatalogCellSurface(false, false),
+                    WebkitPrintColorAdjust: 'exact',
+                    printColorAdjust: 'exact',
                   }}
                 />
               );
@@ -217,9 +258,23 @@ export const OrderCatalogGridView: React.FC<OrderCatalogGridViewProps> = ({
 
             const qty = Number((item as any).quantity ?? (item as any).toOrder ?? 0) || 0;
             const productId = String((item as any).productId ?? (item as any).sku ?? '');
+            const productIdNorm = productId.replace(/-/g, '').toLowerCase();
             const product =
-              productMap.get(productId) || productMap.get(String(Number(productId))) || undefined;
-            const imageUrl = getProductImageUrl(product);
+              productMap.get(productId) ||
+              productMap.get(productIdNorm) ||
+              productMap.get(String(Number(productId))) ||
+              undefined;
+            const altProduct = allProductsOrdered.find((p: any) => {
+              const sku = String((item as any).sku ?? '').trim().toLowerCase();
+              const code = String((item as any).code ?? '').trim().toLowerCase();
+              const pSku = String(p?.sku ?? '').trim().toLowerCase();
+              const pCode = String(p?.code ?? '').trim().toLowerCase();
+              return (sku && (pSku === sku || pCode === sku)) || (code && (pCode === code || pSku === code));
+            });
+            const imageUrl =
+              resolveProductImageAssetUrl((product as any)?.image, (product as any)?.imageFileName) ||
+              resolveRawProductImageAssetUrl(item as Record<string, unknown>) ||
+              resolveProductImageAssetUrl(altProduct?.image, altProduct?.imageFileName);
             const codeLine = product ? getProductCodeLine(product) : '—';
             const nameLabel = product
               ? getProductShortDisplayName(product)

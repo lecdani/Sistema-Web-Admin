@@ -188,7 +188,7 @@ export async function updateCategory(id: string, data: FamilyWritePayload): Prom
     return toCategory(body);
   }
   const fetched = await fetchCategoryById(id);
-  return fetched ?? toCategory({ id, ...payload, isActive: true, createdAt: new Date(), updatedAt: new Date() });
+  return fetched ?? toCategory({ ...payload, isActive: true, createdAt: new Date(), updatedAt: new Date() });
 }
 
 /** Activa/desactiva una familia */

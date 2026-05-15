@@ -9,19 +9,37 @@ import { productsApi } from '@/shared/services/products-api';
 import { ordersApi } from '@/shared/services/orders-api';
 import { histpricesApi } from '@/shared/services/histprices-api';
 import { getFromLocalStorage } from '@/shared/services/database';
-import { getBackendAssetUrl } from '@/shared/config/api';
 import { getProductCodeLine, getProductShortDisplayName } from '@/shared/utils/planogram-grid-display';
+import { resolveProductImageAssetUrl, resolveRawProductImageAssetUrl } from '@/shared/utils/product-image-url';
 import {
   collectPresentationRowsFromGrid,
   sumQtyForPresentation,
 } from '@/shared/utils/planogram-presentation-summary';
 import { PresentationSummaryCell } from '@/shared/components/PresentationSummaryCell';
 
-function getProductImageUrl(product: Product | null | undefined): string {
-  if (!product) return '';
-  if (product.image) return getBackendAssetUrl(product.image);
-  if (product.imageFileName) return getBackendAssetUrl('images/url/' + product.imageFileName);
-  return '';
+function findProductBySkuOrName(
+  products: Product[],
+  sku: string | undefined,
+  name: string | undefined
+): Product | undefined {
+  const skuNorm = String(sku ?? '').trim().toLowerCase();
+  const nameNorm = String(name ?? '').trim().toLowerCase();
+  if (skuNorm) {
+    const bySku = products.find((p) => {
+      const pSku = String(p.sku ?? '').trim().toLowerCase();
+      const pCode = String(p.code ?? '').trim().toLowerCase();
+      return pSku === skuNorm || pCode === skuNorm;
+    });
+    if (bySku) return bySku;
+  }
+  if (nameNorm) {
+    return products.find((p) => {
+      const short = String(p.shortName ?? '').trim().toLowerCase();
+      const full = String(p.name ?? '').trim().toLowerCase();
+      return short === nameNorm || full === nameNorm;
+    });
+  }
+  return undefined;
 }
 
 type LineItem = { qty: number; code: string; description: string; price: number; amount: number };
@@ -259,17 +277,50 @@ export const OrderPlanogramView: React.FC<OrderPlanogramViewProps> = ({
         }
         if (!mounted) return;
 
+        const normalizeId = (v: unknown) =>
+          String(v ?? '')
+            .trim()
+            .replace(/-/g, '')
+            .toLowerCase();
         const productMap = new Map<string, Product>();
         productsData.forEach((p) => {
-          productMap.set(String(p.id), p);
-          if (typeof p.id === 'string' && /^\d+$/.test(p.id)) productMap.set(String(Number(p.id)), p);
+          const id = String(p.id ?? '').trim();
+          if (!id) return;
+          productMap.set(id, p);
+          productMap.set(normalizeId(id), p);
+          if (/^\d+$/.test(id)) productMap.set(String(Number(id)), p);
         });
+        const getProduct = (id: string) =>
+          productMap.get(String(id ?? '').trim()) ||
+          productMap.get(normalizeId(id)) ||
+          productMap.get(String(Number(id)));
+        // Si el listado general no incluye todos los productos del planograma
+        // (p. ej. inactivos), cargar los faltantes por id para renderizar la grilla completa.
+        const missingDistributionProductIds = Array.from(
+          new Set(
+            distList
+              .map((d) => String(d.productId ?? '').trim())
+              .filter((id) => id && !getProduct(id))
+          )
+        );
+        if (missingDistributionProductIds.length > 0) {
+          const fetchedMissing = await Promise.all(
+            missingDistributionProductIds.map((id) => productsApi.getById(id).catch(() => null))
+          );
+          fetchedMissing.forEach((p) => {
+            if (!p) return;
+            const id = String(p.id ?? '').trim();
+            if (!id) return;
+            productMap.set(id, p);
+            productMap.set(normalizeId(id), p);
+            if (/^\d+$/.test(id)) productMap.set(String(Number(id)), p);
+          });
+        }
         if (mounted) setProductMap(new Map(productMap));
-        const getProduct = (id: string) => productMap.get(id) || productMap.get(String(Number(id)));
 
         const qtyQueueByProductId = new Map<
           string,
-          Array<{ productName: string; sku: string; quantity: number; price: number }>
+          Array<{ productName: string; sku: string; quantity: number; price: number; image?: string; imageFileName?: string }>
         >();
         const items = apiOrder.items ?? [];
 
@@ -314,7 +365,15 @@ export const OrderPlanogramView: React.FC<OrderPlanogramViewProps> = ({
               const qty = Number(item.quantity ?? item.toOrder ?? item.Quantity ?? 0) || 0;
               if (qty > 0) {
                 const arr = qtyQueueByProductId.get(id) ?? [];
-                arr.push({ productName: name, sku, quantity: qty, price });
+                arr.push({
+                  productName: name,
+                  sku,
+                  quantity: qty,
+                  price,
+                  image: String((item as any)?.image ?? (item as any)?.Image ?? '').trim() || undefined,
+                  imageFileName:
+                    String((item as any)?.imageFileName ?? (item as any)?.ImageFileName ?? '').trim() || undefined,
+                });
                 qtyQueueByProductId.set(id, arr);
               }
             }
@@ -348,7 +407,15 @@ export const OrderPlanogramView: React.FC<OrderPlanogramViewProps> = ({
               const q = Number(qty) || 0;
               if (q > 0) {
                 const arr = qtyQueueByProductId.get(id) ?? [];
-                arr.push({ productName: name, sku, quantity: q, price });
+                arr.push({
+                  productName: name,
+                  sku,
+                  quantity: q,
+                  price,
+                  image: String((item as any)?.image ?? (item as any)?.Image ?? '').trim() || undefined,
+                  imageFileName:
+                    String((item as any)?.imageFileName ?? (item as any)?.ImageFileName ?? '').trim() || undefined,
+                });
                 qtyQueueByProductId.set(id, arr);
               }
             }
@@ -364,6 +431,11 @@ export const OrderPlanogramView: React.FC<OrderPlanogramViewProps> = ({
             const key = pid ? (qtyQueueByProductId.has(pid) ? pid : String(Number(pid))) : '';
             const queue = key ? qtyQueueByProductId.get(key) : undefined;
             const next = queue && queue.length > 0 ? queue.shift()! : null;
+            const fallbackProduct = findProductBySkuOrName(
+              productsData as Product[],
+              next?.sku,
+              next?.productName
+            );
             planogramGrid.push({
               row,
               col,
@@ -375,7 +447,10 @@ export const OrderPlanogramView: React.FC<OrderPlanogramViewProps> = ({
                 String(product?.code || '').trim(),
               toOrder: next?.quantity ?? 0,
               price: next?.price ?? product?.currentPrice ?? 0,
-              imageUrl: product ? getProductImageUrl(product) : undefined,
+              imageUrl:
+                resolveProductImageAssetUrl(product?.image, product?.imageFileName) ||
+                resolveProductImageAssetUrl(fallbackProduct?.image, fallbackProduct?.imageFileName) ||
+                resolveRawProductImageAssetUrl(next as Record<string, unknown>),
             });
           }
         }
@@ -485,7 +560,15 @@ export const OrderPlanogramView: React.FC<OrderPlanogramViewProps> = ({
             {grid.map((item) => {
               const p =
                 item.productId &&
-                (productMap.get(String(item.productId)) || productMap.get(String(Number(item.productId))));
+                (() => {
+                  const raw = String(item.productId ?? '').trim();
+                  const norm = raw.replace(/-/g, '').toLowerCase();
+                  return (
+                    productMap.get(raw) ||
+                    productMap.get(norm) ||
+                    productMap.get(String(Number(raw)))
+                  );
+                })();
               const nameLabel = p
                 ? getProductShortDisplayName(p)
                 : (item.productName || '').trim();

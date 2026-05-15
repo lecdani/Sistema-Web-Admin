@@ -34,7 +34,7 @@ interface PlanogramEditorProps {
   existingDistributions?: Distribution[];
   /** Solo productos de esta marca (p. ej. Eternal) en la paleta y nuevas celdas. */
   planogramBrandId?: string;
-  onSave?: (createdName?: string) => void;
+  onSave?: (info?: { planogramId: string; name?: string }) => void;
   onCancel: () => void;
 }
 
@@ -60,6 +60,42 @@ export const PlanogramEditor: React.FC<PlanogramEditorProps> = ({
   onCancel
 }) => {
   const { translate } = useLanguage();
+  const isAbsoluteHttpUrl = (value?: string): boolean => {
+    const text = String(value ?? '').trim();
+    return /^https?:\/\//i.test(text);
+  };
+  const extractImageFileNameFromPath = (path?: string): string => {
+    const raw = String(path ?? '').trim();
+    if (!raw) return '';
+    const noQuery = raw.split('?')[0] ?? raw;
+    const normalized = noQuery.replace(/\\/g, '/');
+    const parts = normalized.split('/').filter(Boolean);
+    if (parts.length === 0) return '';
+    return String(parts[parts.length - 1] ?? '').trim();
+  };
+  const normalizeImageFileName = (value?: string): string => {
+    const text = String(value ?? '').trim();
+    if (!text) return '';
+    if (isAbsoluteHttpUrl(text)) return extractImageFileNameFromPath(text);
+    return text;
+  };
+  const toAssetUrl = (value?: string): string => {
+    const raw = String(value ?? '').trim();
+    if (!raw) return '';
+    if (isAbsoluteHttpUrl(raw)) return raw;
+    if (raw.startsWith('/api/')) return raw;
+    if (raw.startsWith('api/')) return `/${raw}`;
+    return getBackendAssetUrl(raw);
+  };
+  const getProductImageSrc = (product: Product): string => {
+    const fileNameRaw = String(product.imageFileName ?? '').trim();
+    if (isAbsoluteHttpUrl(fileNameRaw)) return fileNameRaw;
+    const fileName = normalizeImageFileName(fileNameRaw);
+    if (fileName) return toAssetUrl(`images/url/${encodeURIComponent(fileName)}`);
+    const imagePath = String(product.image ?? '').trim();
+    if (imagePath) return toAssetUrl(imagePath);
+    return '';
+  };
   const [formData, setFormData] = useState<PlanogramFormData>({
     name: planogram?.name || '',
     description: planogram?.description || ''
@@ -320,7 +356,7 @@ export const PlanogramEditor: React.FC<PlanogramEditorProps> = ({
         }
 
         toast.success(translate('planogramSaved'));
-        onSave?.();
+        onSave?.({ planogramId: planogram.id, name: formData.name.trim() });
       } else {
         const created = await planogramsApi.create({
           name: formData.name.trim(),
@@ -347,7 +383,7 @@ export const PlanogramEditor: React.FC<PlanogramEditorProps> = ({
           if (p.id !== created.id && p.isActive) await planogramsApi.toggleActive(p.id);
         }
         toast.success(translate('planogramCreated'));
-        onSave?.(created.name);
+        onSave?.({ planogramId: created.id, name: created.name });
       }
     } catch (err: any) {
       console.error('Error guardando planograma:', err);
@@ -516,9 +552,9 @@ export const PlanogramEditor: React.FC<PlanogramEditorProps> = ({
                       >
                         {cell.product ? (
                           <div className="text-center w-full h-full flex flex-col justify-center p-1 relative">
-                            {cell.product.image ? (
+                            {getProductImageSrc(cell.product) ? (
                               <img
-                                src={getBackendAssetUrl(cell.product.image)}
+                                src={getProductImageSrc(cell.product)}
                                 alt=""
                                 className="w-8 h-8 mx-auto rounded object-cover flex-shrink-0 mb-0.5"
                               />
@@ -623,8 +659,8 @@ export const PlanogramEditor: React.FC<PlanogramEditorProps> = ({
                       >
                         <div className="flex gap-2 items-start">
                           <div className="flex-shrink-0 w-9 h-9 rounded overflow-hidden bg-gray-100 flex items-center justify-center">
-                            {product.image ? (
-                              <img src={getBackendAssetUrl(product.image)} alt="" className="w-full h-full object-cover" />
+                            {getProductImageSrc(product) ? (
+                              <img src={getProductImageSrc(product)} alt="" className="w-full h-full object-cover" />
                             ) : (
                               <Package className="h-4 w-4 text-gray-400" />
                             )}
